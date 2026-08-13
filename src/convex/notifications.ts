@@ -1,7 +1,8 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
+import { safeGet } from "./helpers";
 
 // Diner-sent check-in alerts ("moving now" style). booking_created /
 // booking_cancelled are written automatically by the booking engine.
@@ -136,9 +137,11 @@ export const forRestaurant = query({
           .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
           .collect();
 
+    // safeGet: diner ids may be bare auth subjects (test/legacy identities)
+    // rather than user docs — never take down the notification center.
     const [users, bookings] = await Promise.all([
-      Promise.all(items.map((n) => ctx.db.get(n.userId))),
-      Promise.all(items.map((n) => (n.bookingId ? ctx.db.get(n.bookingId) : null))),
+      Promise.all(items.map((n) => safeGet<Doc<"users">>(ctx, n.userId))),
+      Promise.all(items.map((n) => (n.bookingId ? safeGet<Doc<"bookings">>(ctx, n.bookingId) : null))),
     ]);
 
     return items

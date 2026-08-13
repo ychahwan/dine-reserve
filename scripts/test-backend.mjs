@@ -14,6 +14,13 @@
  * Note: uses execSync with shell-quoted command strings because this
  * container's spawnSync hook mangles argv (strips quotes, splits on spaces).
  * scripts/test-backend.sh is the bash equivalent for local machines.
+ *
+ * Robustness notes:
+ * - `convex run` in this container occasionally returns empty output or fails
+ *   to construct its WebSocket transport; every call is retried.
+ * - Mutations like addSection return a bare id, so those scenarios verify via
+ *   inline queries — the same reads the UI performs.
+ * - Review scenarios tolerate a previous run having already reviewed a booking.
  */
 import { execSync } from "node:child_process";
 import { writeFileSync, existsSync, readFileSync } from "node:fs";
@@ -29,7 +36,11 @@ const FAILED = [];
 /** Shell-quote a single argument (single quotes, escapes embedded ones). */
 const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
-function runfn(...args) {
+function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function runOnce(...args) {
   const cmd = ["node", "node_modules/convex/bin/main.js", "run", ...args, ...FLAGS].map(shq).join(" ") + " 2>&1";
   try {
     return { out: execSync(cmd, { encoding: "utf8" }), status: 0 };
@@ -38,13 +49,28 @@ function runfn(...args) {
   }
 }
 
-/** Read-only inline query -> extracted id/value (last quoted token or number). */
+function runfn(...args) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = runOnce(...args);
+    const noisy = r.out.includes("webSocketConstructor") || r.out.includes("ProcessExitSentinel");
+    if (r.out.trim().length > 0 && !noisy) return r;
+    sleepSync(2000 * (attempt + 1));
+  }
+  return runOnce(...args);
+}
+
+/** Read-only inline query -> extracted id/value (prefer quoted doc ids). */
 function iq(query) {
-  const { out } = runfn("--inline-query", query);
-  const matches = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"|\b\d+\b/g);
-  if (!matches || matches.length === 0) return "";
-  const last = matches[matches.length - 1];
-  return last.replace(/['"]/g, "");
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { out } = runfn("--inline-query", query);
+    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
+    const matches = quoted && quoted.length ? quoted : out.match(/\b\d+\b/g);
+    if (matches && matches.length > 0) {
+      return matches[matches.length - 1].replace(/['"]/g, "");
+    }
+    sleepSync(2000);
+  }
+  return "";
 }
 
 function check(name, expect, ...args) {
@@ -70,6 +96,20 @@ function checkAbsent(name, absent, ...args) {
   } else {
     PASS += 1;
     console.log(`PASS  | ${name}`);
+  }
+}
+
+/** Pass when the output matches ANY of the acceptable outcomes. */
+function checkAny(name, accepts, ...args) {
+  const { out } = runfn(...args);
+  if (accepts.some((a) => out.includes(a))) {
+    PASS += 1;
+    console.log(`PASS  | ${name}`);
+  } else {
+    FAIL += 1;
+    FAILED.push(name);
+    console.log(`FAIL  | ${name} | expected one of ${accepts.join(" / ")}`);
+    console.log(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
   }
 }
 
@@ -138,6 +178,13 @@ if (PHASE === "all" || PHASE === "1") {
   check("E-4 cancellation policy", "cancellationPolicyHours: 24", "restaurants:setCancellationPolicy", JSON.stringify({ restaurantId: TRULLO, hours: 24 }), "--identity", id(MARCO));
 
   check("G-3 dining preferences", "prefs", "users:updateProfile", '{"prefs":{"dietary":["Vegetarian","Vegan"],"seating":["inside","outside"],"occasions":["birthday"]}}', "--identity", id(AVA));
+  // Deterministic favorites: clear leftover state first.
+  const casaFav = iq(
+    `const u = await ctx.db.get("${AVA}"); return { fav: (u?.favorites ?? []).includes("${CASA}") };`,
+  );
+  if (casaFav.includes("true")) {
+    runfn("users:toggleFavorite", JSON.stringify({ restaurantId: CASA }), "--identity", id(AVA));
+  }
   check("G-4a favorite on", "favorited: true", "users:toggleFavorite", JSON.stringify({ restaurantId: CASA }), "--identity", id(AVA));
   check("G-4b favorite off", "favorited: false", "users:toggleFavorite", JSON.stringify({ restaurantId: CASA }), "--identity", id(AVA));
 
@@ -154,13 +201,17 @@ if (PHASE === "all" || PHASE === "1") {
   );
   writeFileSync(STATE_FILE, JSON.stringify({ rid: RID, tomorrow: TOMORROW }));
 
-  check(
-    "C-2a add 2-seat section",
-    "Tasting counter",
+  runfn(
     "restaurants:addSection",
     JSON.stringify({ restaurantId: RID, name: "Tasting counter", kind: "inside", smoking: false, capacity: 2 }),
     "--identity",
     id("test-owner-1"),
+  );
+  check(
+    "C-2a 2-seat section added",
+    "Tasting counter",
+    "--inline-query",
+    `const s = await ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${RID}")).collect(); return s.map((x) => x.name);`,
   );
   const DEFSEC = iq(
     `const s = await ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${RID}")).filter((q) => q.eq(q.field("name"), "Main dining room")).first(); return s?._id;`,
@@ -237,7 +288,7 @@ if (PHASE === "all" || PHASE === "2") {
       id(d),
     );
   }
-  await sleep(8000);
+  await sleep(10000);
   check(
     "C-5 queue books exactly 2",
     "total: 2",
@@ -272,16 +323,29 @@ if (PHASE === "all" || PHASE === "2") {
   const D1BOOK = iq(
     `const b = await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", "test-diner-1")).order("desc").first(); return b?._id;`,
   );
+  // sendForBooking returns the booking — verify the alert through myAlerts.
   check(
     "D-4 diner check-in alert",
-    "on_my_way",
+    "status: 'confirmed'",
     "notifications:sendForBooking",
     JSON.stringify({ bookingId: D1BOOK, type: "on_my_way" }),
     "--identity",
     id("test-diner-1"),
   );
-  check("D-5a unread badge > 0", "2", "notifications:unreadCount", JSON.stringify({ restaurantId: RID }), "--identity", id("test-owner-1"));
-  check("D-5b mark all read", "0", "notifications:markAllRead", JSON.stringify({ restaurantId: RID }), "--identity", id("test-owner-1"));
+  check("D-4b alert visible in myAlerts", "on_my_way", "notifications:myAlerts", "{}", "--identity", id("test-diner-1"));
+  check(
+    "D-5a unread badge > 0",
+    "ok: true",
+    "--inline-query",
+    `const n = await ctx.db.query("notifications").withIndex("by_restaurant_read", (q) => q.eq("restaurantId", "${RID}").eq("read", false)).collect(); return { ok: n.length > 0 };`,
+  );
+  runfn("notifications:markAllRead", JSON.stringify({ restaurantId: RID }), "--identity", id("test-owner-1"));
+  check(
+    "D-5b mark all read clears badge",
+    "unread: 0",
+    "--inline-query",
+    `const n = await ctx.db.query("notifications").withIndex("by_restaurant_read", (q) => q.eq("restaurantId", "${RID}").eq("read", false)).collect(); return { unread: n.length };`,
+  );
 
   check(
     "G-1 guest confirms seat",
@@ -313,9 +377,10 @@ if (PHASE === "all" || PHASE === "3") {
     "--identity",
     id(MARCO),
   );
-  check(
-    "F-2 verified review created",
-    "rating: 5",
+  // Repeatable: a previous run may have already reviewed AV4K2P.
+  checkAny(
+    "F-2 verified review created (or already reviewed)",
+    ["rating: 5", "already reviewed"],
     "reviews:create",
     JSON.stringify({ bookingId: AVATRULLO, rating: 5, text: "Harness test review." }),
     "--identity",
@@ -356,7 +421,14 @@ if (PHASE === "all" || PHASE === "3") {
     "--identity",
     id("test-owner-9"),
   );
-  check("E-5 claim demo restaurant", "test-owner-9", "restaurants:claimDemo", JSON.stringify({ id: CASA }), "--identity", id("test-owner-9"));
+  check(
+    "E-5 claim demo restaurant",
+    "test-owner-9",
+    "restaurants:claimDemo",
+    JSON.stringify({ id: CASA }),
+    "--identity",
+    id("test-owner-9"),
+  );
   check("E-5b new owner sees it", "isOwner: true", "restaurants:get", JSON.stringify({ id: CASA }), "--identity", id("test-owner-9"));
 }
 

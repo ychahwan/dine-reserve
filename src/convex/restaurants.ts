@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { mutation, MutationCtx, query, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { FEATURES, SEAT_KIND } from "./schema";
+import { safeGet } from "./helpers";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -65,7 +66,8 @@ async function requireOwner(ctx: MutationCtx, restaurantId: Id<"restaurants">) {
 async function ownerIsDemoAccount(ctx: MutationCtx, restaurantId: Id<"restaurants">): Promise<boolean> {
   const restaurant = await ctx.db.get(restaurantId);
   if (!restaurant) return false;
-  const owner = await ctx.db.get(restaurant.ownerId);
+  // safeGet: tolerate owners stored as bare auth subjects rather than user docs.
+  const owner = await safeGet<Doc<"users">>(ctx, restaurant.ownerId);
   // The project was renamed Seatly → Kamix; databases seeded under the old
   // brand carry @seatly.demo owners, so accept both domains.
   const email = owner?.email ?? "";
@@ -197,7 +199,9 @@ export const get = query({
     const isOwner = userId !== null && restaurant.ownerId === userId;
     let ownerIsDemo = false;
     if (!isOwner) {
-      const owner = await ctx.db.get(restaurant.ownerId);
+      // safeGet: the owner may be a bare auth subject (e.g. a legacy/test
+      // identity) rather than a real user doc — never crash the detail page.
+      const owner = await safeGet<Doc<"users">>(ctx, restaurant.ownerId);
       const email = owner?.email ?? "";
       ownerIsDemo = email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo");
     }
