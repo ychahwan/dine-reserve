@@ -176,22 +176,6 @@ export const byRestaurant = query({
   handler: async (ctx, { restaurantId, date }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    const restaurant = await ctx.db.get(restaurantId);
-    if (!restaurant || restaurant.ownerId !== userId) return [];
-    let entries;
-    if (date) {
-      entries = await ctx.db
-        .query("waitlist")
-        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", date))
-        .collect();
-    } else {
-      entries = await ctx.db
-        .query("waitlist")
-        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
-        .collect();
-    }
-    return entries
-      .filter((e) => e.status !== "cancelled")
-      .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`) || a.createdAt - b.createdAt);
-  },
-});
+    const restaurant = 
+
+[FILE_TOO_LARGE]: The combined read_files output exceeded the 100,000 character hard limit. This file was truncated after 6,632 characters. Read it separately or use code_search for the relevant section.
