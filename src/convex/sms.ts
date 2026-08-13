@@ -57,6 +57,51 @@ export const sendBookingSms = action({
 });
 
 /**
+ * Day-before booking reminder (scheduled by the daily reminders cron).
+ * Same Twilio env-guard and no-op behavior as sendBookingSms.
+ */
+export const sendBookingReminder = action({
+  args: {
+    to: v.string(),
+    restaurantName: v.string(),
+    city: v.string(),
+    date: v.string(), // YYYY-MM-DD
+    time: v.string(), // HH:mm
+    partySize: v.number(),
+    code: v.optional(v.string()),
+  },
+  handler: async (_ctx, { to, restaurantName, city, date, time, partySize, code }) => {
+    const sid = process.env.TWILIO_ACCOUNT_SID;
+    const token = process.env.TWILIO_AUTH_TOKEN;
+    const from = process.env.TWILIO_FROM_NUMBER;
+    if (!sid || !token || !from) {
+      return { sent: false, skipped: true, reason: "twilio not configured" };
+    }
+    if (!to) return { sent: false, skipped: true, reason: "no phone on booking" };
+
+    const body = `Kamix reminder: ${restaurantName} (${city}) tomorrow at ${time} for ${partySize}. Code: ${code}. Reply or cancel in the app if plans change — see you soon!`;
+
+    try {
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+        method: "POST",
+        headers: {
+          Authorization: "Basic " + btoa(`${sid}:${token}`),
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          To: to,
+          From: from,
+          Body: body.slice(0, 1600),
+        }),
+      });
+      return { sent: res.ok, status: res.status };
+    } catch (e) {
+      return { sent: false, error: e instanceof Error ? e.message : "unknown" };
+    }
+  },
+});
+
+/**
  * Notify a diner that a table on their waitlist just freed up.
  * Same Twilio env-guard and no-op behavior as sendBookingSms.
  */

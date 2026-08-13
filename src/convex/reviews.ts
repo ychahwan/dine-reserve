@@ -1,7 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { Id } from "./_generated/dataModel";
 
 /**
  * Verified reviews. A diner can only review a restaurant they actually dined
@@ -125,7 +124,7 @@ export const myReviewable = query({
     const out = [];
     for (const b of bookings) {
       if (!canReview(b)) continue;
-      if (b.bookingId && reviewedBookingIds.has(b.bookingId as Id<"bookings">)) continue;
+      if (reviewedBookingIds.has(b._id)) continue;
       const restaurant = await ctx.db.get(b.restaurantId);
       if (!restaurant) continue;
       out.push({

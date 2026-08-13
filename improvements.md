@@ -6,13 +6,13 @@ Status legend: **Todo** (not started) · **In progress** (being built) · **Done
 
 | ID | Feature | Description | Status |
 |----|---------|-------------|--------|
-| I-01 | Reviews & ratings | Verified-booking 1–5 star reviews + text on restaurant pages; average rating shown on search cards and detail; review entry from My Bookings. | Todo |
-| I-02 | Diner dining profile | Dietary preferences, seating vibe, occasions and favorite restaurants saved to the profile; pre-fills bookings; "For you" section in Explore. | Todo |
-| I-03 | No-show mitigation | Per-restaurant cancellation policy ("free until X hours before"), SMS reminder the day before the booking, no-show tracking. | Todo |
-| I-04 | Owner analytics / insights | Occupancy, covers, no-show & cancellation rates, busiest times, waitlist conversion — new Insights tab. | Todo |
-| I-05 | Dietary search | Filter restaurants by menu tags (vegetarian, vegan, gluten-free, halal…) — search uses the menu attribute data. | Todo |
-| I-06 | Group invites | Share a booking link; friends confirm their seat and the party grows atomically (never overbooks). | Todo |
-| I-07 | Solo-friendly flag + bar-seat shortcut | "Solo-friendly" amenity with filter, plus a one-tap "Book a bar seat" quick action. | Todo |
+| I-01 | Reviews & ratings | Verified-booking 1–5 star reviews + text on restaurant pages; average rating shown on search cards and detail; review entry from My Bookings. | **Done** |
+| I-02 | Diner dining profile | Dietary preferences, seating vibe, occasions and favorite restaurants saved to the profile; pre-fills bookings; "For you" section in Explore. | **Done** |
+| I-03 | No-show mitigation | Per-restaurant cancellation policy ("free until X hours before"), SMS reminder the day before the booking, no-show tracking. | **Done** |
+| I-04 | Owner analytics / insights | Occupancy, covers, no-show & cancellation rates, busiest times, waitlist conversion — new Insights tab. | **Done** |
+| I-05 | Dietary search | Filter restaurants by menu tags (vegetarian, vegan, gluten-free, halal…) — search uses the menu attribute data. | **Done** |
+| I-06 | Group invites | Share a booking link; friends confirm their seat and the party grows atomically (never overbooks). | **Done** |
+| I-07 | Solo-friendly flag + bar-seat shortcut | "Solo-friendly" amenity with filter, plus a one-tap "Book a bar seat" quick action. | **Done** |
 
 ## Tier 2 — Needs API keys (payments / notifications / AI)
 

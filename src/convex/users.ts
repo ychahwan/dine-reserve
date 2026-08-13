@@ -43,6 +43,12 @@ export const onboard = mutation({
   },
 });
 
+type PrefsPatch = {
+  dietary: string[];
+  seating: ("inside" | "outside" | "bar")[];
+  occasions: string[];
+};
+
 /** Update profile (name / phone / dining preferences). Keeps existing role. */
 export const updateProfile = mutation({
   args: {
@@ -53,7 +59,7 @@ export const updateProfile = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
-    const patch: { name?: string; phone?: string; prefs?: unknown } = {};
+    const patch: { name?: string; phone?: string; prefs?: PrefsPatch } = {};
     if (args.name !== undefined) {
       const clean = args.name.trim().slice(0, 80);
       if (!clean) throw new Error("Name cannot be empty.");

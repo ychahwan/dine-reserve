@@ -140,6 +140,29 @@ html {
     color-mix(in oklch, var(--muted-foreground) 12%, transparent) 1px,
     transparent 1px
   );
-  background-size: 2
+  background-size: 22px 22px;
+}
 
-[FILE_TOO_LARGE]: The combined read_files output exceeded the 100,000 character hard limit. This file was truncated after 4,779 characters. Read it separately or use code_search for the relevant section.
+/* Horizontal "rail" scrollers (date strips, filter chips, menu tabs):
+   hide the scrollbar entirely so swiping feels like a native carousel
+   instead of showing the default scrollbar ("scrollball"). */
+.no-scrollbar,
+.overflow-x-auto {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar,
+.overflow-x-auto::-webkit-scrollbar {
+  display: none;
+}
+
+/* Rails settle cleanly when swiped (proximity snapping) with smooth
+   momentum scrolling on touch devices. */
+.overflow-x-auto {
+  scroll-snap-type: x proximity;
+  -webkit-overflow-scrolling: touch;
+}
+.overflow-x-auto > *,
+.no-scrollbar > * {
+  scroll-snap-align: start;
+}

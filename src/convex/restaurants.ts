@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, MutationCtx, query } from "./_generated/server";
+import { mutation, MutationCtx, query, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { FEATURES, SEAT_KIND } from "./schema";
 
@@ -69,11 +69,27 @@ async function ownerIsDemoAccount(ctx: MutationCtx, restaurantId: Id<"restaurant
   return !!owner?.email?.endsWith("@kamix.demo");
 }
 
+/** Average rating + count for a restaurant (works in queries and mutations). */
+async function restaurantRating(ctx: QueryCtx, restaurantId: Id<"restaurants">) {
+  const reviews = await ctx.db
+    .query("reviews")
+    .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+    .collect();
+  const count = reviews.length;
+  const avg =
+    count > 0 ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / count) * 10) / 10 : 0;
+  return { avg, count };
+}
+
 // ---------------------------------------------------------------------------
 // queries
 // ---------------------------------------------------------------------------
 
-/** Full-text + cuisine + city + seating preference search. */
+/**
+ * Full-text + cuisine + city + seating preference + dietary/solo search.
+ * `dietary` filters restaurants that serve at least one available menu item
+ * tagged with that label (e.g. "Vegetarian", "Halal", "Gluten-free").
+ */
 export const search = query({
   args: {
     q: v.optional(v.string()),
@@ -81,6 +97,8 @@ export const search = query({
     city: v.optional(v.string()),
     seat: v.optional(SEAT_KIND),
     nonSmoking: v.optional(v.boolean()),
+    dietary: v.optional(v.string()),
+    solo: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     let restaurants;
@@ -96,6 +114,7 @@ export const search = query({
     let filtered = restaurants;
     if (args.cuisine) filtered = filtered.filter((r) => r.cuisine === args.cuisine);
     if (args.city) filtered = filtered.filter((r) => r.city === args.city);
+    if (args.solo) filtered = filtered.filter((r) => r.features.soloFriendly === true);
 
     // seating-preference filtering requires section knowledge
     if (args.seat || args.nonSmoking) {
@@ -114,21 +133,38 @@ export const search = query({
       });
     }
 
+    // dietary filter: restaurant must serve an available item with that tag
+    if (args.dietary && args.dietary.trim()) {
+      const tag = args.dietary.trim().toLowerCase();
+      const ids = filtered.map((r) => r._id);
+      const items = await Promise.all(
+        ids.map((id) =>
+          ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
+        ),
+      );
+      filtered = filtered.filter((_, i) =>
+        items[i]!.some(
+          (it) => it.available && (it.tags ?? []).some((t) => t.toLowerCase() === tag),
+        ),
+      );
+    }
+
     return filtered.slice(0, 50);
   },
 });
 
-/** Full detail: restaurant + sections + hours + menus (with items). */
+/** Full detail: restaurant + sections + hours + menus (with items) + rating. */
 export const get = query({
   args: { id: v.id("restaurants") },
   handler: async (ctx, { id }) => {
     const restaurant = await ctx.db.get(id);
     if (!restaurant) return null;
-    const [sections, hours, menus, rawItems] = await Promise.all([
+    const [sections, hours, menus, rawItems, rating] = await Promise.all([
       ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
+      restaurantRating(ctx, id),
     ]);
 
     // Resolve uploaded photos (Convex storage ids) to public URLs so the
@@ -161,7 +197,7 @@ export const get = query({
       const owner = await ctx.db.get(restaurant.ownerId);
       ownerIsDemo = !!owner?.email?.endsWith("@kamix.demo");
     }
-    return { restaurant, sections, hours, menuDocs, isOwner, ownerIsDemo };
+    return { restaurant, sections, hours, menuDocs, isOwner, ownerIsDemo, rating };
   },
 });
 
@@ -260,6 +296,24 @@ export const update = mutation({
       searchText: buildSearchText({ ...restaurant, ...patch }),
     });
     return await ctx.db.get(args.id);
+  },
+});
+
+/** Owner-only: set the free-cancellation window (hours before the booking). */
+export const setCancellationPolicy = mutation({
+  args: {
+    restaurantId: v.id("restaurants"),
+    hours: v.number(), // 0 = no policy (always free to cancel)
+  },
+  handler: async (ctx, { restaurantId, hours }) => {
+    await requireOwner(ctx, restaurantId);
+    if (!Number.isInteger(hours) || hours < 0 || hours > 168) {
+      throw new Error("Policy must be between 0 and 168 hours.");
+    }
+    await ctx.db.patch(restaurantId, {
+      cancellationPolicyHours: hours === 0 ? undefined : hours,
+    });
+    return await ctx.db.get(restaurantId);
   },
 });
 

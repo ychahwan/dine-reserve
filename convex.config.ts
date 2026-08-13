@@ -20,4 +20,13 @@ app.crons.cron(
   "demoRules:ensureDemoRules",
 );
 
+// Day-before booking reminders: every day at 10:00 UTC this sends an SMS
+// reminder (Twilio-guarded no-op when not configured) for tomorrow's
+// confirmed bookings and marks them reminded so they only fire once.
+app.crons.cron(
+  "booking-reminders",
+  { hourUTC: 10, minuteUTC: 0 },
+  "reminders:sendTomorrowReminders",
+);
+
 export default app;

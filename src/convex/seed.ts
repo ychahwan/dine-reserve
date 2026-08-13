@@ -63,7 +63,7 @@ export const ensureDemoData = mutation({
       description:
         "Wood-fired pasta and natural wine in a candle-lit dining room. Ask for the terrace in summer.",
       imageUrl: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=900&q=70",
-      features: { inside: true, outside: true, bar: false, smoking: false, parking: false, liveMusic: false },
+      features: { inside: true, outside: true, bar: false, smoking: false, parking: false, liveMusic: false, soloFriendly: false },
       searchText: "",
       createdAt: now,
     });
@@ -79,7 +79,7 @@ export const ensureDemoData = mutation({
       description:
         "Omakase counter seating and a cozy izakaya floor. Fresh fish delivered daily from the market.",
       imageUrl: "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=900&q=70",
-      features: { inside: true, outside: false, bar: true, smoking: false, parking: false, liveMusic: false },
+      features: { inside: true, outside: false, bar: true, smoking: false, parking: false, liveMusic: false, soloFriendly: true },
       searchText: "",
       createdAt: now,
     });
@@ -95,7 +95,7 @@ export const ensureDemoData = mutation({
       description:
         "Sun-drenched courtyard dining with olive trees. Tapas-style sharing plates and crisp rosé.",
       imageUrl: "https://images.unsplash.com/photo-1550966871-3ed3cdb5ed0c?w=900&q=70",
-      features: { inside: true, outside: true, bar: true, smoking: false, parking: true, liveMusic: true },
+      features: { inside: true, outside: true, bar: true, smoking: false, parking: true, liveMusic: true, soloFriendly: true },
       searchText: "",
       createdAt: now,
     });
@@ -111,7 +111,7 @@ export const ensureDemoData = mutation({
       description:
         "Argentine-style asado over open flame. Late-night bar section with a smoking terrace.",
       imageUrl: "https://images.unsplash.com/photo-1600891964092-4316c288032e?w=900&q=70",
-      features: { inside: true, outside: true, bar: true, smoking: true, parking: true, liveMusic: true },
+      features: { inside: true, outside: true, bar: true, smoking: true, parking: true, liveMusic: true, soloFriendly: true },
       searchText: "",
       createdAt: now,
     });
@@ -119,7 +119,11 @@ export const ensureDemoData = mutation({
     for (const r of [trullo, sakura, oliva, asado]) {
       const doc = await ctx.db.get(r);
       const searchText = [doc!.name, doc!.cuisine, doc!.city, doc!.neighborhood ?? "", doc!.description ?? ""].join(" ").toLowerCase();
-      await ctx.db.patch(r, { searchText });
+      // no-show protection: Trullo demoes the free-cancel-until policy
+      await ctx.db.patch(r, {
+        searchText,
+        ...(r === trullo ? { cancellationPolicyHours: 24 } : {}),
+      });
     }
 
     // ------------------------------------------------------------- sections
@@ -394,6 +398,30 @@ export const ensureDemoData = mutation({
       phone: "+15550002222",
       status: "waiting",
       createdAt: now - 1000 * 60 * 30,
+    });
+
+    // ------------------------------------------------ verified demo reviews
+    await ctx.db.insert("reviews", {
+      restaurantId: trullo,
+      userId: ava,
+      bookingId: b1,
+      rating: 5,
+      text: "Candle-lit room, perfect cacio e pepe and the terrace was lovely. We'll be back.",
+      createdAt: now - 1000 * 60 * 60 * 24 * 2,
+    });
+    await ctx.db.insert("reviews", {
+      restaurantId: sakura,
+      userId: leo,
+      rating: 4,
+      text: "Freshest fish in the city — the omakase counter is worth the wait.",
+      createdAt: now - 1000 * 60 * 60 * 24 * 3,
+    });
+    await ctx.db.insert("reviews", {
+      restaurantId: trullo,
+      userId: leo,
+      rating: 4,
+      text: "Great negroni and friendly staff. Booking was instant.",
+      createdAt: now - 1000 * 60 * 60 * 24 * 6,
     });
 
     return { seeded: true, restaurants: [trullo, sakura, oliva, asado], booking: b1 };
