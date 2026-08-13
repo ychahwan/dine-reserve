@@ -1,0 +1,59 @@
+services:
+  # ---------------------------------------------------------------
+  # Production app: builds the web bundle and serves it with nginx.
+  #   docker compose up --build -d   → http://localhost:5173
+  # ---------------------------------------------------------------
+  web:
+    build:
+      context: .
+      args:
+        # Baked into the production bundle at build time. Set VITE_CONVEX_URL
+        # in .env to the Convex deployment URL (e.g. https://<project>.convex.site)
+        VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
+        VLY_INTEGRATION_KEY: ${VLY_INTEGRATION_KEY:-}
+    image: kamix-web:latest
+    container_name: kamix-web
+    ports:
+      - "5173:80"
+    env_file:
+      - .env
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # Local development with hot reload (Vite).
+  #   docker compose --profile dev up --build -d   → http://localhost:5174
+  # ---------------------------------------------------------------
+  dev:
+    profiles: ["dev"]
+    image: node:20-alpine
+    working_dir: /app
+    volumes:
+      - .:/app
+      # Anonymous volume so the container installs its own node_modules and
+      # never clobbers the host's.
+      - /app/node_modules
+    ports:
+      - "5174:5173"
+    environment:
+      VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
+    command: sh -c "npm ci && npm run dev"
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # Android APK build inside a container — no Android Studio needed.
+  #   docker compose build apk        # ~5–10 min first time
+  #   docker compose run --rm apk     # copies apk/kamix-debug.apk to ./apk/
+  # ---------------------------------------------------------------
+  apk:
+    profiles: ["mobile"]
+    build:
+      context: .
+      dockerfile: Dockerfile.mobile
+      args:
+        VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
+    image: kamix-apk-builder:latest
+    container_name: kamix-apk-builder
+    volumes:
+      - ./apk:/apk
+    environment:
+      VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
