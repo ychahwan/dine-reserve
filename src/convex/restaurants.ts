@@ -66,7 +66,10 @@ async function ownerIsDemoAccount(ctx: MutationCtx, restaurantId: Id<"restaurant
   const restaurant = await ctx.db.get(restaurantId);
   if (!restaurant) return false;
   const owner = await ctx.db.get(restaurant.ownerId);
-  return !!owner?.email?.endsWith("@kamix.demo");
+  // The project was renamed Seatly → Kamix; databases seeded under the old
+  // brand carry @seatly.demo owners, so accept both domains.
+  const email = owner?.email ?? "";
+  return email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo");
 }
 
 /** Average rating + count for a restaurant (works in queries and mutations). */
@@ -195,7 +198,8 @@ export const get = query({
     let ownerIsDemo = false;
     if (!isOwner) {
       const owner = await ctx.db.get(restaurant.ownerId);
-      ownerIsDemo = !!owner?.email?.endsWith("@kamix.demo");
+      const email = owner?.email ?? "";
+      ownerIsDemo = email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo");
     }
     return { restaurant, sections, hours, menuDocs, isOwner, ownerIsDemo, rating };
   },
@@ -338,11 +342,12 @@ export const remove = mutation({
 
 /**
  * Demo-only ownership transfer. The seeded demo restaurants (Trullo, Sakura
- * House, …) are owned by bare `@kamix.demo` user rows that carry no auth
- * identity, so a freshly signed-in manager can never see their bookings or
- * notifications. This lets the current user take over a demo restaurant —
- * strictly guarded: only restaurants whose current owner is a seeded demo
- * account can be claimed, so a real restaurant can never be taken over.
+ * House, …) are owned by bare `@kamix.demo`/`@seatly.demo` user rows that carry
+ * no auth identity, so a freshly signed-in manager can never see their
+ * bookings or notifications. This lets the current user take over a demo
+ * restaurant — strictly guarded: only restaurants whose current owner is a
+ * seeded demo account can be claimed, so a real restaurant can never be taken
+ * over.
  */
 export const claimDemo = mutation({
   args: { id: v.id("restaurants") },

@@ -427,3 +427,87 @@ export const ensureDemoData = mutation({
     return { seeded: true, restaurants: [trullo, sakura, oliva, asado], booking: b1 };
   },
 });
+
+// ---------------------------------------------------------------------------
+// retrofit for databases seeded before the enrichment improvements
+// ---------------------------------------------------------------------------
+
+/**
+ * Attribute map mirroring the menu items the current seed creates, keyed by
+ * item name. Used by retrofitDemoData to backfill databases that were seeded
+ * before menu attributes (dietary tags, allergens, spice) existed.
+ */
+const SEED_ITEM_ATTRS: Record<
+  string,
+  { tags?: string[]; allergens?: string[]; spiceLevel?: "mild" | "medium" | "hot" | "very_hot" }
+> = {
+  "Negroni": { tags: ["House-made"] },
+  "Burrata & prosciutto": { tags: ["Local"], allergens: ["Dairy"] },
+  "Cacio e pepe": { tags: ["Vegetarian", "House-made"], allergens: ["Gluten", "Dairy"] },
+  "Tagliatelle al ragù": { tags: ["House-made"], allergens: ["Gluten", "Dairy"] },
+  "Panna cotta": { tags: ["Vegetarian", "House-made"], allergens: ["Dairy"] },
+  "Nigiri set (8 pcs)": { tags: ["Chef's special"], allergens: ["Fish", "Gluten"] },
+  "Salmon sashimi": { tags: ["Raw"], allergens: ["Fish"] },
+  "Miso soup": { tags: ["Vegan"], allergens: ["Soy", "Gluten"] },
+  "Yuzu highball": { tags: ["House-made"] },
+  "Patatas bravas": { tags: ["Vegan", "Spicy", "Shareable"], spiceLevel: "medium" },
+  "Croquetas de jamón": { tags: ["Shareable"], allergens: ["Gluten", "Dairy"] },
+  "Grilled octopus": { tags: ["Grilled", "Local"], allergens: ["Molluscs"] },
+  "Rose spritz": { tags: ["House-made"] },
+  "Entraña (skirt steak) 400g": { tags: ["Chef's special", "Grilled"] },
+  "Chorizo criollo": { tags: ["Spicy"], allergens: ["Gluten", "Sulphites"], spiceLevel: "hot" },
+  "Provoleta": { tags: ["Vegetarian", "Shareable"], allergens: ["Dairy"] },
+  "Malbec glass": { tags: ["Local"] },
+};
+
+/**
+ * Idempotent data upgrade for deployments that were seeded before the
+ * enrichment improvements (solo-friendly flag, menu-item photos/attributes,
+ * dietary search). Only touches restaurants owned by seeded demo accounts
+ * (@kamix.demo / @seatly.demo) and only fills *missing* fields, so owner
+ * customizations are never overwritten. Safe to run repeatedly.
+ */
+export const retrofitDemoData = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const restaurants = await ctx.db.query("restaurants").collect();
+    let patchedRestaurants = 0;
+    let patchedItems = 0;
+
+    for (const r of restaurants) {
+      const owner = await ctx.db.get(r.ownerId);
+      const email = owner?.email ?? "";
+      if (!(email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo"))) continue;
+
+      // solo-friendly flag (defaults match the current seed)
+      if (r.features.soloFriendly === undefined) {
+        const solo = ["Sakura House", "Casa Oliva", "La Brasa"].includes(r.name);
+        await ctx.db.patch(r._id, { features: { ...r.features, soloFriendly: solo } });
+        patchedRestaurants++;
+      }
+
+      // menu-item attributes, by item name (only where completely missing)
+      const items = await ctx.db
+        .query("menuItems")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+        .collect();
+      for (const it of items) {
+        const def = SEED_ITEM_ATTRS[it.name];
+        if (!def) continue;
+        const patch: {
+          tags?: string[];
+          allergens?: string[];
+          spiceLevel?: "mild" | "medium" | "hot" | "very_hot";
+        } = {};
+        if (!it.tags && def.tags) patch.tags = def.tags;
+        if (!it.allergens && def.allergens) patch.allergens = def.allergens;
+        if (!it.spiceLevel && def.spiceLevel) patch.spiceLevel = def.spiceLevel;
+        if (Object.keys(patch).length > 0) {
+          await ctx.db.patch(it._id, patch);
+          patchedItems++;
+        }
+      }
+    }
+    return { patchedRestaurants, patchedItems };
+  },
+});

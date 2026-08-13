@@ -1,1 +1,543 @@
-[FILE_TOO_LARGE]: The combined read_files output exceeded the 100,000 character hard limit. This file was truncated after 0 characters. Read it separately or use code_search for the relevant section.
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { v } from "convex/values";
+import { api } from "./_generated/api";
+import { mutation, query, MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { SEAT_KIND } from "./schema";
+import { notifyRestaurant } from "./notifications";
+import { notifyWaitlistForFreedSeats } from "./waitlist";
+
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+export function generateCode(len = 6): string {
+  let out = "";
+  const bytes = new Uint8Array(len);
+  crypto.getRandomValues(bytes);
+  for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  return out;
+}
+
+type SlotLike = { _id: Id<"slots">; sectionId: Id<"sections">; time: string; total: number; remaining: number; closed: boolean };
+
+async function findBestSlot(slots: SlotLike[], sectionId: string, time: string): Promise<SlotLike | null> {
+  const matches = slots.filter((s) => s.sectionId === sectionId && s.time === time && !s.closed);
+  if (matches.length === 0) return null;
+  // duplicates are benign: treat the doc with most remaining as canonical
+  return matches.reduce((a, b) => (a.remaining >= b.remaining ? a : b));
+}
+
+async function isRestaurantOwner(ctx: MutationCtx, userId: string, restaurantId: Id<"restaurants">) {
+  const restaurant = await ctx.db.get(restaurantId);
+  return !!restaurant && restaurant.ownerId === userId;
+}
+
+// ---------------------------------------------------------------------------
+// shared booking logic (atomic — safe under 100+ concurrent requests)
+// ---------------------------------------------------------------------------
+
+export type BookingArgs = {
+  restaurantId: Id<"restaurants">;
+  date: string; // YYYY-MM-DD
+  time: string; // HH:mm
+  partySize: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  seat?: "inside" | "outside" | "bar"; // preferred seating area
+  nonSmoking?: boolean;
+  notes?: string;
+  occasion?: string; // birthday, anniversary, proposal, business…
+};
+
+/**
+ * Validate and atomically book a table, throwing on failure. Reads the slot
+ * ledger and decrements seats inside one serializable mutation, so concurrent
+ * requests (including FIFO queue processing) can never overbook.
+ */
+export async function attemptBooking(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  args: BookingArgs,
+) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)) throw new Error("Invalid date.");
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.time)) throw new Error("Invalid time.");
+  if (!Number.isInteger(args.partySize) || args.partySize < 1 || args.partySize > 20) {
+    throw new Error("Party size must be between 1 and 20.");
+  }
+  const name = args.name.trim().slice(0, 80);
+  if (!name) throw new Error("Please enter your name.");
+
+  const restaurant = await ctx.db.get(args.restaurantId);
+  if (!restaurant) throw new Error("Restaurant not found.");
+
+  const sections = await ctx.db
+    .query("sections")
+    .withIndex("by_restaurant", (q) => q.eq("restaurantId", args.restaurantId))
+    .collect();
+  if (sections.length === 0) throw new Error("This restaurant has no seating configured yet.");
+
+  const candidates = sections.filter(
+    (s) => (!args.seat || s.kind === args.seat) && (!args.nonSmoking || !s.smoking),
+  );
+  if (candidates.length === 0) throw new Error("No seating matches your preferences at this restaurant.");
+
+  // Read the slot ledger for this date — serialized by Convex, so the
+  // check + decrement below is atomic and cannot overbook.
+  const slots = await ctx.db
+    .query("slots")
+    .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", args.restaurantId).eq("date", args.date))
+    .collect();
+
+  // 1) exact-time match
+  for (const section of candidates) {
+    const slot = await findBestSlot(slots, section._id, args.time);
+    if (slot && slot.remaining >= args.partySize) {
+      return await commitBooking(ctx, {
+        userId, restaurantId: args.restaurantId, section, slot, args,
+        restaurantName: restaurant.name, city: restaurant.city,
+      });
+    }
+  }
+
+  // 2) nearest available slot later in the day (helpful UX)
+  const laterTimes = [...new Set(slots.map((s) => s.time))].filter((t) => t > args.time).sort();
+  for (const time of laterTimes) {
+    for (const section of candidates) {
+      const slot = await findBestSlot(slots, section._id, time);
+      if (slot && slot.remaining >= args.partySize) {
+        return await commitBooking(ctx, {
+          userId, restaurantId: args.restaurantId, section, slot, args, shiftedTime: time,
+          restaurantName: restaurant.name, city: restaurant.city,
+        });
+      }
+    }
+  }
+
+  throw new Error("No tables left at this time. Try a different time or party size.");
+}
+
+const BOOKING_ARGS_VALIDATOR = {
+  restaurantId: v.id("restaurants"),
+  date: v.string(), // YYYY-MM-DD
+  time: v.string(), // HH:mm
+  partySize: v.number(),
+  name: v.string(),
+  email: v.optional(v.string()),
+  phone: v.optional(v.string()),
+  seat: v.optional(SEAT_KIND), // preferred seating area
+  nonSmoking: v.optional(v.boolean()),
+  notes: v.optional(v.string()),
+  occasion: v.optional(v.string()), // birthday, anniversary, proposal, business…
+};
+
+/** Direct (non-queued) booking path — delegates to the shared atomic logic. */
+export const createBooking = mutation({
+  args: BOOKING_ARGS_VALIDATOR,
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Please sign in to book a table.");
+    return attemptBooking(ctx, userId, args);
+  },
+});
+
+async function commitBooking(
+  ctx: MutationCtx,
+  opts: {
+    userId: Id<"users">;
+    restaurantId: Id<"restaurants">;
+    section: { _id: Id<"sections">; name: string; kind: "inside" | "outside" | "bar"; smoking: boolean };
+    slot: SlotLike;
+    args: { partySize: number; name: string; email?: string; phone?: string; notes?: string; occasion?: string; time: string; date: string };
+    restaurantName: string;
+    city: string;
+    shiftedTime?: string;
+  },
+) {
+  const code = generateCode();
+  const now = Date.now();
+  const bookingId = await ctx.db.insert("bookings", {
+    restaurantId: opts.restaurantId,
+    userId: opts.userId,
+    name: opts.args.name,
+    email: opts.args.email?.trim().slice(0, 120) || undefined,
+    phone: opts.args.phone?.trim().slice(0, 20) || undefined,
+    date: opts.args.date,
+    time: opts.shiftedTime ?? opts.args.time,
+    partySize: opts.args.partySize,
+    sectionId: opts.section._id,
+    sectionName: opts.section.name,
+    kind: opts.section.kind,
+    smoking: opts.section.smoking,
+    status: "confirmed",
+    code,
+    notes: opts.args.notes?.trim().slice(0, 300) || undefined,
+    occasion: opts.args.occasion?.trim().slice(0, 40) || undefined,
+    createdAt: now,
+    updatedAt: now,
+  });
+  // atomic seat decrement — the entire mutation is serializable
+  await ctx.db.patch(opts.slot._id, { remaining: opts.slot.remaining - opts.args.partySize });
+  // owner dashboard event
+  await notifyRestaurant(ctx, {
+    restaurantId: opts.restaurantId,
+    bookingId,
+    userId: opts.userId,
+    type: "booking_created",
+  });
+  // async SMS — never blocks or breaks the booking
+  await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
+    to: opts.args.phone?.trim() || "",
+    event: "confirmed",
+    restaurantName: opts.restaurantName,
+    city: opts.city,
+    date: opts.args.date,
+    time: opts.shiftedTime ?? opts.args.time,
+    partySize: opts.args.partySize,
+    code,
+  });
+  return await ctx.db.get(bookingId);
+}
+
+// ---------------------------------------------------------------------------
+// queries
+// ---------------------------------------------------------------------------
+
+export const getBookingWithRestaurant = query({
+  args: { id: v.id("bookings") },
+  handler: async (ctx, { id }) => {
+    const booking = await ctx.db.get(id);
+    if (!booking) return null;
+    const restaurant = await ctx.db.get(booking.restaurantId);
+    return {
+      booking,
+      restaurant: restaurant
+        ? { _id: restaurant._id, name: restaurant.name, address: restaurant.address, city: restaurant.city }
+        : null,
+    };
+  },
+});
+
+/** Public invite lookup: find a confirmed booking by its 6-char code. */
+export const byCode = query({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const clean = code.trim().toUpperCase().slice(0, 6);
+    if (!clean) return null;
+    const bookings = await ctx.db.query("bookings").collect();
+    const booking = bookings.find((b) => b.code === clean && b.status === "confirmed");
+    if (!booking) return null;
+    const restaurant = await ctx.db.get(booking.restaurantId);
+    return {
+      booking,
+      restaurant: restaurant
+        ? { _id: restaurant._id, name: restaurant.name, address: restaurant.address, city: restaurant.city, imageUrl: restaurant.imageUrl }
+        : null,
+    };
+  },
+});
+
+export const myBookings = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const bookings = await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
+    const restaurants = await Promise.all(
+      bookings.map((b) => ctx.db.get(b.restaurantId)),
+    );
+    return bookings
+      .map((b, i) => ({
+        ...b,
+        restaurant: restaurants[i]
+          ? {
+              _id: restaurants[i]!._id,
+              name: restaurants[i]!.name,
+              imageUrl: restaurants[i]!.imageUrl,
+              cuisine: restaurants[i]!.cuisine,
+              city: restaurants[i]!.city,
+              cancellationPolicyHours: restaurants[i]!.cancellationPolicyHours ?? 0,
+            }
+          : null,
+      }))
+      .sort((a, b) => {
+        const ka = `${a.date}T${a.time}`;
+        const kb = `${b.date}T${b.time}`;
+        return ka.localeCompare(kb);
+      });
+  },
+});
+
+/** Owner view: bookings for one restaurant (optionally filtered by date). */
+export const byRestaurant = query({
+  args: { restaurantId: v.id("restaurants"), date: v.optional(v.string()) },
+  handler: async (ctx, { restaurantId, date }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const restaurant = await ctx.db.get(restaurantId);
+    if (!restaurant || restaurant.ownerId !== userId) return [];
+    let bookings;
+    if (date) {
+      bookings = await ctx.db
+        .query("bookings")
+        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", date))
+        .collect();
+    } else {
+      bookings = await ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect();
+    }
+    return bookings
+      .filter((b) => b.status !== "cancelled")
+      .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+  },
+});
+
+/**
+ * Owner analytics: aggregates over the last `days` (default 30) used by the
+ * Insights tab — covers, completion/no-show/cancellation rates, bookings per
+ * day, busiest times, and waitlist conversion.
+ */
+export const stats = query({
+  args: { restaurantId: v.id("restaurants"), days: v.optional(v.number()) },
+  handler: async (ctx, { restaurantId, days }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const restaurant = await ctx.db.get(restaurantId);
+    if (!restaurant || restaurant.ownerId !== userId) {
+      throw new Error("Only the restaurant owner can view insights.");
+    }
+
+    const lookback = Math.min(Math.max(days ?? 30, 7), 90);
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - lookback);
+    const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+
+    const bookings = await ctx.db
+      .query("bookings")
+      .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+      .collect();
+    const inWindow = bookings.filter((b) => b.date >= cutoffKey);
+
+    let covers = 0;
+    let completed = 0;
+    let noShow = 0;
+    let cancelled = 0;
+    const byDay = new Map<string, number>();
+    const byHour = new Map<string, number>();
+    for (const b of inWindow) {
+      if (b.status === "cancelled") { cancelled++; continue; }
+      covers += b.partySize;
+      byDay.set(b.date, (byDay.get(b.date) ?? 0) + b.partySize);
+      const hour = b.time.slice(0, 2) + ":00";
+      byHour.set(hour, (byHour.get(hour) ?? 0) + b.partySize);
+      if (b.status === "completed") completed++;
+      if (b.status === "no_show") noShow++;
+    }
+
+    const totalFinished = completed + noShow;
+    const waitlist = await ctx.db
+      .query("waitlist")
+      .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
+      .collect();
+    const waiting = waitlist.filter((w) => w.status === "waiting").length;
+    const notified = waitlist.filter((w) => w.status === "notified").length;
+
+    const last14: { date: string; covers: number }[] = [];
+    for (let i = 13; i >= 0; i--) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      last14.push({ date: key, covers: byDay.get(key) ?? 0 });
+    }
+
+    return {
+      rangeDays: lookback,
+      totalBookings: inWindow.length,
+      covers,
+      completed,
+      noShow,
+      cancelled,
+      noShowRate: totalFinished > 0 ? Math.round((noShow / totalFinished) * 100) : 0,
+      cancellationRate: inWindow.length > 0 ? Math.round((cancelled / inWindow.length) * 100) : 0,
+      avgParty: inWindow.length > 0 ? Math.round((covers / inWindow.length) * 10) / 10 : 0,
+      byDay: last14,
+      topTimes: [...byHour.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 6)
+        .map(([time, coversCount]) => ({ time, covers: coversCount })),
+      waitlist: { waiting, notified, total: waiting + notified },
+    };
+  },
+});
+
+// ---------------------------------------------------------------------------
+// status changes
+// ---------------------------------------------------------------------------
+
+export const cancelBooking = mutation({
+  args: { bookingId: v.id("bookings"), reason: v.optional(v.string()) },
+  handler: async (ctx, { bookingId, reason }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const booking = await ctx.db.get(bookingId);
+    if (!booking) throw new Error("Booking not found.");
+    const owner = await isRestaurantOwner(ctx, userId, booking.restaurantId);
+    if (booking.userId !== userId && !owner) throw new Error("You cannot cancel this booking.");
+    if (booking.status === "cancelled") return booking;
+
+    if (booking.sectionId) {
+      const slot = await findBestSlotFromDb(ctx, booking);
+      if (slot) {
+        // restore seats with a ceiling at total capacity
+        await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+      }
+    }
+    await ctx.db.patch(bookingId, { status: "cancelled", updatedAt: Date.now() });
+    // owner dashboard event
+    await notifyRestaurant(ctx, {
+      restaurantId: booking.restaurantId,
+      bookingId,
+      userId: booking.userId,
+      type: "booking_cancelled",
+    });
+    const restaurant = await ctx.db.get(booking.restaurantId);
+    await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
+      to: booking.phone ?? "",
+      event: "cancelled",
+      restaurantName: restaurant?.name ?? "",
+      city: restaurant?.city ?? "",
+      date: booking.date,
+      time: booking.time,
+      partySize: booking.partySize,
+      code: booking.code,
+    });
+
+    // seats freed up — notify the next diner on the waitlist, if any
+    const freed = await notifyWaitlistForFreedSeats(ctx, {
+      restaurantId: booking.restaurantId,
+      sectionId: booking.sectionId,
+      date: booking.date,
+      time: booking.time,
+      partySize: booking.partySize,
+    });
+    if (freed) {
+      await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
+    }
+    return await ctx.db.get(bookingId);
+  },
+});
+
+async function findBestSlotFromDb(
+  ctx: MutationCtx,
+  booking: { restaurantId: Id<"restaurants">; sectionId?: Id<"sections">; date: string; time: string },
+) {
+  if (!booking.sectionId) return null;
+  const slots = await ctx.db
+    .query("slots")
+    .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", booking.restaurantId).eq("date", booking.date))
+    .collect();
+  return findBestSlot(slots, booking.sectionId, booking.time);
+}
+
+/** Owner transitions: completed / no_show / confirmed / cancelled. */
+export const updateStatus = mutation({
+  args: {
+    bookingId: v.id("bookings"),
+    status: v.union(v.literal("confirmed"), v.literal("completed"), v.literal("no_show"), v.literal("cancelled")),
+  },
+  handler: async (ctx, { bookingId, status }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const booking = await ctx.db.get(bookingId);
+    if (!booking) throw new Error("Booking not found.");
+    if (!(await isRestaurantOwner(ctx, userId, booking.restaurantId))) {
+      throw new Error("Only the restaurant owner can change booking status.");
+    }
+    if (booking.status === status) return booking;
+
+    // cancelling returns seats to availability
+    if (status === "cancelled" && booking.sectionId && booking.status !== "cancelled") {
+      const slot = await findBestSlotFromDb(ctx, booking);
+      if (slot) {
+        await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+      }
+    }
+    await ctx.db.patch(bookingId, { status, updatedAt: Date.now() });
+
+    if (status === "cancelled" && booking.status !== "cancelled") {
+      // owner dashboard event
+      await notifyRestaurant(ctx, {
+        restaurantId: booking.restaurantId,
+        bookingId,
+        userId: booking.userId,
+        type: "booking_cancelled",
+      });
+      const freed = await notifyWaitlistForFreedSeats(ctx, {
+        restaurantId: booking.restaurantId,
+        sectionId: booking.sectionId,
+        date: booking.date,
+        time: booking.time,
+        partySize: booking.partySize,
+      });
+      if (freed) {
+        await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
+      }
+    }
+    return await ctx.db.get(bookingId);
+  },
+});
+
+/**
+ * Group invites: a friend who opens the invite link confirms their seat.
+ * The party grows by exactly one and the slot ledger is decremented in the
+ * same serializable mutation, so a booking can never exceed capacity even if
+ * several friends confirm at the same moment.
+ */
+export const confirmGuest = mutation({
+  args: {
+    bookingId: v.id("bookings"),
+    name: v.string(),
+  },
+  handler: async (ctx, { bookingId, name }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const cleanName = name.trim().slice(0, 60);
+    if (!cleanName) throw new Error("Please tell us your name.");
+
+    const booking = await ctx.db.get(bookingId);
+    if (!booking) throw new Error("Booking not found.");
+    if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
+
+    const today = new Date();
+    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
+    if (booking.date < todayKey) throw new Error("This booking is in the past.");
+
+    const guests = booking.guests ?? [];
+    if (guests.some((g) => g.userId === userId)) {
+      throw new Error("You already confirmed your seat.");
+    }
+    if (guests.some((g) => g.name.toLowerCase() === cleanName.toLowerCase())) {
+      throw new Error("Someone with that name already confirmed — use a different name.");
+    }
+    // hard cap: 20 diners total like the booking validator
+    if (booking.partySize + guests.length + 1 > 20) {
+      throw new Error("This booking is at its guest limit.");
+    }
+
+    // atomically consume one more seat from the slot ledger (never overbook)
+    if (booking.sectionId) {
+      const slots = await ctx.db
+        .query("slots")
+        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", booking.restaurantId).eq("date", booking.date))
+        .collect();
+      const slot = await findBestSlot(slots, booking.sectionId, booking.time);
+      if (!slot || slot.remaining < 1) {
+        throw new Error("No seats left — this booking is full.");
+      }
+      await ctx.db.patch(slot._id, { remaining: slot.remaining - 1 });
+    }
+
+    await ctx.db.patch(bookingId, {
+      guests: [...guests, { name: cleanName, userId, confirmedAt: Date.now() }],
+      updatedAt: Date.now(),
+    });
+    return await ctx.db.get(bookingId);
+  },
+});
