@@ -1,7 +1,9 @@
 import { v } from "convex/values";
 import { mutation } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { ensureSlotsForDate } from "./availability";
 import { applyDemoRules } from "./demoRules";
+import { safeGet } from "./helpers";
 
 const daysFromNow = (n: number) => {
   const d = new Date();
@@ -475,7 +477,9 @@ export const retrofitDemoData = mutation({
     let patchedItems = 0;
 
     for (const r of restaurants) {
-      const owner = await ctx.db.get(r.ownerId);
+      // safeGet: tolerate owners stored as bare auth subjects (e.g. test/legacy
+      // identities) rather than real user docs — never crash the retrofit.
+      const owner = await safeGet<Doc<"users">>(ctx, r.ownerId);
       const email = owner?.email ?? "";
       if (!(email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo"))) continue;
 
