@@ -15,108 +15,13 @@
  * Exit code = number of failures.
  *
  * Notes on this environment:
- * - The `convex run` CLI occasionally returns empty output, hangs (broken
- *   WebSocket transport), or fails; every call is retried and every call is
- *   bounded by a 90s timeout so a hung CLI can never block the suite.
  * - Some functions return a bare id (restaurants:create, addSection,
  *   createMenuItem, …) rather than the created doc, so those scenarios verify
  *   through the same reads the UI performs (`restaurants:get`, menuItems).
  * - `restaurants:get` renders nested menu items as `[Array]` in CLI output, so
  *   menu-item assertions read the menuItems table directly.
  */
-import { execSync } from "node:child_process";
-
-const FLAGS = ["--typecheck", "disable", "--codegen", "disable"];
-let PASS = 0;
-let FAIL = 0;
-const FAILED = [];
-
-const shq = (s) => `'${String(s).replace(/'/g, `'\\\\''`)}'`;
-
-/** Synchronous sleep for retry backoff. */
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-/** Run `convex run` once; returns { out, status }. */
-function runOnce(...args) {
-  const cmd =
-    ["node", "node_modules/convex/bin/main.js", "run", ...args, ...FLAGS].map(shq).join(" ") +
-    " 2>&1";
-  try {
-    return { out: execSync(cmd, { encoding: "utf8", timeout: 90000 }), status: 0 };
-  } catch (e) {
-    // A killed/timeout call means the CLI hung — return empty so runfn retries.
-    if (e.killed || e.signal) return { out: "", status: 1 };
-    return { out: `${e.stdout || ""}${e.stderr || ""}`, status: e.status ?? 1 };
-  }
-}
-
-/** Retry on the transient CLI failures: empty output or broken WebSocket transport. */
-function runfn(...args) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const r = runOnce(...args);
-    const noisy = r.out.includes("webSocketConstructor") || r.out.includes("ProcessExitSentinel");
-    if (r.out.trim().length > 0 && !noisy) return r;
-    sleepSync(2000 * (attempt + 1));
-  }
-  return runOnce(...args);
-}
-
-/** Extract an id/value from an inline query result (prefer quoted doc ids). */
-function iq(query) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
-    const matches = quoted && quoted.length ? quoted : out.match(/\b\d+\b/g);
-    if (matches && matches.length > 0) {
-      return matches[matches.length - 1].replace(/['"]/g, "");
-    }
-    sleepSync(2000);
-  }
-  return "";
-}
-
-/** Extract ALL quoted doc ids from an inline query result (for cleanups). */
-function iqAll(query) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
-    if (quoted && quoted.length > 0) {
-      return quoted.map((s) => s.replace(/['"]/g, ""));
-    }
-    sleepSync(2000 * (attempt + 1));
-  }
-  return [];
-}
-
-function check(name, expect, ...args) {
-  const { out } = runfn(...args);
-  if (out.includes(expect)) {
-    PASS += 1;
-    console.log(`PASS  | ${name}`);
-  } else {
-    FAIL += 1;
-    FAILED.push(name);
-    console.log(`FAIL  | ${name} | expected '${expect}'`);
-    console.log(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
-  }
-}
-
-function checkAbsent(name, absent, ...args) {
-  const { out } = runfn(...args);
-  if (out.includes(absent)) {
-    FAIL += 1;
-    FAILED.push(name);
-    console.log(`FAIL  | ${name} | must NOT contain '${absent}'`);
-    console.log(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
-  } else {
-    PASS += 1;
-    console.log(`PASS  | ${name}`);
-  }
-}
-
-const id = (subject) => JSON.stringify({ subject });
+import { logLine, check, runfn, iq, iqPairs, id, summary } from "./lib/runner.mjs";
 
 // ------------------------------------------------------------------ fixtures
 const now = new Date();
@@ -130,22 +35,21 @@ const DINER = `ui-diner-${STAMP}`;
 const DINER2 = `ui-diner2-${STAMP}`;
 const RNAME = `UI Flow Test ${STAMP}`;
 
-console.log(`── UI-flow suite · ${now.toISOString().slice(0, 19).replace("T", " ")} ────────────`);
+logLine(`── UI-flow suite · ${now.toISOString().slice(0, 19).replace("T", " ")} ────────────`);
 
 // ---------------------------------------------------------------- setup
 // Remove harness restaurants left behind by earlier runs (matched by name, so
 // real demo/user restaurants are never touched) — keeps search assertions
 // deterministic across repeated runs.
 (function cleanupHarnessRestaurants() {
-  const rows = iqAll(
-    `const rs = await ctx.db.query("restaurants").collect(); return rs.filter((r) => r.name.startsWith("Test Harness Table") || r.name.startsWith("UI Flow Test")).map((r) => r._id);`,
+  const pairs = iqPairs(
+    `const rs = await ctx.db.query("restaurants").collect(); return rs.filter((r) => r.name.startsWith("Test Harness Table") || r.name.startsWith("UI Flow Test")).map((r) => ({ _id: r._id, ownerId: r.ownerId }));`,
   );
-  for (const rId of rows) {
-    const owner = iq(`const r = await ctx.db.get("${rId}"); return r?.ownerId;`);
+  for (const { id: rId, owner } of pairs) {
     if (!owner) continue;
     runfn("restaurants:remove", JSON.stringify({ id: rId }), "--identity", id(owner));
   }
-  if (rows.length > 0) console.log(`clean | removed ${rows.length} leftover harness restaurant(s)`);
+  if (pairs.length > 0) logLine(`clean | removed ${pairs.length} leftover harness restaurant(s)`);
 })();
 
 // Owner creates a restaurant (C-1 path) and tunes it to a single 2-seat section
@@ -298,11 +202,5 @@ check("UI-2 signed-out booking rejected", "Please sign in", "bookings:createBook
   restaurantId: RID, date: TOMORROW, time: "20:00", partySize: 2, name: "Nope",
 }));
 
-sleepSync(500);
-
 // ------------------------------------------------------------------ summary
-console.log("");
-console.log("─────────────────────────────────────────────────────────────");
-console.log(`RESULT: ${PASS} passed, ${FAIL} failed`);
-if (FAILED.length > 0) console.log(`FAILED: ${FAILED.join(", ")}`);
-process.exit(FAIL);
+process.exit(summary());

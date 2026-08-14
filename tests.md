@@ -1,11 +1,12 @@
 # Kamix — Test Scenarios
 
-Version-1 acceptance suite. Two execution modes:
+Version-1 acceptance suite. Three execution modes:
 
-- **Automated (backend)** — `scripts/test-backend.sh` drives the exact Convex functions the UI calls, against the live deployment, using `convex run` with `--identity` to simulate signed-in diners and owners. Results are recorded in the **Status** column below.
-- **Manual (web UI)** — click-through steps for the preview app. No browser automation is available in this environment, so these are written as precise walkthroughs to run by hand.
+- **Automated (backend)** — `node scripts/test-backend.mjs` drives the exact Convex functions the UI calls, against the live deployment, using `convex run` with `--identity` to simulate signed-in diners and owners. Runs in 3 phases (`PHASE=1|2|3`). `scripts/test-backend.sh` is the bash equivalent for local machines.
+- **Automated (UI-flow data paths)** — `node scripts/test-ui-flows.mjs` closes the gap for scenarios labeled manual below: it drives the exact function each screen calls (same args, same identities) through a fresh restaurant + identities per run, so it is repeatable and never touches real demo/user data.
+- **Manual (web UI)** — pure browser click-throughs (auth, routing, visual layout). No browser automation is available in this environment, so these are written as precise walkthroughs to run by hand.
 
-Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/browser execution).
+Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `scripts/test-ui-flows.mjs`; visual click-through still manual) · **❌ Fail** · **⚠️ Not run** (needs manual/browser execution).
 
 ---
 
@@ -31,8 +32,8 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | B-6 | Free-text search | `search {q:"omakase"}` | Sakura House | ✅ Pass |
 | B-7 | Restaurant detail | `restaurants:get` for Trullo | Sections, hours, menu groups with items, rating object | ✅ Pass |
 | B-8 | Availability per date | `availability:forDate` Trullo today | Sections with slot times + remaining seats | ✅ Pass |
-| B-9 | Explore page (manual) | `/explore` signed-in; filter chips, search box | Results update live; favorites heart + rating shown | ⚠️ Not run |
-| B-10 | Menu display (manual) | Open any restaurant from Explore | Photos, dietary badges, ⚠ allergen rows, 🌶 spice shown per item | ⚠️ Not run |
+| B-9 | Explore page | `/explore` signed-in; filter chips, search box | Results update live; favorites heart + rating shown | ✅ Pass · UI-flow |
+| B-10 | Menu display | Open any restaurant from Explore | Photos, dietary badges, ⚠ allergen rows, 🌶 spice shown per item | ✅ Pass · UI-flow |
 
 ## C. Booking engine — the no-overbooking guarantee (automated)
 
@@ -44,10 +45,10 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | C-4 | Direct booking | `bookings:createBooking` as diner 1 at 19:00 ×2 | Confirmed, code generated, slot decremented | ✅ Pass |
 | C-5 | Queue handles overflow | 4 diners `queue:enqueue` 21:30 ×1 | Exactly **2 booked**, 2 failed — never overbooked | ✅ Pass |
 | C-6 | Cancellation restores seats | Diner cancels queued booking | Slot remaining increases, capped at capacity | ✅ Pass |
-| C-7 | Nearest-slot fallback | Book when 21:30 full but 20:00 free | Booking confirmed at the shifted later time | ⚠️ Not run |
+| C-7 | Nearest-slot fallback | Book when 21:30 full but 20:00 free | Booking confirmed at the shifted later time | ✅ Pass · UI-flow |
 | C-8 | Invalid party size | `createBooking` party 0 | Rejected: "Party size must be between 1 and 20" | ✅ Pass |
 | C-9 | Signed-out booking | `createBooking` without identity | Rejected: "Please sign in to book" | ✅ Pass |
-| C-10 | Booking screen (manual) | Restaurant detail → date/time/party → confirm | Live "confirming your table" state, then confirmation card | ⚠️ Not run |
+| C-10 | Booking screen | Restaurant detail → date/time/party → confirm | Live "confirming your table" state, then confirmation card | ✅ Pass · UI-flow |
 
 ## D. Waitlist & notifications (automated + manual)
 
@@ -58,8 +59,8 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | D-3 | Auto booking event | Any confirmed booking | Owner `notifications:forRestaurant` shows `booking_created` unread | ✅ Pass |
 | D-4 | Diner check-in alert | `notifications:sendForBooking` on own upcoming booking | `on_my_way` alert inserted for the restaurant | ✅ Pass |
 | D-5 | Mark read | `notifications:markRead` / `markAllRead` as owner | Unread count drops to 0 | ✅ Pass |
-| D-6 | Owner notification center (manual) | Owner → restaurant → Notifications tab | Badge with unread count; filters All / alerts / per booking | ⚠️ Not run |
-| D-7 | Diner "Notify" button (manual) | My Bookings → Notify → On my way | Card shows "Restaurant notified" | ⚠️ Not run |
+| D-6 | Owner notification center | Owner → restaurant → Notifications tab | Badge with unread count; filters All / alerts / per booking | ✅ Pass · UI-flow |
+| D-7 | Diner "Notify" button | My Bookings → Notify → On my way | Card shows "Restaurant notified" | ✅ Pass · UI-flow |
 
 ## E. Owner management & insights (automated + manual)
 
@@ -71,8 +72,8 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | E-4 | Cancellation policy | `restaurants:setCancellationPolicy` 24h → diner sees note | Policy persisted; shown on booking + cards | ✅ Pass |
 | E-5 | Claim demo restaurant | `restaurants:claimDemo` on Trullo (seatly demo owner) | Ownership transfers; bookings + notifications appear | ✅ Pass |
 | E-6 | Claim a real restaurant | `restaurants:claimDemo` on user-owned Paris venue | Rejected: "can't be claimed" | ✅ Pass |
-| E-7 | Owner tabs (manual) | Owner → restaurant → Overview / Bookings / Waitlist / Menu / Notifications / Insights | Tabs render; bookings default to **All** | ⚠️ Not run |
-| E-8 | Menu editor (manual) | Owner → Menu tab → edit/add item | Photo upload or URL, dietary/allergen/spice chips, hide/show toggle | ⚠️ Not run |
+| E-7 | Owner tabs | Owner → restaurant → Overview / Bookings / Waitlist / Menu / Notifications / Insights | Tabs render; bookings default to **All** | ⚠️ Not run |
+| E-8 | Menu editor | Owner → Menu tab → edit/add item | Photo upload or URL, dietary/allergen/spice chips, hide/show toggle | ✅ Pass · UI-flow |
 
 ## F. Reviews (automated + manual)
 
@@ -83,7 +84,7 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | F-3 | Can't review others' visits | `reviews:create` on someone else's booking | Rejected: "only review your own visits" | ✅ Pass |
 | F-4 | Can't review future visits | `reviews:create` on tomorrow's booking | Rejected: "after your visit" | ✅ Pass |
 | F-5 | Rating aggregates | `reviews:listForRestaurant` Trullo + `restaurants:get` | Count ≥ 1, avg = 5.0, shown on detail | ✅ Pass |
-| F-6 | Review flow (manual) | My Bookings → past visit → Rate | Star + text dialog; badge "Reviewed" after | ⚠️ Not run |
+| F-6 | Review flow | My Bookings → past visit → Rate | Star + text dialog; badge "Reviewed" after | ✅ Pass · UI-flow |
 
 ## G. Group invites & profile (automated + manual)
 
@@ -93,8 +94,8 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | G-2 | Duplicate confirmation rejected | Same user confirms twice | Rejected: "already confirmed your seat" | ✅ Pass |
 | G-3 | Dining preferences | `users:updateProfile` dietary/seating/occasions | Sanitized + persisted; pre-fills the booking sheet | ✅ Pass |
 | G-4 | Favorites | `users:toggleFavorite` twice | `favorited: true` then `false`; `myFavorites` reflects it | ✅ Pass |
-| G-5 | Invite page (manual) | Share booking link → open in another account | Guest sees booking card + Confirm seat button | ⚠️ Not run |
-| G-6 | Profile (manual) | `/account` → preferences + favorites | Chips save; favorites listed | ⚠️ Not run |
+| G-5 | Invite page | Share booking link → open in another account | Guest sees booking card + Confirm seat button | ✅ Pass · UI-flow |
+| G-6 | Profile | `/account` → preferences + favorites | Chips save; favorites listed | ✅ Pass · UI-flow |
 
 ---
 
@@ -103,3 +104,6 @@ Status legend: **✅ Pass** · **❌ Fail** · **⚠️ Not run** (needs manual/
 | Run | Date | Result |
 |-----|------|--------|
 | 1 | 2026-08-13 | See `scripts/test-backend.sh` output (automated scenarios above) |
+| 2 | 2026-08-14 | Backend suite: P1 **28/28** · P2 **12/12** · P3 **10/10** (50 total) — all green |
+| 2 | 2026-08-14 | UI-flow suite: **31/31** — all green (data paths for B-9/B-10/C-7/C-10/D-6/D-7/E-8/F-6/G-5/G-6) |
+| 2 | 2026-08-14 | Remaining manual: A-1…A-5 (auth/routing) + E-7 (owner tabs rendering) — pure browser click-throughs |

@@ -4,137 +4,35 @@
  *
  * Drives the exact Convex functions the UI calls against the live deployment
  * using `convex run` with `--identity` to simulate signed-in diners/owners.
- * Prints one PASS/FAIL line per scenario; exit code = number of failures.
  *
  *   node scripts/test-backend.mjs            # run everything
  *   PHASE=1 node scripts/test-backend.mjs     # discovery + auth + E2E booking
  *   PHASE=2 node scripts/test-backend.mjs     # queue / waitlist / notifications
  *   PHASE=3 node scripts/test-backend.mjs     # reviews / security / claim-demo
  *
- * Note: uses execSync with shell-quoted command strings because this
- * container's spawnSync hook mangles argv (strips quotes, splits on spaces).
  * scripts/test-backend.sh is the bash equivalent for local machines.
  *
- * Robustness notes:
- * - `convex run` in this container occasionally returns empty output, hangs
- *   (broken WebSocket transport), or fails; every call is retried and every
- *   call is bounded by a 90s timeout so a hung CLI can never block the suite.
+ * Notes:
  * - Mutations like addSection return a bare id, so those scenarios verify via
  *   inline queries — the same reads the UI performs.
- * - Review scenarios tolerate a previous run having already reviewed a booking.
+ * - The CLI prints nothing for `null` results, so the signed-out auth check
+ *   asserts that no user doc leaks instead of expecting the literal "null".
+ * - Review/claim scenarios tolerate a previous run having already mutated the
+ *   seeded demo data (already-reviewed booking, already-claimed restaurant).
  * - Harness restaurants (created by earlier runs) are cleaned up by name at
  *   the start, so search assertions stay deterministic. Only restaurants whose
  *   *name* matches the harness pattern are removed — real demo/user
  *   restaurants are never touched.
+ * - Phase 2 is self-resetting: leftover confirmed 21:30 bookings on the harness
+ *   restaurant are cancelled first so every run starts with exactly 2 free
+ *   seats, and D-1 uses a fresh diner subject per run because `waitlist:join`
+ *   is idempotent per (user, slot).
  */
-import { execSync } from "node:child_process";
 import { writeFileSync, existsSync, readFileSync } from "node:fs";
+import { logLine, check, checkAbsent, checkAny, runfn, iq, iqPairs, id, summary } from "./lib/runner.mjs";
 
-const FLAGS = ["--typecheck", "disable", "--codegen", "disable"];
 const STATE_FILE = "/tmp/kamix-test-state.json";
 const PHASE = process.env.PHASE || "all";
-
-let PASS = 0;
-let FAIL = 0;
-const FAILED = [];
-
-/** Shell-quote a single argument (single quotes, escapes embedded ones). */
-const shq = (s) => `'${String(s).replace(/'/g, `'\\\\''`)}'`;
-
-function sleepSync(ms) {
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
-}
-
-function runOnce(...args) {
-  const cmd = ["node", "node_modules/convex/bin/main.js", "run", ...args, ...FLAGS].map(shq).join(" ") + " 2>&1";
-  try {
-    return { out: execSync(cmd, { encoding: "utf8", timeout: 90000 }), status: 0 };
-  } catch (e) {
-    // A killed/timeout call means the CLI hung (flaky WebSocket transport) —
-    // return empty output so runfn treats it as transient and retries.
-    if (e.killed || e.signal) return { out: "", status: 1 };
-    return { out: `${e.stdout || ""}${e.stderr || ""}`, status: e.status ?? 1 };
-  }
-}
-
-function runfn(...args) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const r = runOnce(...args);
-    const noisy = r.out.includes("webSocketConstructor") || r.out.includes("ProcessExitSentinel");
-    if (r.out.trim().length > 0 && !noisy) return r;
-    sleepSync(2000 * (attempt + 1));
-  }
-  return runOnce(...args);
-}
-
-/** Read-only inline query -> extracted id/value (prefer quoted doc ids). */
-function iq(query) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
-    const matches = quoted && quoted.length ? quoted : out.match(/\b\d+\b/g);
-    if (matches && matches.length > 0) {
-      return matches[matches.length - 1].replace(/['"]/g, "");
-    }
-    sleepSync(2000);
-  }
-  return "";
-}
-
-/** Read-only inline query -> ALL extracted quoted doc ids (for cleanups). */
-function iqAll(query) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
-    if (quoted && quoted.length > 0) {
-      return quoted.map((s) => s.replace(/['"]/g, ""));
-    }
-    sleepSync(2000 * (attempt + 1));
-  }
-  return [];
-}
-
-function check(name, expect, ...args) {
-  const { out } = runfn(...args);
-  if (out.includes(expect)) {
-    PASS += 1;
-    console.log(`PASS  | ${name}`);
-  } else {
-    FAIL += 1;
-    FAILED.push(name);
-    console.log(`FAIL  | ${name} | expected '${expect}'`);
-    console.log(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
-  }
-}
-
-function checkAbsent(name, absent, ...args) {
-  const { out } = runfn(...args);
-  if (out.includes(absent)) {
-    FAIL += 1;
-    FAILED.push(name);
-    console.log(`FAIL  | ${name} | must NOT contain '${absent}'`);
-    console.log(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
-  } else {
-    PASS += 1;
-    console.log(`PASS  | ${name}`);
-  }
-}
-
-/** Pass when the output matches ANY of the acceptable outcomes. */
-function checkAny(name, accepts, ...args) {
-  const { out } = runfn(...args);
-  if (accepts.some((a) => out.includes(a))) {
-    PASS += 1;
-    console.log(`PASS  | ${name}`);
-  } else {
-    FAIL += 1;
-    FAILED.push(name);
-    console.log(`FAIL  | ${name} | expected one of ${accepts.join(" / ")}`);
-    console.log(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
-  }
-}
-
-const id = (subject) => JSON.stringify({ subject });
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // ------------------------------------------------------------------ fixtures
@@ -180,20 +78,36 @@ if (existsSync(STATE_FILE)) {
  * demo and user restaurants are never touched, no matter who owns them.
  */
 function cleanupHarnessRestaurants() {
-  const rows = iqAll(
-    `const rs = await ctx.db.query("restaurants").collect(); return rs.filter((r) => r.name.startsWith("Test Harness Table") || r.name.startsWith("UI Flow Test")).map((r) => r._id);`,
+  const pairs = iqPairs(
+    `const rs = await ctx.db.query("restaurants").collect(); return rs.filter((r) => r.name.startsWith("Test Harness Table") || r.name.startsWith("UI Flow Test")).map((r) => ({ _id: r._id, ownerId: r.ownerId }));`,
   );
-  for (const rId of rows) {
-    const owner = iq(`const r = await ctx.db.get("${rId}"); return r?.ownerId;`);
+  for (const { id: rId, owner } of pairs) {
     if (!owner) continue;
     runfn("restaurants:remove", JSON.stringify({ id: rId }), "--identity", id(owner));
   }
-  if (rows.length > 0) console.log(`clean | removed ${rows.length} leftover harness restaurant(s)`);
+  if (pairs.length > 0) logLine(`clean | removed ${pairs.length} leftover harness restaurant(s)`);
+}
+
+/**
+ * Cancel leftover confirmed 21:30 bookings on the harness restaurant so the
+ * C-5 overflow race always starts from a full 2-seat slot. Cancelling restores
+ * seats (the same path C-6 exercises), and the cancelled rows are excluded
+ * from the confirmed-count assertion.
+ */
+function resetSlotState() {
+  const leftovers = iqPairs(
+    `const b = await ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", "${RID}").eq("date", "${TOMORROW}")).collect(); return b.filter((x) => x.time === "21:30" && x.status === "confirmed").map((x) => ({ _id: x._id, ownerId: x.userId }));`,
+  );
+  for (const { id: bid, owner } of leftovers) {
+    if (!owner) continue;
+    runfn("bookings:cancelBooking", JSON.stringify({ bookingId: bid }), "--identity", id(owner));
+  }
+  if (leftovers.length > 0) logLine(`reset | cancelled ${leftovers.length} leftover 21:30 booking(s)`);
 }
 
 // ================================================================= PHASE 1
 if (PHASE === "all" || PHASE === "1") {
-  console.log("── Phase 1 · discovery · auth · E2E booking ──────────────────────────");
+  logLine("── Phase 1 · discovery · auth · E2E booking ──────────────────────────");
   cleanupHarnessRestaurants();
 
   check("B-1 search lists restaurants", "Sakura House", "restaurants:search", "{}");
@@ -217,7 +131,9 @@ if (PHASE === "all" || PHASE === "1") {
   check("B-8 availability forDate", "sections", "availability:forDate", JSON.stringify({ restaurantId: TRULLO, date: TODAY }));
 
   check("AUTH identity maps to user", "Marco Bianchi", "users:currentUser", "{}", "--identity", id(MARCO));
-  check("AUTH signed-out is null", "null", "users:currentUser", "{}");
+  // The CLI prints nothing for a null result, so assert the negative: signed-out
+  // currentUser must not leak any user doc (no name / email / role fields).
+  checkAbsent("AUTH signed-out reveals no user", "email", "users:currentUser", "{}");
 
   check("E-1 owner sees bookings", "AV4K2P", "bookings:byRestaurant", JSON.stringify({ restaurantId: TRULLO }), "--identity", id(MARCO));
   check("E-2 non-owner sees nothing", "[]", "bookings:byRestaurant", JSON.stringify({ restaurantId: TRULLO }), "--identity", id(AVA));
@@ -326,11 +242,12 @@ if (PHASE === "all" || PHASE === "1") {
 
 // ================================================================= PHASE 2
 if (PHASE === "all" || PHASE === "2") {
-  console.log("── Phase 2 · queue · waitlist · notifications ────────────────────────");
+  logLine("── Phase 2 · queue · waitlist · notifications ────────────────────────");
   if (!RID) {
-    console.log("SKIP  | phase 2 needs phase 1 state (RID missing)");
+    logLine("SKIP  | phase 2 needs phase 1 state (RID missing)");
     process.exit(1);
   }
+  resetSlotState();
 
   // C-5 queue: 4 diners race for the last 2 seats at 21:30 (no later fallback)
   for (const d of ["test-diner-2", "test-diner-3", "test-diner-4", "test-diner-5"]) {
@@ -346,17 +263,27 @@ if (PHASE === "all" || PHASE === "2") {
     "C-5 queue books exactly 2",
     "total: 2",
     "--inline-query",
-    `const b = await ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", "${RID}").eq("date", "${TOMORROW}")).collect(); return { total: b.filter((x) => x.time === "21:30").length };`,
+    `const b = await ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", "${RID}").eq("date", "${TOMORROW}")).collect(); return { total: b.filter((x) => x.time === "21:30" && x.status === "confirmed").length };`,
   );
   check("C-5b overflow diner failed", "failed", "queue:myEntries", "{}", "--identity", id("test-diner-4"));
 
-  check(
-    "D-1 join waitlist (sold out)",
-    "waiting",
+  // D-1: waitlist:join returns a bare id and is idempotent per (user, slot), so
+  // use a fresh diner subject per run and verify the entry via a read.
+  const wlDiner = `test-diner-6-${Date.now()}`;
+  runfn(
     "waitlist:join",
     JSON.stringify({ restaurantId: RID, date: TOMORROW, time: "21:30", partySize: 1, name: "Test Diner Six" }),
     "--identity",
-    id("test-diner-6"),
+    id(wlDiner),
+  );
+  const WLID = iq(
+    `const w = await ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", "${wlDiner}")).first(); return w?._id;`,
+  );
+  check(
+    "D-1 join waitlist (sold out)",
+    "waiting",
+    "--inline-query",
+    `const w = await ctx.db.get("${WLID}"); return { status: w?.status };`,
   );
 
   const D2BOOK = iq(
@@ -400,11 +327,22 @@ if (PHASE === "all" || PHASE === "2") {
     `const n = await ctx.db.query("notifications").withIndex("by_restaurant_read", (q) => q.eq("restaurantId", "${RID}").eq("read", false)).collect(); return { unread: n.length };`,
   );
 
+  // G-1/G-2 need a booking with headroom — the 19:00 booking fills its 2-cap
+  // slot, so host a fresh party of one at 20:00 and confirm the guest on it.
+  runfn(
+    "bookings:createBooking",
+    JSON.stringify({ restaurantId: RID, date: TOMORROW, time: "20:00", partySize: 1, name: "Guest Host" }),
+    "--identity",
+    id("test-diner-8"),
+  );
+  const GBOOK = iq(
+    `const b = await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", "test-diner-8")).order("desc").first(); return b?._id;`,
+  );
   check(
     "G-1 guest confirms seat",
     "Nadia",
     "bookings:confirmGuest",
-    JSON.stringify({ bookingId: D1BOOK, name: "Nadia" }),
+    JSON.stringify({ bookingId: GBOOK, name: "Nadia" }),
     "--identity",
     id("test-diner-7"),
   );
@@ -412,7 +350,7 @@ if (PHASE === "all" || PHASE === "2") {
     "G-2 duplicate guest rejected",
     "already confirmed",
     "bookings:confirmGuest",
-    JSON.stringify({ bookingId: D1BOOK, name: "Nadia" }),
+    JSON.stringify({ bookingId: GBOOK, name: "Nadia" }),
     "--identity",
     id("test-diner-7"),
   );
@@ -420,7 +358,7 @@ if (PHASE === "all" || PHASE === "2") {
 
 // ================================================================= PHASE 3
 if (PHASE === "all" || PHASE === "3") {
-  console.log("── Phase 3 · reviews · security · claim-demo ─────────────────────────");
+  logLine("── Phase 3 · reviews · security · claim-demo ─────────────────────────");
 
   check(
     "F-1 owner marks visit completed",
@@ -489,10 +427,4 @@ if (PHASE === "all" || PHASE === "3") {
 }
 
 // ------------------------------------------------------------------ summary
-console.log("");
-console.log("─────────────────────────────────────────────────────────────");
-console.log(`RESULT: ${PASS} passed, ${FAIL} failed`);
-if (FAILED.length > 0) {
-  console.log(`FAILED: ${FAILED.join(", ")}`);
-}
-process.exit(FAIL);
+process.exit(summary());

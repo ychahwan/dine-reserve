@@ -1,0 +1,167 @@
+#!/usr/bin/env node
+/**
+ * Shared runner for the Kamix test suites (test-backend.mjs, test-ui-flows.mjs).
+ *
+ * Drives the exact Convex functions the UI calls against the live deployment
+ * using `convex run` with `--identity` to simulate signed-in diners/owners.
+ *
+ * Robustness notes (this container):
+ * - `convex run` occasionally returns empty output, hangs (broken WebSocket
+ *   transport), or fails; every call is retried, and every call is bounded by
+ *   a 25s timeout so a hung CLI can never block the suite for long.
+ * - The CLI prints NOTHING for `null` results — a clean exit with empty output
+ *   is a valid `null` result, so it is NOT retried at the transport level.
+ * - The CLI occasionally prints nothing for a call that should have returned a
+ *   value (transient): `iq` retries id-lookups up to 3 times, and `check`
+ *   retries once when the result comes back empty (no scenario here expects a
+ *   literal empty output).
+ * - Every PASS/FAIL line is appended to /tmp/kamix-results.log so a platform
+ *   runner-kill mid-run does not lose the results gathered so far.
+ */
+import { execSync } from "node:child_process";
+import { appendFileSync } from "node:fs";
+
+const FLAGS = ["--typecheck", "disable", "--codegen", "disable"];
+const RESULTS_LOG = "/tmp/kamix-results.log";
+
+let PASS = 0;
+let FAIL = 0;
+const FAILED = [];
+
+/** Print a line to stdout AND checkpoint it to the results log. */
+export function logLine(s) {
+  console.log(s);
+  try {
+    appendFileSync(RESULTS_LOG, s + "\n");
+  } catch {
+    /* log file unavailable — stdout only */
+  }
+}
+
+/** Shell-quote a single argument (single quotes, escapes embedded ones). */
+export const shq = (s) => `'${String(s).replace(/'/g, `'\\\\''`)}'`;
+
+export function sleepSync(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+/** Run `convex run` once, bounded by 25s; returns { out, status }. */
+export function runOnce(...args) {
+  const cmd = ["node", "node_modules/convex/bin/main.js", "run", ...args, ...FLAGS].map(shq).join(" ") + " 2>&1";
+  try {
+    return { out: execSync(cmd, { encoding: "utf8", timeout: 25000 }), status: 0 };
+  } catch (e) {
+    // A killed/timeout call means the CLI hung — return empty so runfn retries.
+    if (e.killed || e.signal) return { out: "", status: 1 };
+    return { out: `${e.stdout || ""}${e.stderr || ""}`, status: e.status ?? 1 };
+  }
+}
+
+/** Retry on transport noise; a clean exit with empty output is a valid `null`. */
+export function runfn(...args) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const r = runOnce(...args);
+    const noisy = r.out.includes("webSocketConstructor") || r.out.includes("ProcessExitSentinel");
+    if ((r.out.trim().length > 0 || r.status === 0) && !noisy) return r;
+    sleepSync(1500 * (attempt + 1));
+  }
+  return runOnce(...args);
+}
+
+/** Read-only inline query -> extracted id/value (retries on transient empties). */
+export function iq(query) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { out } = runfn("--inline-query", query);
+    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
+    const matches = quoted && quoted.length ? quoted : out.match(/\b\d+\b/g);
+    if (matches && matches.length > 0) {
+      return matches[matches.length - 1].replace(/['"]/g, "");
+    }
+    sleepSync(1500);
+  }
+  return "";
+}
+
+/** Read-only inline query -> ALL extracted quoted doc ids (for cleanups). */
+export function iqAll(query) {
+  const { out } = runfn("--inline-query", query);
+  const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
+  if (quoted && quoted.length > 0) {
+    return quoted.map((s) => s.replace(/['"]/g, ""));
+  }
+  return [];
+}
+
+/**
+ * Read-only inline query that returns an array of `{ _id, ownerId }` objects
+ * (the shape the CLI prints with single quotes) -> [{ id, owner }, …].
+ */
+export function iqPairs(query) {
+  const { out } = runfn("--inline-query", query);
+  const ids = [...out.matchAll(/_id: '([a-z0-9]{24,})'/g)].map((m) => m[1]);
+  const owners = [...out.matchAll(/ownerId: '([^']*)'/g)].map((m) => m[1]);
+  return ids.map((idVal, i) => ({ id: idVal, owner: owners[i] ?? "" }));
+}
+
+export function check(name, expect, ...args) {
+  // The CLI occasionally prints nothing for a call that should have returned a
+  // value (transient). No scenario here expects a literal empty output, so
+  // retry once when the result comes back empty before declaring a failure.
+  let { out } = runfn(...args);
+  if (out.trim().length === 0) {
+    sleepSync(1500);
+    ({ out } = runfn(...args));
+  }
+  if (out.includes(expect)) {
+    PASS += 1;
+    logLine(`PASS  | ${name}`);
+  } else {
+    FAIL += 1;
+    FAILED.push(name);
+    logLine(`FAIL  | ${name} | expected '${expect}'`);
+    logLine(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
+  }
+}
+
+export function checkAbsent(name, absent, ...args) {
+  const { out } = runfn(...args);
+  if (out.includes(absent)) {
+    FAIL += 1;
+    FAILED.push(name);
+    logLine(`FAIL  | ${name} | must NOT contain '${absent}'`);
+    logLine(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
+  } else {
+    PASS += 1;
+    logLine(`PASS  | ${name}`);
+  }
+}
+
+/** Pass when the output matches ANY of the acceptable outcomes. */
+export function checkAny(name, accepts, ...args) {
+  let { out } = runfn(...args);
+  if (out.trim().length === 0) {
+    sleepSync(1500);
+    ({ out } = runfn(...args));
+  }
+  if (accepts.some((a) => out.includes(a))) {
+    PASS += 1;
+    logLine(`PASS  | ${name}`);
+  } else {
+    FAIL += 1;
+    FAILED.push(name);
+    logLine(`FAIL  | ${name} | expected one of ${accepts.join(" / ")}`);
+    logLine(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
+  }
+}
+
+export const id = (subject) => JSON.stringify({ subject });
+
+export function summary() {
+  logLine("");
+  logLine("─────────────────────────────────────────────────────────────");
+  logLine(`RESULT: ${PASS} passed, ${FAIL} failed`);
+  if (FAILED.length > 0) {
+    logLine(`FAILED: ${FAILED.join(", ")}`);
+  }
+  return FAIL;
+}
