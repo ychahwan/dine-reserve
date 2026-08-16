@@ -45,6 +45,8 @@ export const WAITLIST_STATUS = v.union(
 //   booking engine so the owner sees the full event stream.
 // - on_my_way / running_late / arrived / special_request are sent by the
 //   diner from their booking ("moving now" style check-ins).
+// - new_order / assist_request / menu_request are written by the dine-in
+//   experience (orders, pings to the team, and off-menu requests).
 export const NOTIFICATION_TYPE = v.union(
   v.literal("booking_created"),
   v.literal("booking_cancelled"),
@@ -52,6 +54,9 @@ export const NOTIFICATION_TYPE = v.union(
   v.literal("running_late"),
   v.literal("arrived"),
   v.literal("special_request"),
+  v.literal("new_order"),
+  v.literal("assist_request"),
+  v.literal("menu_request"),
 );
 export type NotificationType = Infer<typeof NOTIFICATION_TYPE>;
 
@@ -82,6 +87,53 @@ export const BOOKING_GUEST = v.object({
   userId: v.optional(v.id("users")),
   confirmedAt: v.number(),
 });
+
+// Lifecycle of a dine-in order placed from a booking.
+// open → preparing → served → completed (owner drives it); diner can cancel
+// while open. completed/cancelled are terminal for billing purposes.
+export const ORDER_STATUS = v.union(
+  v.literal("open"),
+  v.literal("preparing"),
+  v.literal("served"),
+  v.literal("completed"),
+  v.literal("cancelled"),
+);
+
+// One line on a dine-in order — snapshot of the menu item at order time so
+// prices stay correct even if the menu changes later.
+export const ORDER_ITEM = v.object({
+  menuItemId: v.optional(v.id("menuItems")),
+  name: v.string(),
+  priceCents: v.number(),
+  quantity: v.number(),
+  note: v.optional(v.string()),
+});
+
+// Ready-made pings a diner can send to the waiter/manager from the table.
+export const ASSIST_TEMPLATE = v.union(
+  v.literal("water"),
+  v.literal("napkins"),
+  v.literal("utensils"),
+  v.literal("order_status"),
+  v.literal("bill"),
+  v.literal("help"),
+  v.literal("custom"),
+);
+
+export const ASSIST_STATUS = v.union(
+  v.literal("open"),
+  v.literal("resolved"),
+  v.literal("cancelled"),
+);
+
+// Off-menu requests ("can you make something without peanuts?") — the owner
+// manages them in a dedicated tab.
+export const MENU_REQUEST_STATUS = v.union(
+  v.literal("new"),
+  v.literal("in_progress"),
+  v.literal("fulfilled"),
+  v.literal("declined"),
+);
 
 const schema = defineSchema(
   {
@@ -246,6 +298,8 @@ const schema = defineSchema(
       guests: v.optional(v.array(BOOKING_GUEST)),
       // day-before SMS reminder has been sent (via the daily reminders cron)
       reminderSent: v.optional(v.boolean()),
+      // diner confirmed arrival at the restaurant (timestamp)
+      checkedInAt: v.optional(v.number()),
     })
       .index("by_user", ["userId"])
       .index("by_restaurant", ["restaurantId"])
@@ -324,6 +378,55 @@ const schema = defineSchema(
       rating: v.number(), // 1..5
       text: v.optional(v.string()),
       createdAt: v.number(),
+    })
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_user", ["userId"])
+      .index("by_booking", ["bookingId"]),
+
+    // dine-in orders placed from a booking — the diner orders from the menu
+    // directly, the kitchen sees it live, and the bill is built from these.
+    dineOrders: defineTable({
+      bookingId: v.id("bookings"),
+      restaurantId: v.id("restaurants"),
+      userId: v.id("users"),
+      items: v.array(ORDER_ITEM),
+      totalCents: v.number(),
+      status: ORDER_STATUS,
+      note: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })
+      .index("by_booking", ["bookingId"])
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_user", ["userId"]),
+
+    // diner pings to the waiter/manager ("more water", "bring the bill"…).
+    // The restaurant sees them instantly (reactive) and marks them resolved.
+    assistRequests: defineTable({
+      bookingId: v.id("bookings"),
+      restaurantId: v.id("restaurants"),
+      userId: v.id("users"),
+      template: ASSIST_TEMPLATE,
+      note: v.optional(v.string()),
+      status: ASSIST_STATUS,
+      createdAt: v.number(),
+      resolvedAt: v.optional(v.number()),
+    })
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_booking", ["bookingId"])
+      .index("by_user", ["userId"]),
+
+    // "can you make me something not on the menu?" — the owner reviews these
+    // in a dedicated tab (new → in progress → fulfilled / declined).
+    menuRequests: defineTable({
+      restaurantId: v.id("restaurants"),
+      userId: v.optional(v.id("users")),
+      bookingId: v.optional(v.id("bookings")),
+      name: v.string(),
+      description: v.optional(v.string()),
+      status: MENU_REQUEST_STATUS,
+      createdAt: v.number(),
+      updatedAt: v.number(),
     })
       .index("by_restaurant", ["restaurantId"])
       .index("by_user", ["userId"])

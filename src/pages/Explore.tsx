@@ -125,6 +125,11 @@ export default function Explore() {
     [favorites],
   );
 
+  // The chosen day + party carry into the restaurant page so the diner never
+  // has to re-pick the date after choosing a restaurant.
+  const cardLink = (restaurantId: string) =>
+    `/restaurant/${restaurantId}${quickDate ? `?date=${quickDate}&party=${partySize}` : ""}`;
+
   const handleToggleFavorite = async (id: string, name: string) => {
     try {
       const res = await toggleFavorite({ restaurantId: id as never });
@@ -331,7 +336,7 @@ export default function Explore() {
             <div className="mt-3 space-y-3">
               {favorites!.map((r) => (
                 <Card key={r._id} className="group overflow-hidden rounded-2xl border-border/70 p-0">
-                  <Link to={`/restaurant/${r._id}`} className="flex items-center gap-3 p-3">
+                  <Link to={cardLink(r._id)} className="flex items-center gap-3 p-3">
                     {r.imageUrl ? (
                       <img src={r.imageUrl} alt={r.name} className="size-14 shrink-0 rounded-xl object-cover" />
                     ) : (
@@ -404,6 +409,7 @@ export default function Explore() {
               <RestaurantCard
                 key={r._id}
                 id={r._id}
+                to={cardLink(r._id)}
                 summary={summaryMap.get(r._id)}
                 date={quickDate ?? today()}
                 favorited={favoriteIds.has(r._id)}
@@ -420,12 +426,14 @@ export default function Explore() {
 /** Card loads its own data so search results re-render cheaply. */
 function RestaurantCard({
   id,
+  to,
   summary,
   date,
   favorited,
   onToggleFavorite,
 }: {
   id: string;
+  to: string;
   summary?: AvailabilitySummary;
   date: string;
   favorited: boolean;
@@ -463,7 +471,7 @@ function RestaurantCard({
 
   return (
     <Card className="group overflow-hidden rounded-2xl border-border/70 p-0 transition-all hover:-translate-y-0.5 hover:shadow-md">
-      <Link to={`/restaurant/${r._id}`} className="relative block h-36 w-full overflow-hidden">
+      <Link to={to} className="relative block h-36 w-full overflow-hidden">
         {r.imageUrl ? (
           <img
             src={r.imageUrl}
@@ -533,7 +541,7 @@ function RestaurantCard({
             <Heart className={cn("size-4", favorited && "fill-current")} />
           </button>
           <Button size="sm" asChild className="shrink-0">
-            <Link to={`/restaurant/${r._id}`}>Book</Link>
+            <Link to={to}>Book</Link>
           </Button>
         </div>
       </div>

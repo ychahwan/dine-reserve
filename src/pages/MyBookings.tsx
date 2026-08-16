@@ -1,4 +1,5 @@
 import { CustomerShell } from "@/components/CustomerShell";
+import { DiningDialog } from "@/components/DiningDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -30,6 +31,7 @@ import {
   CalendarX2,
   Car,
   Check,
+  CheckCircle2,
   Clock,
   Copy,
   MapPin,
@@ -41,6 +43,7 @@ import {
   Store,
   UserPlus,
   Users,
+  Utensils,
   type LucideIcon,
 } from "lucide-react";
 import { useMemo, useState } from "react";
@@ -98,6 +101,7 @@ export default function MyBookings() {
   const sendForBooking = useMutation(api.notifications.sendForBooking);
   const reviewable = useQuery(api.reviews.myReviewable);
   const createReview = useMutation(api.reviews.create);
+  const checkIn = useMutation(api.dining.checkIn);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   // In-app confirmation (native window.confirm is blocked in the sandboxed
@@ -122,6 +126,12 @@ export default function MyBookings() {
 
   // Invite-friends dialog (group invites)
   const [inviteBookingId, setInviteBookingId] = useState<string | null>(null);
+
+  // Dine-in dialog: order, ping the team, menu ideas, bill
+  const [dineBookingId, setDineBookingId] = useState<string | null>(null);
+  const dineBooking = dineBookingId
+    ? (bookings ?? []).find((b) => b._id === dineBookingId) ?? null
+    : null;
 
   const nowKey = `${today()}T00:00`;
   const upcoming = (bookings ?? []).filter(
@@ -194,6 +204,19 @@ export default function MyBookings() {
       const msg = e instanceof Error ? e.message : "Could not leave the waitlist.";
       setCancelError(msg);
       toast.error(msg);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleCheckIn = async (bookingId: string) => {
+    if (busyId) return;
+    setBusyId(bookingId);
+    try {
+      await checkIn({ bookingId: bookingId as never });
+      toast.success("Checked in — the restaurant knows you're here!");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not check in.");
     } finally {
       setBusyId(null);
     }
@@ -379,6 +402,7 @@ export default function MyBookings() {
                   {upcoming.map((b) => {
                     const sent = latestAlertByBooking.get(b._id);
                     const guests = b.guests ?? [];
+                    const canCheckIn = b.date === today() && !b.checkedInAt;
                     return (
                       <Card
                         key={b._id}
@@ -401,7 +425,14 @@ export default function MyBookings() {
                               <p className="truncate font-semibold">
                                 {b.restaurant?.name ?? "Restaurant"}
                               </p>
-                              <StatusBadge status={b.status} />
+                              <div className="flex shrink-0 items-center gap-1.5">
+                                {b.checkedInAt && (
+                                  <Badge className="gap-1 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+                                    <CheckCircle2 className="size-3" /> Checked in
+                                  </Badge>
+                                )}
+                                <StatusBadge status={b.status} />
+                              </div>
                             </div>
                             <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
                               <CalendarCheck2 className="size-3.5" />
@@ -423,6 +454,22 @@ export default function MyBookings() {
                                 <BellRing className="size-3" />
                                 Restaurant notified · {ALERT_LABEL[sent.type]}
                               </p>
+                            )}
+                            {canCheckIn && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="mt-2 h-8 gap-1 text-emerald-700 hover:bg-emerald-600/10 hover:text-emerald-700 dark:text-emerald-400"
+                                disabled={busyId === b._id}
+                                onClick={() => handleCheckIn(b._id)}
+                              >
+                                {busyId === b._id ? (
+                                  <Spinner className="size-3.5" />
+                                ) : (
+                                  <MapPin className="size-3.5" />
+                                )}
+                                I&apos;m here — check in
+                              </Button>
                             )}
                           </div>
                         </div>
@@ -464,6 +511,15 @@ export default function MyBookings() {
                               onClick={() => setInviteBookingId(b._id)}
                             >
                               <UserPlus className="size-3.5" /> Invite
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              title="Order, ping the team, view your bill"
+                              onClick={() => setDineBookingId(b._id)}
+                            >
+                              <Utensils className="size-3.5" /> Dine
                             </Button>
                             <Button
                               variant="ghost"
@@ -568,6 +624,14 @@ export default function MyBookings() {
           </p>
         ) : null}
       </div>
+
+      {/* Dine-in experience (order / ask / menu ideas / bill) */}
+      <DiningDialog
+        booking={dineBooking}
+        onOpenChange={(open) => {
+          if (!open) setDineBookingId(null);
+        }}
+      />
 
       {/* Confirm cancel booking */}
       <AlertDialog

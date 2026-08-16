@@ -2,19 +2,19 @@
 /**
  * Shared runner for the Kamix test suites (test-backend.mjs, test-ui-flows.mjs).
  *
- * Drives the exact Convex functions the UI calls against the live deployment
- * using `convex run` with `--identity` to simulate signed-in diners/owners.
+ * Drives the exact Convex functions the UI calls using `convex run` with
+ * `--identity` to simulate signed-in diners/owners.
  *
  * Robustness notes (this container):
  * - `convex run` occasionally returns empty output, hangs (broken WebSocket
  *   transport), or fails; every call is retried, and every call is bounded by
  *   a 25s timeout so a hung CLI can never block the suite for long.
- * - The CLI prints NOTHING for `null` results — a clean exit with empty output
- *   is a valid `null` result, so it is NOT retried at the transport level.
+ * - The CLI prints NOTHING for `null`/void results — a clean exit with empty
+ *   output is a valid result, so it is NOT retried at the transport level.
  * - The CLI occasionally prints nothing for a call that should have returned a
- *   value (transient): `iq` retries id-lookups up to 3 times, and `check`
- *   retries once when the result comes back empty (no scenario here expects a
- *   literal empty output).
+ *   value (transient). `iq`/`iqRaw`/`iqPairs` retry on empty output, `check`
+ *   retries once, and `runfnV` re-runs a mutation only when a verify query
+ *   proves the effect did NOT happen (so retrying can never duplicate rows).
  * - Every PASS/FAIL line is appended to /tmp/kamix-results.log so a platform
  *   runner-kill mid-run does not lose the results gathered so far.
  */
@@ -57,7 +57,11 @@ export function runOnce(...args) {
   }
 }
 
-/** Retry on transport noise; a clean exit with empty output is a valid `null`. */
+/**
+ * Retry on transport noise; a clean exit with empty output is treated as a
+ * valid `null`/void result (never retried here — use `runfnV` when the call
+ * MUST return a value and the effect is verifiable).
+ */
 export function runfn(...args) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const r = runOnce(...args);
@@ -68,11 +72,29 @@ export function runfn(...args) {
   return runOnce(...args);
 }
 
+/**
+ * Mutation that must have an effect: if the CLI returns empty output (a
+ * dropped/glitched call), run `verifyQuery` (an inline-query string that
+ * returns "OK" when the effect happened, anything else when not) and only
+ * re-run the mutation when the effect is proven absent. Retrying is therefore
+ * safe — it can never duplicate rows created by a lost-but-executed call.
+ */
+export function runfnV(fn, argsJson, verifyQuery, ...extra) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const r = runfn(fn, argsJson, ...extra);
+    if (r.out.trim().length > 0 && !r.out.includes("webSocketConstructor")) return r;
+    const verified = iqRaw(verifyQuery);
+    if (/['"]?OK['"]?/.test(verified.trim())) return r; // effect present — call succeeded
+    sleepSync(1500 * (attempt + 1));
+  }
+  return runfn(fn, argsJson, ...extra);
+}
+
 /** Read-only inline query -> extracted id/value (retries on transient empties). */
 export function iq(query) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
+    const quoted = out.match(/'(?:[a-z0-9]{24,})'|\"(?:[a-z0-9]{24,})\"/g);
     const matches = quoted && quoted.length ? quoted : out.match(/\b\d+\b/g);
     if (matches && matches.length > 0) {
       return matches[matches.length - 1].replace(/['"]/g, "");
@@ -82,12 +104,25 @@ export function iq(query) {
   return "";
 }
 
+/** Read-only inline query -> raw CLI output (retries on transient empties). */
+export function iqRaw(query) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { out } = runfn("--inline-query", query);
+    if (out.trim().length > 0) return out;
+    sleepSync(1500);
+  }
+  return "";
+}
+
 /** Read-only inline query -> ALL extracted quoted doc ids (for cleanups). */
 export function iqAll(query) {
-  const { out } = runfn("--inline-query", query);
-  const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
-  if (quoted && quoted.length > 0) {
-    return quoted.map((s) => s.replace(/['"]/g, ""));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { out } = runfn("--inline-query", query);
+    const quoted = out.match(/'(?:[a-z0-9]{24,})'|\"(?:[a-z0-9]{24,})\"/g);
+    if (quoted && quoted.length > 0) {
+      return quoted.map((s) => s.replace(/['"]/g, ""));
+    }
+    sleepSync(1500);
   }
   return [];
 }
@@ -95,12 +130,18 @@ export function iqAll(query) {
 /**
  * Read-only inline query that returns an array of `{ _id, ownerId }` objects
  * (the shape the CLI prints with single quotes) -> [{ id, owner }, …].
+ * Retries on empty output so a glitched call can never silently no-op a
+ * cleanup pass.
  */
 export function iqPairs(query) {
-  const { out } = runfn("--inline-query", query);
-  const ids = [...out.matchAll(/_id: '([a-z0-9]{24,})'/g)].map((m) => m[1]);
-  const owners = [...out.matchAll(/ownerId: '([^']*)'/g)].map((m) => m[1]);
-  return ids.map((idVal, i) => ({ id: idVal, owner: owners[i] ?? "" }));
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { out } = runfn("--inline-query", query);
+    const ids = [...out.matchAll(/_id: '([a-z0-9]{24,})'/g)].map((m) => m[1]);
+    const owners = [...out.matchAll(/ownerId: '([^']*)'/g)].map((m) => m[1]);
+    if (ids.length > 0) return ids.map((idVal, i) => ({ id: idVal, owner: owners[i] ?? "" }));
+    sleepSync(1500);
+  }
+  return [];
 }
 
 export function check(name, expect, ...args) {

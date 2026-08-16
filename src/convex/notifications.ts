@@ -5,7 +5,8 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
 
 // Diner-sent check-in alerts ("moving now" style). booking_created /
-// booking_cancelled are written automatically by the booking engine.
+// booking_cancelled are written automatically by the booking engine;
+// new_order / assist_request / menu_request come from the dine-in experience.
 export const DINER_ALERT_TYPES = v.union(
   v.literal("on_my_way"),
   v.literal("running_late"),
@@ -17,6 +18,9 @@ export const ALL_NOTIFICATION_TYPES = v.union(
   DINER_ALERT_TYPES,
   v.literal("booking_created"),
   v.literal("booking_cancelled"),
+  v.literal("new_order"),
+  v.literal("assist_request"),
+  v.literal("menu_request"),
 );
 
 /**
@@ -29,7 +33,16 @@ export async function notifyRestaurant(
     restaurantId: Id<"restaurants">;
     bookingId?: Id<"bookings">;
     userId: Id<"users">;
-    type: "on_my_way" | "running_late" | "arrived" | "special_request" | "booking_created" | "booking_cancelled";
+    type:
+      | "on_my_way"
+      | "running_late"
+      | "arrived"
+      | "special_request"
+      | "booking_created"
+      | "booking_cancelled"
+      | "new_order"
+      | "assist_request"
+      | "menu_request";
     message?: string;
   },
 ) {

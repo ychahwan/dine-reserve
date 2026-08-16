@@ -20,6 +20,7 @@ import {
   CalendarDays,
   CalendarPlus,
   Check,
+  CheckCircle2,
   Clock,
   Lightbulb,
   Loader2,
@@ -843,7 +844,14 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
                   </p>
                   {b.notes && <p className="mt-1.5 rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs italic text-muted-foreground">“{b.notes}”</p>}
                 </div>
-                <Badge className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">{b.status}</Badge>
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  {b.checkedInAt && (
+                    <Badge className="gap-1 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
+                      <CheckCircle2 className="size-3" /> Checked in
+                    </Badge>
+                  )}
+                  <Badge className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">{b.status}</Badge>
+                </div>
               </div>
               <Separator className="my-3" />
               <div className="flex flex-wrap gap-2">

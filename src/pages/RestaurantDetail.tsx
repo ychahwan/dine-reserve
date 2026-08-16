@@ -30,7 +30,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router";
+import { useNavigate, useParams, useSearchParams } from "react-router";
 import { cn } from "@/lib/utils";
 import {
   bookingShareText,
@@ -86,6 +86,7 @@ function groupMenuItems(items: MenuItemLike[]): [string, MenuItemLike[]][] {
 export default function RestaurantDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const { user } = useAuth();
   const data = useQuery(api.restaurants.get, { id: id as never });
   const reviewsData = useQuery(api.reviews.listForRestaurant, { restaurantId: id as never });
@@ -93,8 +94,18 @@ export default function RestaurantDetail() {
   const toggleFavorite = useMutation(api.users.toggleFavorite);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
 
-  const [date, setDate] = useState(today());
-  const [partySize, setPartySize] = useState(2);
+  // The date + party size chosen on Explore carry over via ?date=&party=, so
+  // the diner never has to re-pick the date after choosing a restaurant. The
+  // strip below still lets them change it, but it starts pre-selected.
+  const [date, setDate] = useState<string>(() => {
+    const d = searchParams.get("date");
+    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isPastDate(d)) return d;
+    return today();
+  });
+  const [partySize, setPartySize] = useState<number>(() => {
+    const p = Number(searchParams.get("party"));
+    return Number.isInteger(p) && p >= 1 && p <= 20 ? p : 2;
+  });
   const [seatPref, setSeatPref] = useState<SeatPref | null>(null);
   const [nonSmoking, setNonSmoking] = useState(false);
   const [menuTab, setMenuTab] = useState<string>("overview");

@@ -3,6 +3,12 @@ import { OwnerMenuTab } from "@/components/OwnerMenuTab";
 import { OwnerNotificationsTab } from "@/components/OwnerNotificationsTab";
 import { OwnerInsightsTab } from "@/components/OwnerInsightsTab";
 import { AvailabilityTab, BookingsTab, SlotRulesTab } from "@/components/OwnerRestaurantTabs";
+import {
+  DiningTabCount,
+  OwnerAssistsTab,
+  OwnerMenuRequestsTab,
+  OwnerOrdersTab,
+} from "@/components/OwnerDiningTabs";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -165,8 +171,11 @@ export default function OwnerRestaurant() {
             { key: "availability", label: "Availability" },
             { key: "menu", label: "Menu" },
             { key: "bookings", label: "Bookings" },
+            { key: "orders", label: "Orders", badge: "orders" as const },
+            { key: "requests", label: "Requests", badge: "assists" as const },
+            { key: "menuideas", label: "Menu ideas", badge: "menuRequests" as const },
             { key: "insights", label: "Insights" },
-            { key: "notifications", label: "Notifications", badge: true },
+            { key: "notifications", label: "Notifications", badge: "notifications" as const },
           ].map((t) => (
             <TabsTrigger
               key={t.key}
@@ -175,7 +184,12 @@ export default function OwnerRestaurant() {
             >
               {t.key === "insights" && <BarChart3 className="mr-1 size-3" />}
               {t.label}
-              {t.badge && <NotificationsBadge restaurantId={r._id} active={tab === "notifications"} />}
+              {t.badge === "notifications" && (
+                <NotificationsBadge restaurantId={r._id} active={tab === "notifications"} />
+              )}
+              {t.badge && t.badge !== "notifications" && (
+                <DiningTabCount restaurantId={r._id} kind={t.badge} />
+              )}
             </TabsTrigger>
           ))}
         </TabsList>
@@ -200,6 +214,15 @@ export default function OwnerRestaurant() {
         </TabsContent>
         <TabsContent value="bookings" className="mt-5">
           <BookingsTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="orders" className="mt-5">
+          <OwnerOrdersTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="requests" className="mt-5">
+          <OwnerAssistsTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="menuideas" className="mt-5">
+          <OwnerMenuRequestsTab restaurantId={r._id} />
         </TabsContent>
         <TabsContent value="insights" className="mt-5">
           <OwnerInsightsTab restaurantId={r._id} />

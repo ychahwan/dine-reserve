@@ -16,8 +16,11 @@ import {
   BellRing,
   Car,
   CheckCheck,
+  ChefHat,
   Clock,
+  Hand,
   Inbox,
+  Lightbulb,
   MapPin,
   Sparkles,
   Users,
@@ -38,6 +41,9 @@ const TYPE_META: Record<
   special_request: { label: "Special request", icon: Sparkles, cls: "bg-violet-600/10 text-violet-700 dark:text-violet-400" },
   booking_created: { label: "New booking", icon: BellRing, cls: "bg-primary/10 text-primary" },
   booking_cancelled: { label: "Booking cancelled", icon: BellOff, cls: "bg-destructive/10 text-destructive" },
+  new_order: { label: "New order", icon: ChefHat, cls: "bg-primary/10 text-primary" },
+  assist_request: { label: "Team request", icon: Hand, cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
+  menu_request: { label: "Off-menu request", icon: Lightbulb, cls: "bg-violet-600/10 text-violet-700 dark:text-violet-400" },
 };
 
 const DINER_ALERT_TYPES = new Set(["on_my_way", "running_late", "arrived", "special_request"]);
@@ -127,8 +133,8 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
     <div className="space-y-4 pb-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Diner check-ins (on my way, running late…) and automatic booking events —
-          tap a notification to mark it as read.
+          Diner check-ins (on my way, running late…), dine-in activity (orders, pings, off-menu
+          requests) and automatic booking events — tap a notification to mark it as read.
         </p>
         <Button
           variant="outline"
@@ -146,7 +152,7 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
         {[
           { key: "all" as const, label: `All (${items.length})` },
           { key: "alerts" as const, label: "Diner alerts" },
-          { key: "events" as const, label: "Booking events" },
+          { key: "events" as const, label: "Booking & dine-in" },
         ].map((t) => (
           <button
             key={t.key}
@@ -192,7 +198,7 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
           <Inbox className="size-8 text-muted-foreground/50" />
           <p className="text-sm text-muted-foreground">
             {items.length === 0
-              ? "No notifications yet — diner alerts and booking events will appear here."
+              ? "No notifications yet — diner alerts, dine-in activity and booking events will appear here."
               : "Nothing matches this filter."}
           </p>
         </div>
