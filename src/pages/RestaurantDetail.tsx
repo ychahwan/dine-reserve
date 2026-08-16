@@ -549,7 +549,8 @@ export default function RestaurantDetail() {
                 ) : (
                   <>
                     <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                      {formatDate(date)} — {availability.openTime} to {availability.closeTime}
+                      {showDateStrip ? `${formatDate(date)} — ` : ""}
+                      {availability.openTime} to {availability.closeTime}
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       {availableSlots.map((slot) => (
