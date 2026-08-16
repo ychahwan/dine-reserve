@@ -545,6 +545,96 @@ export const createMenuItem = mutation({
       throw new Error("Invalid spice level.");
     }
     return await ctx.db.insert("menuItems", {
-      re
+      restaurantId: menu.restaurantId,
+      menuId: args.menuId,
+      name: args.name.trim().slice(0, 100),
+      description: args.description?.trim().slice(0, 300) || undefined,
+      priceCents: Math.round(args.priceCents),
+      category: args.category?.trim().slice(0, 40) || undefined,
+      popular: args.popular ?? false,
+      available: true,
+      imageStorageId: args.imageStorageId,
+      imageUrl: args.imageUrl?.trim().slice(0, 500) || undefined,
+      tags: sanitizeTags(args.tags),
+      allergens: sanitizeTags(args.allergens),
+      spiceLevel: (args.spiceLevel as SpiceLevel) || undefined,
+    });
+  },
+});
 
-[FILE_TOO_LARGE]: The combined read_files output exceeded the 100,000 character hard limit. This file was truncated after 20,138 characters. Read it separately or use code_search for the relevant section.
+export const updateMenuItem = mutation({
+  args: {
+    id: v.id("menuItems"),
+    name: v.optional(v.string()),
+    description: v.optional(v.string()),
+    priceCents: v.optional(v.number()),
+    category: v.optional(v.string()),
+    popular: v.optional(v.boolean()),
+    available: v.optional(v.boolean()),
+    imageStorageId: v.optional(v.id("_storage")),
+    imageUrl: v.optional(v.string()),
+    removeImage: v.optional(v.boolean()),
+    tags: v.optional(v.array(v.string())),
+    allergens: v.optional(v.array(v.string())),
+    spiceLevel: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const item = await ctx.db.get(args.id);
+    if (!item) throw new Error("Item not found.");
+    await requireOwner(ctx, item.restaurantId);
+
+    if (args.priceCents !== undefined && (args.priceCents < 0 || args.priceCents > 1000000)) {
+      throw new Error("Invalid price.");
+    }
+    if (args.spiceLevel !== undefined && args.spiceLevel !== "" && !SPICE_VALUES.includes(args.spiceLevel as SpiceLevel)) {
+      throw new Error("Invalid spice level.");
+    }
+
+    // photo transitions: replace/remove uploaded files and clear the paired field
+    let imageStorageId = item.imageStorageId;
+    let imageUrl = item.imageUrl;
+    if (args.removeImage) {
+      await deleteItemImage(ctx, item);
+      imageStorageId = undefined;
+      imageUrl = undefined;
+    } else if (args.imageStorageId !== undefined) {
+      if (item.imageStorageId && item.imageStorageId !== args.imageStorageId) await deleteItemImage(ctx, item);
+      imageStorageId = args.imageStorageId;
+      imageUrl = undefined;
+    } else if (args.imageUrl !== undefined && args.imageUrl.trim() !== "") {
+      if (item.imageStorageId) await deleteItemImage(ctx, item);
+      imageStorageId = undefined;
+      imageUrl = args.imageUrl.trim().slice(0, 500);
+    }
+
+    await ctx.db.patch(args.id, {
+      name: args.name !== undefined && args.name.trim() !== "" ? args.name.trim().slice(0, 100) : item.name,
+      description:
+        args.description !== undefined ? (args.description.trim().slice(0, 300) || undefined) : item.description,
+      priceCents: args.priceCents !== undefined ? Math.round(args.priceCents) : item.priceCents,
+      category: args.category !== undefined ? (args.category.trim().slice(0, 40) || undefined) : item.category,
+      popular: args.popular !== undefined ? args.popular : (item.popular ?? false),
+      available: args.available !== undefined ? args.available : item.available,
+      tags: args.tags !== undefined ? sanitizeTags(args.tags) : item.tags,
+      allergens: args.allergens !== undefined ? sanitizeTags(args.allergens) : item.allergens,
+      spiceLevel:
+        args.spiceLevel !== undefined ? ((args.spiceLevel as SpiceLevel) || undefined) : item.spiceLevel,
+      imageStorageId,
+      imageUrl,
+    });
+    return await ctx.db.get(args.id);
+  },
+});
+
+export const deleteMenuItem = mutation({
+  args: { id: v.id("menuItems") },
+  handler: async (ctx, { id }) => {
+    const item = await ctx.db.get(id);
+    if (!item) throw new Error("Item not found.");
+    await requireOwner(ctx, item.restaurantId);
+    await deleteItemImage(ctx, item);
+    await ctx.db.delete(id);
+  },
+});
+
+export type MenuItem = Doc<"menuItems">;
