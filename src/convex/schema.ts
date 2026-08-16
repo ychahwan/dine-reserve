@@ -100,13 +100,17 @@ export const ORDER_STATUS = v.union(
 );
 
 // One line on a dine-in order — snapshot of the menu item at order time so
-// prices stay correct even if the menu changes later.
+// prices stay correct even if the menu changes later. ingredients is the
+// restaurant's list at order time; removeIngredients is what the diner asked
+// the kitchen to leave out (the customization).
 export const ORDER_ITEM = v.object({
   menuItemId: v.optional(v.id("menuItems")),
   name: v.string(),
   priceCents: v.number(),
   quantity: v.number(),
   note: v.optional(v.string()),
+  ingredients: v.optional(v.array(v.string())),
+  removeIngredients: v.optional(v.array(v.string())),
 });
 
 // Ready-made pings a diner can send to the waiter/manager from the table.
@@ -266,6 +270,9 @@ const schema = defineSchema(
       tags: v.optional(v.array(v.string())),
       // allergens (EU Big-14 set + common additions)
       allergens: v.optional(v.array(v.string())),
+      // the dish's ingredients as defined by the restaurant — diners can
+      // remove any of these when they customize their order at the table
+      ingredients: v.optional(v.array(v.string())),
       // mild | medium | hot | very_hot
       spiceLevel: v.optional(
         v.union(v.literal("mild"), v.literal("medium"), v.literal("hot"), v.literal("very_hot")),

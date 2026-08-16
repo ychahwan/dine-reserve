@@ -17,7 +17,7 @@ const SPICE_VALUES: SpiceLevel[] = ["mild", "medium", "hot", "very_hot"];
 const MAX_TAGS = 12;
 const MAX_TAG_LEN = 40;
 
-/** Trim, dedupe, and cap an attribute list (tags / allergens). */
+/** Trim, dedupe, and cap an attribute list (tags / allergens / ingredients). */
 function sanitizeTags(tags?: string[]): string[] | undefined {
   if (tags === undefined) return undefined;
   const seen = new Set<string>();
@@ -533,6 +533,7 @@ export const createMenuItem = mutation({
     imageUrl: v.optional(v.string()),
     tags: v.optional(v.array(v.string())),
     allergens: v.optional(v.array(v.string())),
+    ingredients: v.optional(v.array(v.string())),
     spiceLevel: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -557,6 +558,7 @@ export const createMenuItem = mutation({
       imageUrl: args.imageUrl?.trim().slice(0, 500) || undefined,
       tags: sanitizeTags(args.tags),
       allergens: sanitizeTags(args.allergens),
+      ingredients: sanitizeTags(args.ingredients),
       spiceLevel: (args.spiceLevel as SpiceLevel) || undefined,
     });
   },
@@ -576,6 +578,7 @@ export const updateMenuItem = mutation({
     removeImage: v.optional(v.boolean()),
     tags: v.optional(v.array(v.string())),
     allergens: v.optional(v.array(v.string())),
+    ingredients: v.optional(v.array(v.string())),
     spiceLevel: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
@@ -617,6 +620,7 @@ export const updateMenuItem = mutation({
       available: args.available !== undefined ? args.available : item.available,
       tags: args.tags !== undefined ? sanitizeTags(args.tags) : item.tags,
       allergens: args.allergens !== undefined ? sanitizeTags(args.allergens) : item.allergens,
+      ingredients: args.ingredients !== undefined ? sanitizeTags(args.ingredients) : item.ingredients,
       spiceLevel:
         args.spiceLevel !== undefined ? ((args.spiceLevel as SpiceLevel) || undefined) : item.spiceLevel,
       imageStorageId,

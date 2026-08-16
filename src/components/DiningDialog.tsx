@@ -21,6 +21,7 @@ import {
   Hand,
   MapPin,
   Minus,
+  Pencil,
   Plus,
   Receipt,
   Send,
@@ -60,6 +61,7 @@ type MenuItemLike = {
   category?: string;
   available: boolean;
   tags?: string[];
+  ingredients?: string[];
 };
 
 type OrderLine = {
@@ -68,6 +70,8 @@ type OrderLine = {
   priceCents: number;
   quantity: number;
   note?: string;
+  ingredients?: string[];
+  removeIngredients?: string[];
 };
 
 type OrderLike = {
@@ -77,6 +81,22 @@ type OrderLike = {
   totalCents: number;
   note?: string;
   createdAt: number;
+};
+
+type BillLineLike = {
+  name: string;
+  quantity: number;
+  priceCents: number;
+  lineTotal: number;
+  removeIngredients?: string[];
+  note?: string;
+};
+
+/** A cart line: quantity + per-item customization (ingredients to drop, note). */
+type CartEntry = {
+  qty: number;
+  removed: string[];
+  note?: string;
 };
 
 /** Epoch-millisecond timestamp -> "5:30 PM" (formatTime only takes "HH:mm" strings). */
@@ -119,11 +139,20 @@ function groupItems(items: MenuItemLike[]): [string, MenuItemLike[]][] {
   return [...map.entries()];
 }
 
+/** "No onion, no garlic" style summary for a customized line. */
+function removalSummary(removed: string[] | undefined, note?: string): string | null {
+  const parts: string[] = [];
+  if (removed && removed.length > 0) parts.push(`no ${removed.join(", no ")}`);
+  if (note && note.trim()) parts.push(note.trim());
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 /**
- * The dine-in experience for one booking: order from the menu, ping the
- * waiter/manager, ask for something off-menu, and view the saved bill.
- * Everything is reactive — the restaurant's screens update the instant the
- * diner acts, and this dialog updates the instant the kitchen responds.
+ * The dine-in experience for one booking: order from the menu (with per-dish
+ * customization), ping the waiter/manager, ask for something off-menu, and
+ * view the saved bill. Everything is reactive — the restaurant's screens
+ * update the instant the diner acts, and this dialog updates the instant the
+ * kitchen responds.
  */
 export function DiningDialog({
   booking,
@@ -161,9 +190,10 @@ export function DiningDialog({
   const createMenuRequest = useMutation(api.dining.createMenuRequest);
 
   const [tab, setTab] = useState<"order" | "assist" | "menu" | "bill">("order");
-  const [cart, setCart] = useState<Record<string, number>>({});
+  const [cart, setCart] = useState<Record<string, CartEntry>>({});
   const [orderNote, setOrderNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
+  const [customizing, setCustomizing] = useState<{ item: MenuItemLike; existing?: CartEntry } | null>(null);
 
   const [assistTemplate, setAssistTemplate] = useState("water");
   const [assistNote, setAssistNote] = useState("");
@@ -178,6 +208,7 @@ export function DiningDialog({
     setAssistNote("");
     setMenuName("");
     setMenuDesc("");
+    setCustomizing(null);
   }, [booking?._id]);
 
   const allItems = useMemo(
@@ -190,22 +221,42 @@ export function DiningDialog({
   );
   const grouped = useMemo(() => groupItems(availableItems), [availableItems]);
 
-  const cartCount = Object.values(cart).reduce((s, n) => s + n, 0);
-  const cartTotal = Object.entries(cart).reduce((sum, [id, qty]) => {
+  const cartCount = Object.values(cart).reduce((s, e) => s + e.qty, 0);
+  const cartTotal = Object.entries(cart).reduce((sum, [id, entry]) => {
     const item = availableItems.find((i) => i._id === id);
-    return sum + (item?.priceCents ?? 0) * qty;
+    return sum + (item?.priceCents ?? 0) * entry.qty;
   }, 0);
 
   const isToday = booking?.date === today();
 
-  const bump = (id: string, delta: number) => {
+  /** Open the customize sheet for an item, or add directly when it has no ingredients. */
+  const handleAdd = (item: MenuItemLike) => {
+    if (item.ingredients && item.ingredients.length > 0) {
+      setCustomizing({ item, existing: cart[item._id] });
+    } else {
+      setCart((c) => {
+        const prev = c[item._id] ?? { qty: 0, removed: [] };
+        return { ...c, [item._id]: { ...prev, qty: prev.qty + 1 } };
+      });
+    }
+  };
+
+  /** Stepper +/- on a cart line keeps its customization. */
+  const bumpQty = (id: string, delta: number) => {
     setCart((c) => {
+      const prev = c[id];
+      if (!prev) return c;
+      const qty = prev.qty + delta;
       const next = { ...c };
-      const qty = (next[id] ?? 0) + delta;
       if (qty <= 0) delete next[id];
-      else next[id] = qty;
+      else next[id] = { ...prev, qty };
       return next;
     });
+  };
+
+  const confirmCustomize = (item: MenuItemLike, entry: CartEntry) => {
+    setCart((c) => ({ ...c, [item._id]: entry }));
+    setCustomizing(null);
   };
 
   const handleCheckIn = async () => {
@@ -227,9 +278,11 @@ export function DiningDialog({
     try {
       await placeOrder({
         bookingId: booking._id as never,
-        items: Object.entries(cart).map(([menuItemId, quantity]) => ({
+        items: Object.entries(cart).map(([menuItemId, entry]) => ({
           menuItemId: menuItemId as never,
-          quantity,
+          quantity: entry.qty,
+          removeIngredients: entry.removed.length > 0 ? entry.removed : undefined,
+          note: entry.note?.trim() || undefined,
         })),
         note: orderNote.trim() || undefined,
       });
@@ -312,7 +365,7 @@ export function DiningDialog({
   };
 
   const cartItems = Object.entries(cart)
-    .map(([id, qty]) => ({ item: availableItems.find((i) => i._id === id), qty }))
+    .map(([id, entry]) => ({ item: availableItems.find((i) => i._id === id), entry }))
     .filter((x) => x.item);
 
   return (
@@ -405,15 +458,22 @@ export function DiningDialog({
                         </span>
                       </div>
                       <div className="mt-2 space-y-1">
-                        {o.items.map((line, i) => (
-                          <div key={i} className="flex items-center justify-between text-sm">
-                            <span className="text-muted-foreground">
-                              {line.quantity}× {line.name}
-                              {line.note ? <span className="ml-1 text-xs italic">({line.note})</span> : null}
-                            </span>
-                            <span className="font-medium">{formatPrice(line.priceCents * line.quantity)}</span>
-                          </div>
-                        ))}
+                        {o.items.map((line, i) => {
+                          const summary = removalSummary(line.removeIngredients, line.note);
+                          return (
+                            <div key={i} className="flex items-center justify-between gap-2 text-sm">
+                              <span className="min-w-0 text-muted-foreground">
+                                {line.quantity}× {line.name}
+                                {summary ? (
+                                  <span className="ml-1 block text-xs italic">
+                                    ({summary})
+                                  </span>
+                                ) : null}
+                              </span>
+                              <span className="shrink-0 font-medium">{formatPrice(line.priceCents * line.quantity)}</span>
+                            </div>
+                          );
+                        })}
                       </div>
                       <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2">
                         <span className="text-xs text-muted-foreground">
@@ -464,7 +524,9 @@ export function DiningDialog({
                     </div>
                     <div className="mt-2 space-y-2">
                       {items.map((item) => {
-                        const qty = cart[item._id] ?? 0;
+                        const entry = cart[item._id];
+                        const customizable = (item.ingredients ?? []).length > 0;
+                        const summary = entry ? removalSummary(entry.removed, entry.note) : null;
                         return (
                           <div
                             key={item._id}
@@ -488,25 +550,41 @@ export function DiningDialog({
                                   </span>
                                 ))}
                               </div>
+                              {summary && (
+                                <p className="mt-1 text-[11px] italic text-muted-foreground">
+                                  {summary}
+                                </p>
+                              )}
                             </div>
-                            {qty === 0 ? (
+                            {!entry ? (
                               <Button
                                 size="sm"
                                 variant="outline"
                                 className="shrink-0"
-                                onClick={() => bump(item._id, 1)}
+                                onClick={() => handleAdd(item)}
                               >
-                                <Plus className="size-3.5" /> Add
+                                <Plus className="size-3.5" /> {customizable ? "Customize" : "Add"}
                               </Button>
                             ) : (
-                              <div className="flex shrink-0 items-center gap-2">
-                                <Button variant="outline" size="icon-sm" onClick={() => bump(item._id, -1)}>
+                              <div className="flex shrink-0 items-center gap-1.5">
+                                <Button variant="outline" size="icon-sm" onClick={() => bumpQty(item._id, -1)}>
                                   <Minus className="size-3.5" />
                                 </Button>
-                                <span className="w-5 text-center text-sm font-semibold">{qty}</span>
-                                <Button size="icon-sm" onClick={() => bump(item._id, 1)}>
+                                <span className="w-5 text-center text-sm font-semibold">{entry.qty}</span>
+                                <Button size="icon-sm" onClick={() => bumpQty(item._id, 1)}>
                                   <Plus className="size-3.5" />
                                 </Button>
+                                {customizable && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    aria-label="Customize"
+                                    className="text-muted-foreground"
+                                    onClick={() => setCustomizing({ item, existing: entry })}
+                                  >
+                                    <Pencil className="size-3.5" />
+                                  </Button>
+                                )}
                               </div>
                             )}
                           </div>
@@ -528,12 +606,18 @@ export function DiningDialog({
                   <span className="text-base font-bold">{formatPrice(cartTotal)}</span>
                 </div>
                 <div className="mt-2 space-y-1.5">
-                  {cartItems.map(({ item, qty }) => (
-                    <div key={item!._id} className="flex items-center justify-between text-xs text-muted-foreground">
-                      <span>{qty}× {item!.name}</span>
-                      <span>{formatPrice(item!.priceCents * qty)}</span>
-                    </div>
-                  ))}
+                  {cartItems.map(({ item, entry }) => {
+                    const summary = removalSummary(entry.removed, entry.note);
+                    return (
+                      <div key={item!._id} className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                        <span className="min-w-0">
+                          {entry.qty}× {item!.name}
+                          {summary ? <span className="block text-[10px] italic">({summary})</span> : null}
+                        </span>
+                        <span className="shrink-0">{formatPrice(item!.priceCents * entry.qty)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
                 <div className="mt-2 space-y-1.5">
                   <Label htmlFor="order-note" className="text-xs text-muted-foreground">
@@ -744,15 +828,21 @@ export function DiningDialog({
               <>
                 <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
                   <div className="divide-y divide-border/60">
-                    {bill.lines.map((line) => (
-                      <div key={line.name} className="flex items-center justify-between px-3.5 py-2.5 text-sm">
-                        <span className="min-w-0 flex-1 text-muted-foreground">
-                          {line.name}
-                          <span className="ml-1.5 text-xs">× {line.quantity}</span>
-                        </span>
-                        <span className="font-medium">{formatPrice(line.lineTotal)}</span>
-                      </div>
-                    ))}
+                    {bill.lines.map((line: BillLineLike) => {
+                      const summary = removalSummary(line.removeIngredients, line.note);
+                      return (
+                        <div key={`${line.name}-${summary ?? "plain"}`} className="flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm">
+                          <span className="min-w-0 flex-1 text-muted-foreground">
+                            {line.name}
+                            <span className="ml-1.5 text-xs">× {line.quantity}</span>
+                            {summary ? (
+                              <span className="block text-[11px] italic">({summary})</span>
+                            ) : null}
+                          </span>
+                          <span className="shrink-0 font-medium">{formatPrice(line.lineTotal)}</span>
+                        </div>
+                      );
+                    })}
                   </div>
                   <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3.5 py-3">
                     <span className="text-sm font-semibold">Total ({bill.orderCount} order{bill.orderCount === 1 ? "" : "s"})</span>
@@ -777,6 +867,147 @@ export function DiningDialog({
             <BellRing className="size-3" /> Live — updates arrive instantly
           </span>
         </div>
+      </DialogContent>
+
+      {/* Customize dialog (nested): pick what to leave out of each dish */}
+      <CustomizeDialog
+        open={customizing !== null}
+        item={customizing?.item ?? null}
+        initial={customizing?.existing}
+        onClose={() => setCustomizing(null)}
+        onConfirm={(entry) => {
+          if (customizing) confirmCustomize(customizing.item, entry);
+        }}
+      />
+    </Dialog>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Customize dialog — ingredient removals + note + quantity
+// ---------------------------------------------------------------------------
+
+function CustomizeDialog({
+  open,
+  item,
+  initial,
+  onClose,
+  onConfirm,
+}: {
+  open: boolean;
+  item: MenuItemLike | null;
+  initial?: CartEntry;
+  onClose: () => void;
+  onConfirm: (entry: CartEntry) => void;
+}) {
+  const [qty, setQty] = useState(1);
+  const [removed, setRemoved] = useState<string[]>([]);
+  const [note, setNote] = useState("");
+
+  // Reset local state whenever the dialog targets a different item.
+  useEffect(() => {
+    if (!open) return;
+    setQty(initial?.qty ?? 1);
+    setRemoved(initial?.removed ?? []);
+    setNote(initial?.note ?? "");
+  }, [open, item?._id, initial]);
+
+  const ingredients = item?.ingredients ?? [];
+
+  const toggleRemoved = (ing: string) =>
+    setRemoved((prev) =>
+      prev.includes(ing) ? prev.filter((i) => i !== ing) : [...prev, ing],
+    );
+
+  const handleConfirm = () => {
+    if (!item || qty < 1) return;
+    onConfirm({ qty, removed, note: note.trim() || undefined });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle className="tracking-tight">Customize {item?.name ?? ""}</DialogTitle>
+          <DialogDescription>
+            Tap any ingredient to leave it out — the kitchen sees exactly what you want.
+          </DialogDescription>
+        </DialogHeader>
+
+        {item && (
+          <div className="space-y-4">
+            <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3.5 py-2.5">
+              <span className="text-sm font-semibold">{formatPrice(item.priceCents)}</span>
+              <span className="flex items-center gap-2">
+                <Button variant="outline" size="icon-sm" onClick={() => setQty((q) => Math.max(1, q - 1))}>
+                  <Minus className="size-3.5" />
+                </Button>
+                <span className="w-5 text-center text-sm font-semibold">{qty}</span>
+                <Button size="icon-sm" onClick={() => setQty((q) => Math.min(20, q + 1))}>
+                  <Plus className="size-3.5" />
+                </Button>
+              </span>
+            </div>
+
+            {ingredients.length > 0 ? (
+              <div>
+                <p className="text-sm font-medium">Leave something out?</p>
+                <p className="mb-1.5 text-[11px] text-muted-foreground">
+                  Tap an ingredient to remove it from this dish.
+                </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {ingredients.map((ing) => {
+                    const off = removed.includes(ing);
+                    return (
+                      <button
+                        key={ing}
+                        type="button"
+                        onClick={() => toggleRemoved(ing)}
+                        className={cn(
+                          "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                          off
+                            ? "border-destructive/40 bg-destructive/10 text-destructive line-through"
+                            : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                        )}
+                      >
+                        {off ? "No " : ""}
+                        {ing}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                No ingredient list on this one — add a note below if you&apos;d like to change something.
+              </p>
+            )}
+
+            <div className="space-y-1.5">
+              <Label htmlFor="customize-note" className="text-xs text-muted-foreground">
+                Extra instructions <span className="font-normal">(optional)</span>
+              </Label>
+              <Textarea
+                id="customize-note"
+                rows={2}
+                value={note}
+                maxLength={120}
+                onChange={(e) => setNote(e.target.value)}
+                placeholder="e.g. Extra parmesan on the side"
+              />
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="outline" className="flex-1" onClick={onClose}>
+                Cancel
+              </Button>
+              <Button className="flex-1" onClick={handleConfirm}>
+                <Plus className="size-4" /> Add {qty > 1 ? `${qty} ` : ""}to order ·{" "}
+                {formatPrice(item.priceCents * qty)}
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

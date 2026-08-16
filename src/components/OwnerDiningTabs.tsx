@@ -68,7 +68,7 @@ type BookingBrief = {
 type OrderWithMeta = {
   _id: string;
   status: "open" | "preparing" | "served" | "completed" | "cancelled";
-  items: { name: string; priceCents: number; quantity: number; note?: string }[];
+  items: { name: string; priceCents: number; quantity: number; note?: string; ingredients?: string[]; removeIngredients?: string[] }[];
   totalCents: number;
   note?: string;
   createdAt: number;
@@ -96,6 +96,16 @@ type MenuReqWithMeta = {
   dinerName: string;
   booking: BookingBrief;
 };
+
+/** "no onion · extra parmesan" style summary for a customized order line. */
+function lineSummary(line: { removeIngredients?: string[]; note?: string }): string | null {
+  const parts: string[] = [];
+  if (line.removeIngredients && line.removeIngredients.length > 0) {
+    parts.push(`no ${line.removeIngredients.join(", no ")}`);
+  }
+  if (line.note && line.note.trim()) parts.push(line.note.trim());
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
 
 /** Live badge count for the tab bar (Orders / Requests / Menu ideas). */
 export function DiningTabCount({ restaurantId, kind }: { restaurantId: string; kind: "orders" | "assists" | "menuRequests" }) {
@@ -218,15 +228,20 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
                 </div>
 
                 <div className="mt-3 space-y-1 rounded-xl bg-muted/40 p-3">
-                  {o.items.map((line, i) => (
-                    <div key={i} className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">
-                        {line.quantity}× {line.name}
-                        {line.note ? <span className="ml-1 text-xs italic">({line.note})</span> : null}
-                      </span>
-                      <span className="font-medium">{formatPrice(line.priceCents * line.quantity)}</span>
-                    </div>
-                  ))}
+                  {o.items.map((line, i) => {
+                    const summary = lineSummary(line);
+                    return (
+                      <div key={i} className="flex items-center justify-between gap-2 text-sm">
+                        <span className="min-w-0 text-muted-foreground">
+                          {line.quantity}× {line.name}
+                          {summary && (
+                            <span className="block text-xs italic">{summary}</span>
+                          )}
+                        </span>
+                        <span className="shrink-0 font-medium">{formatPrice(line.priceCents * line.quantity)}</span>
+                      </div>
+                    );
+                  })}
                   {o.note && (
                     <p className="border-t border-border/60 pt-1.5 text-xs italic text-muted-foreground">
                       “{o.note}”

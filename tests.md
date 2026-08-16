@@ -33,7 +33,7 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | B-7 | Restaurant detail | `restaurants:get` for Trullo | Sections, hours, menu groups with items, rating object | ✅ Pass |
 | B-8 | Availability per date | `availability:forDate` Trullo today | Sections with slot times + remaining seats | ✅ Pass |
 | B-9 | Explore page | `/explore` signed-in; filter chips, search box | Results update live; favorites heart + rating shown | ✅ Pass · UI-flow |
-| B-10 | Menu display | Open any restaurant from Explore | Photos, dietary badges, ⚠ allergen rows, 🌶 spice shown per item | ✅ Pass · UI-flow |
+| B-10 | Menu display | Open any restaurant from Explore | Photos, dietary badges, ⚠ allergen rows, 🌶 spice, ingredient lists shown per item | ✅ Pass · UI-flow |
 | B-11 | Date carries into detail | Explore → pick date + party → open a restaurant | Detail booking sheet opens **pre-filled** with the chosen date/party; the date is not asked again | ✅ Pass (code path) |
 
 ## C. Booking engine — the no-overbooking guarantee (automated)
@@ -74,7 +74,7 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | E-5 | Claim demo restaurant | `restaurants:claimDemo` on Trullo (seatly demo owner) | Ownership transfers; bookings + notifications appear | ✅ Pass |
 | E-6 | Claim a real restaurant | `restaurants:claimDemo` on user-owned Paris venue | Rejected: "can't be claimed" | ✅ Pass |
 | E-7 | Owner tabs | Owner → restaurant → Overview / Bookings / Waitlist / Menu / Notifications / Insights | Tabs render; bookings default to **All** | ⚠️ Not run |
-| E-8 | Menu editor | Owner → Menu tab → edit/add item | Photo upload or URL, dietary/allergen/spice chips, hide/show toggle | ✅ Pass · UI-flow |
+| E-8 | Menu editor | Owner → Menu tab → edit/add item | Photo upload or URL, dietary/allergen/spice chips, **ingredients list**, hide/show toggle | ✅ Pass · UI-flow |
 
 ## F. Reviews (automated + manual)
 
@@ -106,10 +106,11 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | H-2 | Order from the table | Diner orders from the live menu (2× carbonara) without any assistant | Order `open`, per-line price snapshot, total 2900; empty order rejected | ✅ Pass |
 | H-3 | Owner sees live orders | `dining:restaurantOrders` as owner vs a random diner | Owner sees the order with diner name; non-owner gets `[]` (no data leak) | ✅ Pass |
 | H-4 | Kitchen status flow | Owner `dining:updateOrderStatus` preparing → served → completed | Each status persisted on the order | ✅ Pass |
-| H-5 | Bill at the table | `dining:billForBooking` for the checked-in booking | Itemized lines, total 2900, `paid: false` (payments land later via Stripe) | ✅ Pass |
+| H-5 | Bill at the table | `dining:billForBooking` for the checked-in booking | Itemized lines, total, `paid: false` (payments land later via Stripe) | ✅ Pass |
 | H-6 | Ping waiter/manager | Diner `dining:sendAssist` with template "water" + note | Owner sees the ping on the restaurant, marks it `resolved` (resolvedAt set) | ✅ Pass |
 | H-7 | Off-menu request | Diner `dining:createMenuRequest` ("Matcha latte, oat milk") | Owner sees it in the requests tab, marks it `fulfilled` | ✅ Pass |
 | H-8 | Security guards | Signed-out `placeOrder`; diner cancels someone else's order | Both rejected ("sign in" / "cannot cancel") | ✅ Pass |
+| H-9 | Ingredients + order customization | Owner defines each dish's `ingredients`; diner orders with `removeIngredients` ("no Pecorino romano") + per-line note | Ingredients saved; line snapshots the list AND the removal; unknown removal rejected ("isn't an ingredient"); owner's order view and the itemized bill carry the customization | ✅ Pass |
 
 ---
 
@@ -122,3 +123,4 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | 2 | 2026-08-14 | UI-flow suite: **31/31** — all green (data paths for B-9/B-10/C-7/C-10/D-6/D-7/E-8/F-6/G-5/G-6) |
 | 2 | 2026-08-14 | Remaining manual: A-1…A-5 (auth/routing) + E-7 (owner tabs rendering) — pure browser click-throughs |
 | 3 | 2026-08-16 | Backend suite: P1 **28/28** · P2 **12/12** · P3 **10/10** · P4 **21/21** (71 total) — all green. P4 covers the new dine-in surface (H-1…H-8: check-in, orders, bill, waiter pings, off-menu requests, guards). B-11 (date carries into detail) verified via code path. |
+| 4 | 2026-08-16 | Backend suite: P1 **28/28** · P2 **12/12** · P3 **10/10** · P4 **27/27** (77 total) — all green. P4 adds **H-9** (restaurant-defined ingredients + diner order customization: removals validated, snapshotted, visible to the kitchen and on the bill). E-8/B-10 now also cover the ingredient list. |

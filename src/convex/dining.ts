@@ -45,6 +45,35 @@ async function isOwnerOf(
   return !!restaurant && restaurant.ownerId === userId;
 }
 
+/**
+ * Validate a diner's ingredient removals against the dish's real ingredient
+ * list (case-insensitive, original casing kept). Unknown names are rejected so
+ * the kitchen never gets a request the menu can't honour — and the intent is
+ * never silently dropped.
+ */
+function sanitizeRemovals(
+  removals: string[] | undefined,
+  ingredients: string[] | undefined,
+  dishName: string,
+): string[] {
+  if (!removals || removals.length === 0) return [];
+  const allowed = new Map((ingredients ?? []).map((i) => [i.toLowerCase(), i]));
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of removals) {
+    const key = raw.trim().toLowerCase();
+    if (!key || seen.has(key)) continue;
+    const canonical = allowed.get(key);
+    if (!canonical) {
+      throw new Error(`“${raw.trim()}” isn't an ingredient of ${dishName}.`);
+    }
+    seen.add(key);
+    out.push(canonical);
+    if (out.length >= 20) break;
+  }
+  return out;
+}
+
 const ASSIST_LABEL: Record<string, string> = {
   water: "💧 More water",
   napkins: "🧻 More napkins",
@@ -90,9 +119,11 @@ export const checkIn = mutation({
 
 /**
  * Diner places an order for one of their confirmed bookings. Menu items are
- * snapshotted (name + price at order time) so the bill stays correct even if
- * the menu changes later. The kitchen sees it live via the reactive
- * restaurantOrders query.
+ * snapshotted (name, price, ingredients at order time) so the bill stays
+ * correct even if the menu changes later. Per line, the diner can customise
+ * the dish: remove any ingredient from the restaurant's list (validated
+ * against the item) and/or add a note. The kitchen sees it live via the
+ * reactive restaurantOrders query.
  */
 export const placeOrder = mutation({
   args: {
@@ -102,6 +133,7 @@ export const placeOrder = mutation({
         menuItemId: v.id("menuItems"),
         quantity: v.number(),
         note: v.optional(v.string()),
+        removeIngredients: v.optional(v.array(v.string())),
       }),
     ),
     note: v.optional(v.string()),
@@ -127,6 +159,8 @@ export const placeOrder = mutation({
       priceCents: number;
       quantity: number;
       note?: string;
+      ingredients?: string[];
+      removeIngredients?: string[];
     }[] = [];
     let totalCents = 0;
     for (let i = 0; i < items.length; i++) {
@@ -137,12 +171,15 @@ export const placeOrder = mutation({
       }
       if (!item.available) throw new Error(`"${item.name}" is currently unavailable.`);
       const qty = items[i]!.quantity;
+      const removed = sanitizeRemovals(items[i]!.removeIngredients, item.ingredients, item.name);
       lineItems.push({
         menuItemId: item._id,
         name: item.name,
         priceCents: item.priceCents,
         quantity: qty,
         note: items[i]!.note?.trim().slice(0, 120) || undefined,
+        ingredients: item.ingredients && item.ingredients.length > 0 ? item.ingredients : undefined,
+        removeIngredients: removed.length > 0 ? removed : undefined,
       });
       totalCents += item.priceCents * qty;
     }
@@ -266,8 +303,10 @@ export const cancelOrder = mutation({
 
 /**
  * The saved bill for a booking: line items aggregated from every non-cancelled
- * order. Payment (cards/wallets) is wired later — for now the bill is shown to
- * the diner and the restaurant, and the total is stored.
+ * order. Customised lines (e.g. "Carbonara — no pecorino") are grouped
+ * separately from the plain version. Payment (cards/wallets) is wired later —
+ * for now the bill is shown to the diner and the restaurant, and the total is
+ * stored.
  */
 export const billForBooking = query({
   args: { bookingId: v.id("bookings") },
@@ -285,17 +324,28 @@ export const billForBooking = query({
       .collect();
     const billable = orders.filter((o) => o.status !== "cancelled");
 
-    // aggregate identical lines across orders into one bill row
-    const linesMap = new Map<string, { name: string; quantity: number; priceCents: number }>();
+    // aggregate identical lines across orders into one bill row; a different
+    // customization (removals/note) makes it a distinct row
+    const linesMap = new Map<
+      string,
+      { name: string; quantity: number; priceCents: number; removeIngredients?: string[]; note?: string }
+    >();
     let totalCents = 0;
     for (const o of billable) {
       for (const line of o.items) {
-        const key = line.name.toLowerCase();
+        const removed = line.removeIngredients ?? [];
+        const key = `${line.name.toLowerCase()}|${removed.slice().sort().join(",")}|${(line.note ?? "").toLowerCase()}`;
         const existing = linesMap.get(key);
         if (existing) {
           existing.quantity += line.quantity;
         } else {
-          linesMap.set(key, { name: line.name, quantity: line.quantity, priceCents: line.priceCents });
+          linesMap.set(key, {
+            name: line.name,
+            quantity: line.quantity,
+            priceCents: line.priceCents,
+            removeIngredients: removed.length > 0 ? removed : undefined,
+            note: line.note,
+          });
         }
         totalCents += line.priceCents * line.quantity;
       }

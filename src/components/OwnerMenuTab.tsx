@@ -37,6 +37,7 @@ export type OwnerMenuItem = {
   imageUrl?: string;
   tags?: string[];
   allergens?: string[];
+  ingredients?: string[];
   spiceLevel?: string;
 };
 
@@ -48,6 +49,7 @@ export type OwnerMenuDoc = {
 };
 
 const MAX_PHOTO_BYTES = 5 * 1024 * 1024; // 5 MB
+const MAX_INGREDIENTS = 12;
 
 // ---------------------------------------------------------------------------
 // Main tab
@@ -189,6 +191,7 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
 
   const tags = item.tags ?? [];
   const allergens = item.allergens ?? [];
+  const ingredients = item.ingredients ?? [];
   const spice = item.spiceLevel ? spiceLabel(item.spiceLevel) : null;
 
   return (
@@ -230,6 +233,11 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
             )}
           </div>
         )}
+        {ingredients.length > 0 && (
+          <p className="mt-1 truncate text-[11px] text-muted-foreground" title={ingredients.join(", ")}>
+            🥘 {ingredients.join(", ")}
+          </p>
+        )}
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <button
@@ -257,7 +265,7 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
 }
 
 // ---------------------------------------------------------------------------
-// Add / edit dialog (photo + attributes)
+// Add / edit dialog (photo + attributes + ingredients)
 // ---------------------------------------------------------------------------
 
 function ItemFormDialog({
@@ -280,6 +288,8 @@ function ItemFormDialog({
   const [available, setAvailable] = useState(true);
   const [tags, setTags] = useState<string[]>([]);
   const [allergens, setAllergens] = useState<string[]>([]);
+  const [ingredients, setIngredients] = useState<string[]>([]);
+  const [ingInput, setIngInput] = useState("");
   const [spice, setSpice] = useState<string>("");
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   const [newUpload, setNewUpload] = useState<{ storageId: string; preview: string } | null>(null);
@@ -303,6 +313,8 @@ function ItemFormDialog({
     setAvailable(item?.available ?? true);
     setTags(item?.tags ?? []);
     setAllergens(item?.allergens ?? []);
+    setIngredients(item?.ingredients ?? []);
+    setIngInput("");
     setSpice(item?.spiceLevel ?? "");
     setCurrentImage(item?.imageUrl ?? null);
     setNewUpload(null);
@@ -313,6 +325,24 @@ function ItemFormDialog({
 
   const toggleTag = (list: string[], setList: (v: string[]) => void, value: string) =>
     setList(list.includes(value) ? list.filter((t) => t !== value) : [...list, value]);
+
+  const addIngredient = (raw: string) => {
+    const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+    if (parts.length === 0) return;
+    setIngredients((prev) => {
+      const seen = new Set(prev.map((i) => i.toLowerCase()));
+      const next = [...prev];
+      for (const p of parts) {
+        const key = p.toLowerCase();
+        if (!seen.has(key) && next.length < MAX_INGREDIENTS) {
+          seen.add(key);
+          next.push(p.slice(0, 40));
+        }
+      }
+      return next;
+    });
+    setIngInput("");
+  };
 
   const handleFile = async (file: File | undefined | null) => {
     if (!file) return;
@@ -369,6 +399,7 @@ function ItemFormDialog({
       popular,
       tags,
       allergens,
+      ingredients,
       spiceLevel: spice || undefined,
       imageStorageId: hasNewUpload ? (newUpload!.storageId as never) : undefined,
       imageUrl: hasUrl ? urlInput.trim() : undefined,
@@ -490,6 +521,65 @@ function ItemFormDialog({
                 <p className="text-[10px] text-muted-foreground">JPG, PNG or WebP · up to 5 MB. You can upload a photo or link one from the web.</p>
               </div>
             </div>
+          </div>
+
+          {/* Ingredients */}
+          <div>
+            <p className="text-sm font-medium">Ingredients</p>
+            <p className="mb-1.5 text-[11px] text-muted-foreground">
+              List the dish&apos;s ingredients — diners can remove any of these when they order at the table.
+            </p>
+            {ingredients.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-1.5">
+                {ingredients.map((ing) => (
+                  <span
+                    key={ing}
+                    className="flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-medium text-foreground"
+                  >
+                    {ing}
+                    <button
+                      type="button"
+                      aria-label={`Remove ${ing}`}
+                      onClick={() => setIngredients((prev) => prev.filter((i) => i !== ing))}
+                      className="text-muted-foreground hover:text-destructive"
+                    >
+                      <X className="size-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <Input
+                value={ingInput}
+                onChange={(e) => setIngInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === ",") {
+                    e.preventDefault();
+                    addIngredient(ingInput);
+                  }
+                }}
+                onBlur={() => {
+                  if (ingInput.trim()) addIngredient(ingInput);
+                }}
+                placeholder="e.g. Pecorino romano — Enter to add"
+                className="h-8 text-xs"
+                disabled={ingredients.length >= MAX_INGREDIENTS}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 shrink-0"
+                onClick={() => addIngredient(ingInput)}
+                disabled={!ingInput.trim() || ingredients.length >= MAX_INGREDIENTS}
+              >
+                <Plus className="size-3.5" /> Add
+              </Button>
+            </div>
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              {ingredients.length}/{MAX_INGREDIENTS} · separate with commas
+            </p>
           </div>
 
           {/* Tags */}

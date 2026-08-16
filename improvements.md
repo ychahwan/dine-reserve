@@ -19,6 +19,7 @@ Status legend: **Todo** (not started) · **In progress** (being built) · **Done
 | I-11 | Off-menu / special requests | Diner asks for anything not on the menu; the restaurant sees it in a dedicated Requests tab and can mark it fulfilled. | **Done** |
 | I-12 | Itemized bill at the table | Persistent itemized bill per booking (lines, quantities, totals, paid flag). Payment via Stripe is the Tier-2 I-20 item — the bill is already shaped for it. | **Done** |
 | I-13 | Journey continuity (date carry-over) | Selected date + party size carry over from search into the restaurant detail booking sheet — the date is never asked twice. | **Done** |
+| I-14 | Menu ingredients + order customization | Restaurants define each dish's ingredients in the menu editor (chips in the item form). Diners customize at the table — leave any ingredient out (validated against the restaurant's list) and add per-line instructions; the kitchen's order view and the itemized bill both carry the customization. Seed demo items now ship ingredient lists. | **Done** |
 
 ## Tier 2 — Needs API keys (payments / notifications / AI)
 

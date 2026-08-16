@@ -9,7 +9,7 @@
  *   PHASE=1 node scripts/test-backend.mjs     # discovery + auth + E2E booking
  *   PHASE=2 node scripts/test-backend.mjs     # queue / waitlist / notifications
  *   PHASE=3 node scripts/test-backend.mjs     # reviews / security / claim-demo
- *   PHASE=4 node scripts/test-backend.mjs     # dine-in: check-in, orders, pings, bill
+ *   PHASE=4 node scripts/test-backend.mjs     # dine-in: check-in, orders, pings, bill, customization
  *
  * scripts/test-backend.sh is the bash equivalent for local machines.
  *
@@ -20,6 +20,8 @@
  *   assertions use `checkRead`, which retries until the expected token shows.
  * - The CLI prints nothing for `null`/void results, so the signed-out auth
  *   check asserts that no user doc leaks instead of expecting literal "null".
+ * - The CLI renders nested arrays as `[Array]`, so read assertions that need
+ *   array contents return joined strings instead of the raw arrays.
  * - Setup mutations are run through `runfnV`, which verifies the effect in the
  *   DB and only re-runs the mutation when the effect is proven absent — so a
  *   glitch can never silently skip a step or duplicate a row.
@@ -464,7 +466,7 @@ if (PHASE === "all" || PHASE === "3") {
 
 // ================================================================= PHASE 4
 if (PHASE === "all" || PHASE === "4") {
-  logLine("── Phase 4 · dine-in · check-in · orders · pings · bill ──────────────");
+  logLine("── Phase 4 · dine-in · check-in · orders · pings · bill · customization ─");
   if (!RID) {
     logLine("SKIP  | phase 4 needs phase 1 state (RID missing)");
     process.exit(1);
@@ -657,6 +659,73 @@ if (PHASE === "all" || PHASE === "4") {
     JSON.stringify({ orderId: ORD }),
     "--identity",
     id("test-diner-9"),
+  );
+
+  // H-9: restaurant-defined ingredients + diner order customization. A second
+  // item WITH an ingredient list; the diner removes one ingredient and the
+  // line snapshots both the list and the removal. Unknown removals are rejected
+  // so the kitchen never gets a request the menu can't honour.
+  const itemCus = `Truffle Carbonara ${run}`;
+  runfnV(
+    "restaurants:createMenuItem",
+    JSON.stringify({
+      menuId: MENU,
+      name: itemCus,
+      priceCents: 2100,
+      category: "Pasta",
+      ingredients: ["Tonnarelli", "Pecorino romano", "Black pepper", "Truffle oil"],
+    }),
+    `const i = await ctx.db.query("menuItems").withIndex("by_menu", (q) => q.eq("menuId", "${MENU}")).filter((q) => q.eq(q.field("name"), "${itemCus}")).first(); return i ? "OK" : "MISSING";`,
+    "--identity",
+    id("test-owner-1"),
+  );
+  const CUS = iq(
+    `const i = await ctx.db.query("menuItems").withIndex("by_menu", (q) => q.eq("menuId", "${MENU}")).filter((q) => q.eq(q.field("name"), "${itemCus}")).first(); return i?._id;`,
+  );
+  checkRead(
+    "H-9a owner-defined ingredients saved",
+    "Truffle oil",
+    `const i = await ctx.db.get("${CUS}"); return (i?.ingredients ?? []).join(", ");`,
+  );
+  check(
+    "H-9b diner orders with an ingredient removed",
+    "open",
+    "dining:placeOrder",
+    JSON.stringify({
+      bookingId: DBOOK,
+      items: [{ menuItemId: CUS, quantity: 1, removeIngredients: ["Pecorino romano"] }],
+    }),
+    "--identity",
+    id(diner),
+  );
+  const CUSORD = iq(
+    `const o = await ctx.db.query("dineOrders").withIndex("by_booking", (q) => q.eq("bookingId", "${DBOOK}")).order("desc").first(); return o?._id;`,
+  );
+  checkRead(
+    "H-9c line snapshots removal + ingredients",
+    "Pecorino romano",
+    `const o = await ctx.db.get("${CUSORD}"); return (o?.items?.[0]?.removeIngredients ?? []).join(", ") + " | " + (o?.items?.[0]?.ingredients ?? []).join(", ");`,
+  );
+  check(
+    "H-9d unknown removal rejected",
+    "isn't an ingredient",
+    "dining:placeOrder",
+    JSON.stringify({
+      bookingId: DBOOK,
+      items: [{ menuItemId: CUS, quantity: 1, removeIngredients: ["Peanut butter"] }],
+    }),
+    "--identity",
+    id(diner),
+  );
+  checkRead(
+    "H-9e owner view carries customization",
+    "Pecorino romano",
+    `const o = await ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${RID}")).order("desc").first(); return (o?.items?.[0]?.removeIngredients ?? []).join(", ");`,
+  );
+  checkRead(
+    "H-9f bill keeps customized line separate",
+    "Pecorino romano",
+    `const b = await ctx.db.query("dineOrders").withIndex("by_booking", (q) => q.eq("bookingId", "${DBOOK}")).collect(); const lines = b.filter((o) => o.status !== "cancelled").flatMap((o) => o.items); return lines.map((l) => l.name + " | " + (l.removeIngredients ?? []).join(", ")).join(" ;; ");`,
   );
 }
 
