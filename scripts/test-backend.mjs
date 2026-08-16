@@ -15,14 +15,14 @@
  *
  * Notes:
  * - Mutations like addSection return a bare id, so those scenarios verify via
- *   inline queries — the same reads the UI performs.
+ *   inline queries — the same reads the UI performs. Value reads occasionally
+ *   come back empty/stale from the CLI in this container, so all read-only
+ *   assertions use `checkRead`, which retries until the expected token shows.
  * - The CLI prints nothing for `null`/void results, so the signed-out auth
  *   check asserts that no user doc leaks instead of expecting literal "null".
- * - The CLI occasionally prints NOTHING for a call that should have returned a
- *   value (a dropped/glitched transport). Setup mutations are therefore run
- *   through `runfnV`, which verifies the effect in the DB and only re-runs the
- *   mutation when the effect is proven absent — so a glitch can never silently
- *   skip a step or duplicate a row.
+ * - Setup mutations are run through `runfnV`, which verifies the effect in the
+ *   DB and only re-runs the mutation when the effect is proven absent — so a
+ *   glitch can never silently skip a step or duplicate a row.
  * - Review/claim scenarios tolerate a previous run having already mutated the
  *   seeded demo data (already-reviewed booking, already-claimed restaurant).
  * - Harness restaurants (created by earlier runs) are cleaned up by name at
@@ -39,7 +39,7 @@
  *   touching demo/user data.
  */
 import { writeFileSync, existsSync, readFileSync } from "node:fs";
-import { logLine, check, checkAbsent, checkAny, runfn, runfnV, iq, iqRaw, iqPairs, id, summary } from "./lib/runner.mjs";
+import { logLine, check, checkAbsent, checkAny, checkRead, runfn, runfnV, iq, iqRaw, iqPairs, id, summary } from "./lib/runner.mjs";
 
 const STATE_FILE = "/tmp/kamix-test-state.json";
 const PHASE = process.env.PHASE || "all";
@@ -148,10 +148,9 @@ if (PHASE === "all" || PHASE === "1") {
   // B-7: the CLI renders `restaurants:get` nested menu items as `[Array]`, so
   // the menu-item assertion reads the menuItems table — the same rows the
   // detail page resolves and displays.
-  check(
+  checkRead(
     "B-7 restaurant detail (menu)",
     "Cacio e pepe",
-    "--inline-query",
     `const its = await ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${TRULLO}")).collect(); return its.map((i) => i.name);`,
   );
   check("B-8 availability forDate", "sections", "availability:forDate", JSON.stringify({ restaurantId: TRULLO, date: TODAY }));
@@ -191,10 +190,9 @@ if (PHASE === "all" || PHASE === "1") {
     `const r = await ctx.db.query("restaurants").withIndex("by_owner", (q) => q.eq("ownerId", "test-owner-1")).filter((q) => q.eq(q.field("name"), "Test Harness Table")).order("desc").first(); return r?._id;`,
   );
   writeFileSync(STATE_FILE, JSON.stringify({ rid: RID, tomorrow: TOMORROW }));
-  check(
+  checkRead(
     "C-1 owner creates restaurant",
     "Test Harness Table",
-    "--inline-query",
     `const r = await ctx.db.get("${RID}"); return { name: r?.name };`,
   );
 
@@ -205,10 +203,9 @@ if (PHASE === "all" || PHASE === "1") {
     "--identity",
     id("test-owner-1"),
   );
-  check(
+  checkRead(
     "C-2a 2-seat section added",
     "Tasting counter",
-    "--inline-query",
     `const s = await ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${RID}")).collect(); return s.map((x) => x.name);`,
   );
   const DEFSEC = iq(
@@ -221,10 +218,9 @@ if (PHASE === "all" || PHASE === "1") {
     "--identity",
     id("test-owner-1"),
   );
-  check(
+  checkRead(
     "C-2b default section removed (1 left)",
     "1",
-    "--inline-query",
     `const s = await ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${RID}")).collect(); return { count: s.length };`,
   );
   runfnV(
@@ -237,10 +233,9 @@ if (PHASE === "all" || PHASE === "1") {
     "--identity",
     id("test-owner-1"),
   );
-  check(
+  checkRead(
     "C-2c hours saved (7 days)",
     "7",
-    "--inline-query",
     `const h = await ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", "${RID}")).collect(); return { count: h.length };`,
   );
   check(
@@ -296,10 +291,9 @@ if (PHASE === "all" || PHASE === "2") {
     );
   }
   await sleep(10000);
-  check(
+  checkRead(
     "C-5 queue books exactly 2",
     "total: 2",
-    "--inline-query",
     `const b = await ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", "${RID}").eq("date", "${TOMORROW}")).collect(); return { total: b.filter((x) => x.time === "21:30" && x.status === "confirmed").length };`,
   );
   check("C-5b overflow diner failed", "failed", "queue:myEntries", "{}", "--identity", id("test-diner-4"));
@@ -317,10 +311,9 @@ if (PHASE === "all" || PHASE === "2") {
   const WLID = iq(
     `const w = await ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", "${wlDiner}")).first(); return w?._id;`,
   );
-  check(
+  checkRead(
     "D-1 join waitlist (sold out)",
     "waiting",
-    "--inline-query",
     `const w = await ctx.db.get("${WLID}"); return { status: w?.status };`,
   );
 
@@ -351,10 +344,9 @@ if (PHASE === "all" || PHASE === "2") {
     id("test-diner-1"),
   );
   check("D-4b alert visible in myAlerts", "on_my_way", "notifications:myAlerts", "{}", "--identity", id("test-diner-1"));
-  check(
+  checkRead(
     "D-5a unread badge > 0",
     "ok: true",
-    "--inline-query",
     `const n = await ctx.db.query("notifications").withIndex("by_restaurant_read", (q) => q.eq("restaurantId", "${RID}").eq("read", false)).collect(); return { ok: n.length > 0 };`,
   );
   runfnV(
@@ -364,10 +356,9 @@ if (PHASE === "all" || PHASE === "2") {
     "--identity",
     id("test-owner-1"),
   );
-  check(
+  checkRead(
     "D-5b mark all read clears badge",
     "unread: 0",
-    "--inline-query",
     `const n = await ctx.db.query("notifications").withIndex("by_restaurant_read", (q) => q.eq("restaurantId", "${RID}").eq("read", false)).collect(); return { unread: n.length };`,
   );
 
@@ -570,10 +561,9 @@ if (PHASE === "all" || PHASE === "4") {
     "--identity",
     id(diner),
   );
-  check(
+  checkRead(
     "H-2b order snapshots price (2900)",
     "2900",
-    "--inline-query",
     `const o = await ctx.db.query("dineOrders").withIndex("by_booking", (q) => q.eq("bookingId", "${DBOOK}")).order("desc").first(); return { total: o?.totalCents };`,
   );
   check(

@@ -11,8 +11,9 @@
  *   a 25s timeout so a hung CLI can never block the suite for long.
  * - The CLI prints NOTHING for `null`/void results — a clean exit with empty
  *   output is a valid result, so it is NOT retried at the transport level.
- * - The CLI occasionally prints nothing for a call that should have returned a
- *   value (transient). `iq`/`iqRaw`/`iqPairs` retry on empty output, `check`
+ * - The CLI occasionally prints nothing (or stale output) for a call that
+ *   should have returned a value (transient, seen twice in a row on the same
+ *   read). `iq`/`iqRaw`/`iqPairs`/`checkRead` retry on empty output, `check`
  *   retries once, and `runfnV` re-runs a mutation only when a verify query
  *   proves the effect did NOT happen (so retrying can never duplicate rows).
  * - Every PASS/FAIL line is appended to /tmp/kamix-results.log so a platform
@@ -39,7 +40,7 @@ export function logLine(s) {
 }
 
 /** Shell-quote a single argument (single quotes, escapes embedded ones). */
-export const shq = (s) => `'${String(s).replace(/'/g, `'\\\\''`)}'`;
+export const shq = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`;
 
 export function sleepSync(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
@@ -94,7 +95,7 @@ export function runfnV(fn, argsJson, verifyQuery, ...extra) {
 export function iq(query) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|\"(?:[a-z0-9]{24,})\"/g);
+    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
     const matches = quoted && quoted.length ? quoted : out.match(/\b\d+\b/g);
     if (matches && matches.length > 0) {
       return matches[matches.length - 1].replace(/['"]/g, "");
@@ -118,7 +119,7 @@ export function iqRaw(query) {
 export function iqAll(query) {
   for (let attempt = 0; attempt < 3; attempt++) {
     const { out } = runfn("--inline-query", query);
-    const quoted = out.match(/'(?:[a-z0-9]{24,})'|\"(?:[a-z0-9]{24,})\"/g);
+    const quoted = out.match(/'(?:[a-z0-9]{24,})'|"(?:[a-z0-9]{24,})"/g);
     if (quoted && quoted.length > 0) {
       return quoted.map((s) => s.replace(/['"]/g, ""));
     }
@@ -129,7 +130,7 @@ export function iqAll(query) {
 
 /**
  * Read-only inline query that returns an array of `{ _id, ownerId }` objects
- * (the shape the CLI prints with single quotes) -> [{ id, owner }, …].
+ * (the shape the CLI prints with single quotes) -> [{ id, owner }, ...].
  * Retries on empty output so a glitched call can never silently no-op a
  * cleanup pass.
  */
@@ -162,6 +163,30 @@ export function check(name, expect, ...args) {
     logLine(`FAIL  | ${name} | expected '${expect}'`);
     logLine(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
   }
+}
+
+/**
+ * Assert on a READ-ONLY inline query. The CLI in this container occasionally
+ * returns empty or stale output for value reads (observed twice in a row on
+ * the same query), so this retries up to 5 times until the expected token
+ * appears. Retrying is always safe here: the queries are pure reads of state
+ * that was already written (and verified) by setup steps.
+ */
+export function checkRead(name, expect, query) {
+  let out = "";
+  for (let attempt = 0; attempt < 5; attempt++) {
+    ({ out } = runfn("--inline-query", query));
+    if (out.includes(expect)) {
+      PASS += 1;
+      logLine(`PASS  | ${name}`);
+      return;
+    }
+    sleepSync(1200);
+  }
+  FAIL += 1;
+  FAILED.push(name);
+  logLine(`FAIL  | ${name} | expected '${expect}'`);
+  logLine(`       out: ${out.replace(/\s+/g, " ").slice(0, 420)}`);
 }
 
 export function checkAbsent(name, absent, ...args) {

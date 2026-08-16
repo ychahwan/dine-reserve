@@ -2,7 +2,7 @@
 
 Version-1 acceptance suite. Three execution modes:
 
-- **Automated (backend)** — `node scripts/test-backend.mjs` drives the exact Convex functions the UI calls, against the live deployment, using `convex run` with `--identity` to simulate signed-in diners and owners. Runs in 3 phases (`PHASE=1|2|3`). `scripts/test-backend.sh` is the bash equivalent for local machines.
+- **Automated (backend)** — `node scripts/test-backend.mjs` drives the exact Convex functions the UI calls, against the live deployment, using `convex run` with `--identity` to simulate signed-in diners and owners. Runs in 4 phases (`PHASE=1|2|3|4`). `scripts/test-backend.sh` is the bash equivalent for local machines.
 - **Automated (UI-flow data paths)** — `node scripts/test-ui-flows.mjs` closes the gap for scenarios labeled manual below: it drives the exact function each screen calls (same args, same identities) through a fresh restaurant + identities per run, so it is repeatable and never touches real demo/user data.
 - **Manual (web UI)** — pure browser click-throughs (auth, routing, visual layout). No browser automation is available in this environment, so these are written as precise walkthroughs to run by hand.
 
@@ -34,6 +34,7 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | B-8 | Availability per date | `availability:forDate` Trullo today | Sections with slot times + remaining seats | ✅ Pass |
 | B-9 | Explore page | `/explore` signed-in; filter chips, search box | Results update live; favorites heart + rating shown | ✅ Pass · UI-flow |
 | B-10 | Menu display | Open any restaurant from Explore | Photos, dietary badges, ⚠ allergen rows, 🌶 spice shown per item | ✅ Pass · UI-flow |
+| B-11 | Date carries into detail | Explore → pick date + party → open a restaurant | Detail booking sheet opens **pre-filled** with the chosen date/party; the date is not asked again | ✅ Pass (code path) |
 
 ## C. Booking engine — the no-overbooking guarantee (automated)
 
@@ -97,6 +98,19 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | G-5 | Invite page | Share booking link → open in another account | Guest sees booking card + Confirm seat button | ✅ Pass · UI-flow |
 | G-6 | Profile | `/account` → preferences + favorites | Chips save; favorites listed | ✅ Pass · UI-flow |
 
+## H. Dine-in experience (automated — check-in, orders, pings, bill)
+
+| ID | Scenario | Steps | Expected | Status |
+|----|----------|-------|----------|--------|
+| H-1 | Confirm arrival | Diner checks in on the day of the booking (`dining:checkIn`) | `checkedInAt` timestamp set; call is idempotent; checking in before the day is rejected ("day of your booking") | ✅ Pass |
+| H-2 | Order from the table | Diner orders from the live menu (2× carbonara) without any assistant | Order `open`, per-line price snapshot, total 2900; empty order rejected | ✅ Pass |
+| H-3 | Owner sees live orders | `dining:restaurantOrders` as owner vs a random diner | Owner sees the order with diner name; non-owner gets `[]` (no data leak) | ✅ Pass |
+| H-4 | Kitchen status flow | Owner `dining:updateOrderStatus` preparing → served → completed | Each status persisted on the order | ✅ Pass |
+| H-5 | Bill at the table | `dining:billForBooking` for the checked-in booking | Itemized lines, total 2900, `paid: false` (payments land later via Stripe) | ✅ Pass |
+| H-6 | Ping waiter/manager | Diner `dining:sendAssist` with template "water" + note | Owner sees the ping on the restaurant, marks it `resolved` (resolvedAt set) | ✅ Pass |
+| H-7 | Off-menu request | Diner `dining:createMenuRequest` ("Matcha latte, oat milk") | Owner sees it in the requests tab, marks it `fulfilled` | ✅ Pass |
+| H-8 | Security guards | Signed-out `placeOrder`; diner cancels someone else's order | Both rejected ("sign in" / "cannot cancel") | ✅ Pass |
+
 ---
 
 ## Run log
@@ -107,3 +121,4 @@ Status legend: **✅ Pass** · **✅ Pass · UI-flow** (data path verified via `
 | 2 | 2026-08-14 | Backend suite: P1 **28/28** · P2 **12/12** · P3 **10/10** (50 total) — all green |
 | 2 | 2026-08-14 | UI-flow suite: **31/31** — all green (data paths for B-9/B-10/C-7/C-10/D-6/D-7/E-8/F-6/G-5/G-6) |
 | 2 | 2026-08-14 | Remaining manual: A-1…A-5 (auth/routing) + E-7 (owner tabs rendering) — pure browser click-throughs |
+| 3 | 2026-08-16 | Backend suite: P1 **28/28** · P2 **12/12** · P3 **10/10** · P4 **21/21** (71 total) — all green. P4 covers the new dine-in surface (H-1…H-8: check-in, orders, bill, waiter pings, off-menu requests, guards). B-11 (date carries into detail) verified via code path. |
