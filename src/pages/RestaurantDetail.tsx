@@ -95,17 +95,18 @@ export default function RestaurantDetail() {
   const [favoriteBusy, setFavoriteBusy] = useState(false);
 
   // The date + party size chosen on Explore carry over via ?date=&party=, so
-  // the diner never has to re-pick the date after choosing a restaurant. The
-  // strip below still lets them change it, but it starts pre-selected.
-  const [date, setDate] = useState<string>(() => {
-    const d = searchParams.get("date");
-    if (d && /^\d{4}-\d{2}-\d{2}$/.test(d) && !isPastDate(d)) return d;
-    return today();
-  });
+  // the diner never has to re-pick the date after choosing a restaurant. When
+  // a valid date came over, the 14-day strip collapses into a compact chip
+  // ("Change date" re-opens it) — the date is never asked twice.
+  const urlDate = searchParams.get("date");
+  const validUrlDate =
+    urlDate && /^\d{4}-\d{2}-\d{2}$/.test(urlDate) && !isPastDate(urlDate) ? urlDate : null;
+  const [date, setDate] = useState<string>(validUrlDate ?? today());
   const [partySize, setPartySize] = useState<number>(() => {
     const p = Number(searchParams.get("party"));
     return Number.isInteger(p) && p >= 1 && p <= 20 ? p : 2;
   });
+  const [showDateStrip, setShowDateStrip] = useState(!validUrlDate);
   const [seatPref, setSeatPref] = useState<SeatPref | null>(null);
   const [nonSmoking, setNonSmoking] = useState(false);
   const [menuTab, setMenuTab] = useState<string>("overview");
@@ -207,6 +208,16 @@ export default function RestaurantDetail() {
   }, [availability, seatPref, nonSmoking, partySize]);
 
   const selectedSection = availability?.sections.find((s) => s._id === selectedSlot?.sectionId);
+
+  // MUST stay above the `if (!data)` early return — hooks cannot be called
+  // conditionally. Grouping a few dozen menu items is cheap, so a plain call
+  // is fine and keeps hook order stable across load/ready renders.
+  const groupedItems = useMemo(() => {
+    if (!data) return [] as [string, MenuItemLike[]][];
+    const all = data.menuDocs.flatMap((m) => m.items);
+    const visible = menuTab === "overview" ? all : data.menuDocs.find((m) => m._id === menuTab)?.items ?? [];
+    return groupMenuItems(visible);
+  }, [data, menuTab]);
 
   const handleConfirm = async () => {
     if (!selectedSlot || !id) return;
@@ -318,10 +329,6 @@ export default function RestaurantDetail() {
   }
 
   const { restaurant: r, menuDocs, rating } = data;
-  const allItems = menuDocs.flatMap((m) => m.items);
-  const visibleItems =
-    menuTab === "overview" ? allItems : menuDocs.find((m) => m._id === menuTab)?.items ?? [];
-  const groupedItems = useMemo(() => groupMenuItems(visibleItems), [visibleItems]);
   const isFavorite = (user?.favorites ?? []).includes(r._id);
   const policyHours = r.cancellationPolicyHours ?? 0;
 
@@ -428,31 +435,44 @@ export default function RestaurantDetail() {
             )}
           </div>
 
-          {/* Date strip */}
-          <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
-            {days.map((d) => (
-              <button
-                key={d}
-                onClick={() => setDate(d)}
-                className={cn(
-                  "flex shrink-0 flex-col items-center rounded-xl border px-3 py-2 transition-colors",
-                  date === d
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border bg-card text-muted-foreground hover:text-foreground",
-                )}
-              >
-                <span className="text-[10px] font-medium uppercase opacity-80">
-                  {new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
-                </span>
-                <span className="text-lg font-bold leading-6">
-                  {new Date(`${d}T00:00:00`).getDate()}
-                </span>
-                <span className="text-[10px] opacity-80">
-                  {new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short" })}
-                </span>
-              </button>
-            ))}
-          </div>
+          {/* Date strip — collapsed into a chip when the date already came
+              over from Explore; "Change date" re-opens it. */}
+          {showDateStrip ? (
+            <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
+              {days.map((d) => (
+                <button
+                  key={d}
+                  onClick={() => setDate(d)}
+                  className={cn(
+                    "flex shrink-0 flex-col items-center rounded-xl border px-3 py-2 transition-colors",
+                    date === d
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-card text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  <span className="text-[10px] font-medium uppercase opacity-80">
+                    {new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
+                  </span>
+                  <span className="text-lg font-bold leading-6">
+                    {new Date(`${d}T00:00:00`).getDate()}
+                  </span>
+                  <span className="text-[10px] opacity-80">
+                    {new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short" })}
+                  </span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="mt-4 flex items-center justify-between rounded-xl border border-border/80 bg-muted/30 px-4 py-3">
+              <span className="flex items-center gap-2 text-sm font-medium">
+                <CalendarDays className="size-4 text-primary" />
+                {formatDate(date)}
+              </span>
+              <Button variant="outline" size="sm" onClick={() => setShowDateStrip(true)}>
+                Change date
+              </Button>
+            </div>
+          )}
 
           {/* Party size */}
           <div className="mt-4 flex items-center justify-between rounded-xl border border-border/80 bg-muted/30 px-4 py-3">
