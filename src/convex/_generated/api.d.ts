@@ -23,6 +23,7 @@ import type * as reviews from "../reviews.js";
 import type * as seed from "../seed.js";
 import type * as slotRules from "../slotRules.js";
 import type * as sms from "../sms.js";
+import type * as socialize from "../socialize.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
 import type * as validation from "../validation.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   seed: typeof seed;
   slotRules: typeof slotRules;
   sms: typeof sms;
+  socialize: typeof socialize;
   uploads: typeof uploads;
   users: typeof users;
   validation: typeof validation;
