@@ -237,3 +237,26 @@ export const cancellationPolicySchema = z
   .max(168, "Policy must be between 0 and 168 hours.");
 
 export const cancelReasonSchema = optionalTextSchema(300);
+
+// ---------------------------------------------------------------------------
+// Socialize: diner-to-diner gifts
+// ---------------------------------------------------------------------------
+
+export const giftTypeSchema = z.object({
+  name: z.string().trim().min(1, "Gift name is required.").max(60, "Gift name is too long."),
+  emoji: z.string().trim().min(1, "Pick an emoji for the gift.").max(8, "Emoji is too long."),
+  description: optionalTextSchema(200),
+  priceCents: z
+    .number()
+    .int("Price must be a whole number of cents.")
+    .min(0, "Invalid price.")
+    .max(1_000_000, "Invalid price."),
+  available: z.boolean(),
+});
+
+export const sendGiftSchema = z.object({
+  giftId: z.string().min(1, "Pick a gift."),
+  receiverUserId: z.string().min(1, "Pick who to send it to."),
+  note: optionalTextSchema(200),
+  reveal: z.enum(["now", "on_delivery"]),
+});

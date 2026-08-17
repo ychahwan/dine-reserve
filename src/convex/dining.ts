@@ -301,10 +301,11 @@ export const cancelOrder = mutation({
 
 /**
  * The saved bill for a booking: line items aggregated from every non-cancelled
- * order. Customised lines (e.g. "Carbonara — no pecorino") are grouped
- * separately from the plain version. Payment (cards/wallets) is wired later —
- * for now the bill is shown to the diner and the restaurant, and the total is
- * stored.
+ * order, plus any Socialize gifts the diner sent to others (charged to this
+ * booking's bill). Customised lines (e.g. "Carbonara — no pecorino") are
+ * grouped separately from the plain version. Payment (cards/wallets) is wired
+ * later — for now the bill is shown to the diner and the restaurant, and the
+ * total is stored.
  */
 export const billForBooking = query({
   args: { bookingId: v.id("bookings") },
@@ -326,7 +327,14 @@ export const billForBooking = query({
     // customization (removals/note) makes it a distinct row
     const linesMap = new Map<
       string,
-      { name: string; quantity: number; priceCents: number; removeIngredients?: string[]; note?: string }
+      {
+        name: string;
+        quantity: number;
+        priceCents: number;
+        removeIngredients?: string[];
+        note?: string;
+        isGift?: boolean;
+      }
     >();
     let totalCents = 0;
     for (const o of billable) {
@@ -348,6 +356,29 @@ export const billForBooking = query({
         totalCents += line.priceCents * line.quantity;
       }
     }
+
+    // Socialize gifts the diner sent from this table land on their bill too.
+    const gifts = await ctx.db
+      .query("giftDeliveries")
+      .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
+      .collect();
+    const billableGifts = gifts.filter((g) => g.status !== "cancelled");
+    const senders = await Promise.all(
+      billableGifts.map((g) => safeGet<Doc<"users">>(ctx, g.senderUserId)),
+    );
+    for (let i = 0; i < billableGifts.length; i++) {
+      const g = billableGifts[i]!;
+      const senderName = senders[i]?.name ?? "Guest";
+      linesMap.set(`gift|${g._id}`, {
+        name: `${g.emoji} ${g.name}`,
+        quantity: 1,
+        priceCents: g.priceCents,
+        note: `Gift from ${senderName}`,
+        isGift: true,
+      });
+      totalCents += g.priceCents;
+    }
+
     const lines = [...linesMap.values()]
       .map((l) => ({ ...l, lineTotal: l.priceCents * l.quantity }))
       .sort((a, b) => b.lineTotal - a.lineTotal);

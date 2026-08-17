@@ -47,6 +47,8 @@ export const WAITLIST_STATUS = v.union(
 //   diner from their booking ("moving now" style check-ins).
 // - new_order / assist_request / menu_request are written by the dine-in
 //   experience (orders, pings to the team, and off-menu requests).
+// - gift_ordered is written when a diner sends another diner a gift via
+//   Socialize (the owner prepares it and marks it delivered).
 export const NOTIFICATION_TYPE = v.union(
   v.literal("booking_created"),
   v.literal("booking_cancelled"),
@@ -57,6 +59,7 @@ export const NOTIFICATION_TYPE = v.union(
   v.literal("new_order"),
   v.literal("assist_request"),
   v.literal("menu_request"),
+  v.literal("gift_ordered"),
 );
 export type NotificationType = Infer<typeof NOTIFICATION_TYPE>;
 
@@ -439,6 +442,58 @@ const schema = defineSchema(
       .index("by_restaurant", ["restaurantId"])
       .index("by_user", ["userId"])
       .index("by_booking", ["bookingId"]),
+
+    // ---------- Socialize: diner-to-diner gifts & presence ----------
+
+    // Restaurant-defined gift catalog — what diners can send each other in
+    // the Socialize space (a drink, a dessert, a coffee…). Owner-managed.
+    giftTypes: defineTable({
+      restaurantId: v.id("restaurants"),
+      name: v.string(),
+      emoji: v.string(),
+      description: v.optional(v.string()),
+      priceCents: v.number(),
+      available: v.boolean(),
+      createdAt: v.number(),
+    }).index("by_restaurant", ["restaurantId"]),
+
+    // A diner's Socialize presence at a restaurant — visible (shown to other
+    // diners, open to gifts) or invisible. One doc per booking.
+    dinerPresence: defineTable({
+      bookingId: v.id("bookings"),
+      restaurantId: v.id("restaurants"),
+      userId: v.id("users"),
+      visible: v.boolean(),
+      updatedAt: v.number(),
+    })
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_booking", ["bookingId"])
+      .index("by_user", ["userId"]),
+
+    // A gift one diner sends to another at the same restaurant. The price is
+    // snapped at send time and charged to the sender's bill. `reveal` decides
+    // whether the receiver sees it immediately ("now") or only once the
+    // restaurant marks it delivered ("on_delivery" — a surprise).
+    giftDeliveries: defineTable({
+      restaurantId: v.id("restaurants"),
+      bookingId: v.id("bookings"), // receiver's booking
+      senderUserId: v.id("users"),
+      receiverUserId: v.id("users"),
+      giftId: v.optional(v.id("giftTypes")),
+      name: v.string(), // snapshot at send time
+      emoji: v.string(),
+      priceCents: v.number(),
+      note: v.optional(v.string()),
+      reveal: v.union(v.literal("now"), v.literal("on_delivery")),
+      status: v.union(v.literal("ordered"), v.literal("delivered"), v.literal("cancelled")),
+      revealedAt: v.optional(v.number()),
+      createdAt: v.number(),
+      deliveredAt: v.optional(v.number()),
+    })
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_booking", ["bookingId"])
+      .index("by_sender", ["senderUserId"])
+      .index("by_receiver", ["receiverUserId"]),
   },
   {
     schemaValidation: false,

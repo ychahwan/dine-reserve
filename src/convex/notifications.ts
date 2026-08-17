@@ -7,7 +7,8 @@ import { optionalTextSchema, parseOrThrow } from "./validation";
 
 // Diner-sent check-in alerts ("moving now" style). booking_created /
 // booking_cancelled are written automatically by the booking engine;
-// new_order / assist_request / menu_request come from the dine-in experience.
+// new_order / assist_request / menu_request come from the dine-in experience;
+// gift_ordered comes from Socialize (diner → diner gift).
 export const DINER_ALERT_TYPES = v.union(
   v.literal("on_my_way"),
   v.literal("running_late"),
@@ -22,6 +23,7 @@ export const ALL_NOTIFICATION_TYPES = v.union(
   v.literal("new_order"),
   v.literal("assist_request"),
   v.literal("menu_request"),
+  v.literal("gift_ordered"),
 );
 
 /**
@@ -43,7 +45,8 @@ export async function notifyRestaurant(
       | "booking_cancelled"
       | "new_order"
       | "assist_request"
-      | "menu_request";
+      | "menu_request"
+      | "gift_ordered";
     message?: string;
   },
 ) {
