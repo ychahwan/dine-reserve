@@ -2,6 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, MutationCtx, query } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { parseOrThrow, waitlistJoinSchema } from "./validation";
 
 /** Payload scheduled to sms.sendWaitlistSms when a waitlist spot frees up. */
 export type WaitlistSmsPayload = {
@@ -74,14 +75,10 @@ export const join = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to join the waitlist.");
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)) throw new Error("Invalid date.");
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.time)) throw new Error("Invalid time.");
-    if (!Number.isInteger(args.partySize) || args.partySize < 1 || args.partySize > 20) {
-      throw new Error("Party size must be between 1 and 20.");
-    }
-    const name = args.name.trim().slice(0, 80);
-    if (!name) throw new Error("Please enter your name.");
+    // Zod: real calendar date, HH:mm time, party size 1–20, non-empty name.
+    parseOrThrow(waitlistJoinSchema, args);
 
+    const name = args.name.trim().slice(0, 80);
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
 

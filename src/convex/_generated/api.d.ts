@@ -25,6 +25,7 @@ import type * as slotRules from "../slotRules.js";
 import type * as sms from "../sms.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
+import type * as validation from "../validation.js";
 import type * as waitlist from "../waitlist.js";
 
 import type {
@@ -51,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   sms: typeof sms;
   uploads: typeof uploads;
   users: typeof users;
+  validation: typeof validation;
   waitlist: typeof waitlist;
 }>;
 

@@ -310,7 +310,8 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_restaurant", ["restaurantId"])
-      .index("by_restaurant_date", ["restaurantId", "date"]),
+      .index("by_restaurant_date", ["restaurantId", "date"])
+      .index("by_code", ["code"]), // invite-link lookups
 
     // FIFO booking-request queue. Every diner booking request enqueues here
     // and is drained one entry at a time per (restaurant, date, time), so a

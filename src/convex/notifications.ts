@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
+import { optionalTextSchema, parseOrThrow } from "./validation";
 
 // Diner-sent check-in alerts ("moving now" style). booking_created /
 // booking_cancelled are written automatically by the booking engine;
@@ -71,6 +72,7 @@ export const sendForBooking = mutation({
   handler: async (ctx, { bookingId, type, message }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to notify the restaurant.");
+    parseOrThrow(optionalTextSchema(300), message);
 
     const booking = await ctx.db.get(bookingId);
     if (!booking || booking.userId !== userId) throw new Error("Booking not found.");

@@ -6,6 +6,7 @@ import type { Id } from "./_generated/dataModel";
 import { SEAT_KIND } from "./schema";
 import { notifyRestaurant } from "./notifications";
 import { notifyWaitlistForFreedSeats } from "./waitlist";
+import { bookingArgsSchema, bookingCodeSchema, cancelReasonSchema, guestNameSchema, parseOrThrow } from "./validation";
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export function generateCode(len = 6): string {
@@ -58,14 +59,10 @@ export async function attemptBooking(
   userId: Id<"users">,
   args: BookingArgs,
 ) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)) throw new Error("Invalid date.");
-  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.time)) throw new Error("Invalid time.");
-  if (!Number.isInteger(args.partySize) || args.partySize < 1 || args.partySize > 20) {
-    throw new Error("Party size must be between 1 and 20.");
-  }
-  const name = args.name.trim().slice(0, 80);
-  if (!name) throw new Error("Please enter your name.");
+  // Zod: real calendar date, HH:mm time, party size 1–20, non-empty name.
+  parseOrThrow(bookingArgsSchema, args);
 
+  const name = args.name.trim().slice(0, 80);
   const restaurant = await ctx.db.get(args.restaurantId);
   if (!restaurant) throw new Error("Restaurant not found.");
 
@@ -220,10 +217,12 @@ export const getBookingWithRestaurant = query({
 export const byCode = query({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
-    const clean = code.trim().toUpperCase().slice(0, 6);
-    if (!clean) return null;
-    const bookings = await ctx.db.query("bookings").collect();
-    const booking = bookings.find((b) => b.code === clean && b.status === "confirmed");
+    const parsed = bookingCodeSchema.safeParse(code);
+    if (!parsed.success) return null;
+    const clean = parsed.data.toUpperCase();
+    // indexed lookup — O(log n) instead of scanning every booking
+    const hits = await ctx.db.query("bookings").withIndex("by_code", (q) => q.eq("code", clean)).collect();
+    const booking = hits.find((b) => b.status === "confirmed");
     if (!booking) return null;
     const restaurant = await ctx.db.get(booking.restaurantId);
     return {
@@ -376,6 +375,7 @@ export const cancelBooking = mutation({
   handler: async (ctx, { bookingId, reason }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
+    parseOrThrow(cancelReasonSchema, reason);
     const booking = await ctx.db.get(bookingId);
     if (!booking) throw new Error("Booking not found.");
     const owner = await isRestaurantOwner(ctx, userId, booking.restaurantId);
@@ -498,8 +498,7 @@ export const confirmGuest = mutation({
   handler: async (ctx, { bookingId, name }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
-    const cleanName = name.trim().slice(0, 60);
-    if (!cleanName) throw new Error("Please tell us your name.");
+    const cleanName = parseOrThrow(guestNameSchema, name);
 
     const booking = await ctx.db.get(bookingId);
     if (!booking) throw new Error("Booking not found.");

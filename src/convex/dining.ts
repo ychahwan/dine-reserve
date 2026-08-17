@@ -11,6 +11,7 @@ import {
 } from "./schema";
 import { notifyRestaurant } from "./notifications";
 import { safeGet } from "./helpers";
+import { assistNoteSchema, menuRequestSchema, parseOrThrow, placeOrderSchema } from "./validation";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -143,11 +144,8 @@ export const placeOrder = mutation({
     if (userId === null) throw new Error("Please sign in to order.");
     const booking = await requireOwnConfirmedBooking(ctx, userId, bookingId);
 
-    if (items.length === 0) throw new Error("Your order is empty.");
-    if (items.length > 50) throw new Error("Too many items in one order.");
-    if (items.some((i) => !Number.isInteger(i.quantity) || i.quantity < 1 || i.quantity > 20)) {
-      throw new Error("Item quantities must be between 1 and 20.");
-    }
+    // Zod: non-empty order, ≤50 lines, integer quantities 1–20, capped notes.
+    parseOrThrow(placeOrderSchema, { items, note });
 
     // load + validate every menu item against THIS restaurant
     const menuItems = await Promise.all(
@@ -381,6 +379,7 @@ export const sendAssist = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
     const booking = await requireOwnConfirmedBooking(ctx, userId, bookingId);
+    parseOrThrow(assistNoteSchema, { note });
 
     const id = await ctx.db.insert("assistRequests", {
       bookingId: booking._id,
@@ -508,10 +507,10 @@ export const createMenuRequest = mutation({
   handler: async (ctx, { restaurantId, bookingId, name, description }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
+    parseOrThrow(menuRequestSchema, { name, description });
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
     const cleanName = name.trim().slice(0, 100);
-    if (!cleanName) throw new Error("Tell us what you'd like.");
 
     if (bookingId) {
       const booking = await ctx.db.get(bookingId);

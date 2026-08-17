@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
+import { parseOrThrow, reviewArgsSchema } from "./validation";
 
 /**
  * Verified diner reviews.
@@ -23,10 +24,8 @@ export const create = mutation({
   handler: async (ctx, { bookingId, rating, text }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
-
-    if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
-      throw new Error("Rating must be between 1 and 5.");
-    }
+    // Zod: integer rating 1–5, text ≤1000 chars.
+    parseOrThrow(reviewArgsSchema, { rating, text });
 
     const booking = await ctx.db.get(bookingId);
     if (!booking) throw new Error("Booking not found.");

@@ -1,7 +1,16 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import { z } from "zod";
 import { mutation, query } from "./_generated/server";
 import { ROLES, SEAT_KIND, DINING_PREFS } from "./schema";
+import { parseOrThrow } from "./validation";
+
+const profileNameSchema = z
+  .string()
+  .trim()
+  .min(1, "Please tell us your name.")
+  .max(80, "Name is too long.");
+const profilePhoneSchema = z.string().trim().max(20, "Phone number is too long.").optional();
 
 /**
  * Get the current signed in user. Returns null if the user is not signed in.
@@ -29,14 +38,13 @@ export const onboard = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
-    const cleanName = args.name.trim().slice(0, 80);
-    if (!cleanName) throw new Error("Please tell us your name.");
-    const cleanPhone = args.phone?.trim().slice(0, 20) || undefined;
+    const cleanName = parseOrThrow(profileNameSchema, args.name);
+    const cleanPhone = parseOrThrow(profilePhoneSchema, args.phone);
 
     await ctx.db.patch(userId, {
       role: args.role,
       name: cleanName,
-      phone: cleanPhone,
+      phone: cleanPhone || undefined,
       onboarded: true,
     });
     return await ctx.db.get(userId);
@@ -61,12 +69,10 @@ export const updateProfile = mutation({
     if (userId === null) throw new Error("You must be signed in.");
     const patch: { name?: string; phone?: string; prefs?: PrefsPatch } = {};
     if (args.name !== undefined) {
-      const clean = args.name.trim().slice(0, 80);
-      if (!clean) throw new Error("Name cannot be empty.");
-      patch.name = clean;
+      patch.name = parseOrThrow(profileNameSchema, args.name);
     }
     if (args.phone !== undefined) {
-      patch.phone = args.phone.trim().slice(0, 20) || undefined;
+      patch.phone = parseOrThrow(profilePhoneSchema, args.phone) || undefined;
     }
     if (args.prefs !== undefined) {
       // sanitize: dedupe + cap each list so the profile stays tidy

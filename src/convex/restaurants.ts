@@ -4,6 +4,16 @@ import { mutation, MutationCtx, query, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { FEATURES, SEAT_KIND } from "./schema";
 import { safeGet } from "./helpers";
+import {
+  cancellationPolicySchema,
+  hoursSchema,
+  menuArgsSchema,
+  menuItemArgsSchema,
+  menuItemUpdateSchema,
+  parseOrThrow,
+  restaurantArgsSchema,
+  sectionArgsSchema,
+} from "./validation";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -238,14 +248,12 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
-    const name = args.name.trim().slice(0, 100);
-    if (!name) throw new Error("Restaurant name is required.");
-    if (!args.cuisine.trim()) throw new Error("Cuisine type is required.");
-    if (!args.city.trim()) throw new Error("City is required.");
+    // Zod: non-empty name/cuisine/city/address, sane price range, length caps.
+    parseOrThrow(restaurantArgsSchema, args);
 
     const id = await ctx.db.insert("restaurants", {
       ownerId: userId,
-      name,
+      name: args.name.trim().slice(0, 100),
       cuisine: args.cuisine.trim().slice(0, 40),
       city: args.city.trim().slice(0, 60),
       address: args.address.trim().slice(0, 200),
@@ -288,6 +296,9 @@ export const update = mutation({
   },
   handler: async (ctx, args) => {
     const { restaurant } = await requireOwner(ctx, args.id);
+    // Zod also guards update — a blank name/cuisine/city/address can never
+    // overwrite real data (previously only create was validated).
+    parseOrThrow(restaurantArgsSchema, args);
     const patch = {
       name: args.name.trim().slice(0, 100),
       cuisine: args.cuisine.trim().slice(0, 40),
@@ -315,9 +326,7 @@ export const setCancellationPolicy = mutation({
   },
   handler: async (ctx, { restaurantId, hours }) => {
     await requireOwner(ctx, restaurantId);
-    if (!Number.isInteger(hours) || hours < 0 || hours > 168) {
-      throw new Error("Policy must be between 0 and 168 hours.");
-    }
+    parseOrThrow(cancellationPolicySchema, hours);
     await ctx.db.patch(restaurantId, {
       cancellationPolicyHours: hours === 0 ? undefined : hours,
     });
@@ -384,8 +393,8 @@ export const addSection = mutation({
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.restaurantId);
-    if (args.capacity < 1 || args.capacity > 500) throw new Error("Capacity must be 1–500 seats.");
-    if (!args.name.trim()) throw new Error("Section name is required.");
+    // Zod: non-empty name, seat kind enum, integer capacity 1–500.
+    parseOrThrow(sectionArgsSchema, args);
     return await ctx.db.insert("sections", {
       restaurantId: args.restaurantId,
       name: args.name.trim().slice(0, 60),
@@ -410,7 +419,7 @@ export const updateSection = mutation({
     const section = await ctx.db.get(args.id);
     if (!section) throw new Error("Section not found.");
     await requireOwner(ctx, section.restaurantId);
-    if (args.capacity < 1 || args.capacity > 500) throw new Error("Capacity must be 1–500 seats.");
+    parseOrThrow(sectionArgsSchema, args);
     await ctx.db.patch(args.id, {
       name: args.name.trim().slice(0, 60),
       kind: args.kind,
@@ -454,13 +463,8 @@ export const saveHours = mutation({
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.restaurantId);
-    if (args.hours.length !== 7) throw new Error("Provide hours for all 7 days.");
-    for (const h of args.hours) {
-      if (h.dayOfWeek < 0 || h.dayOfWeek > 6) throw new Error("Invalid day.");
-      if (h.enabled) {
-        if (!TIME_RE.test(h.open) || !TIME_RE.test(h.close)) throw new Error(`Invalid time for day ${h.dayOfWeek}.`);
-      }
-    }
+    // Zod: exactly 7 days, day 0–6, HH:mm for enabled days.
+    parseOrThrow(hoursSchema, { hours: args.hours });
     const existing = await ctx.db
       .query("hours")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", args.restaurantId))
@@ -484,7 +488,7 @@ export const createMenu = mutation({
   },
   handler: async (ctx, args) => {
     await requireOwner(ctx, args.restaurantId);
-    if (!args.name.trim()) throw new Error("Menu name is required.");
+    parseOrThrow(menuArgsSchema, args);
     return await ctx.db.insert("menus", {
       restaurantId: args.restaurantId,
       name: args.name.trim().slice(0, 80),
@@ -499,6 +503,7 @@ export const updateMenu = mutation({
     const menu = await ctx.db.get(args.id);
     if (!menu) throw new Error("Menu not found.");
     await requireOwner(ctx, menu.restaurantId);
+    parseOrThrow(menuArgsSchema, args);
     await ctx.db.patch(args.id, {
       name: args.name.trim().slice(0, 80),
       description: args.description?.trim().slice(0, 300),
@@ -540,11 +545,8 @@ export const createMenuItem = mutation({
     const menu = await ctx.db.get(args.menuId);
     if (!menu) throw new Error("Menu not found.");
     await requireOwner(ctx, menu.restaurantId);
-    if (!args.name.trim()) throw new Error("Item name is required.");
-    if (args.priceCents < 0 || args.priceCents > 1000000) throw new Error("Invalid price.");
-    if (args.spiceLevel !== undefined && args.spiceLevel !== "" && !SPICE_VALUES.includes(args.spiceLevel as SpiceLevel)) {
-      throw new Error("Invalid spice level.");
-    }
+    // Zod: non-empty name, price 0..1M, spice enum, tag/ingredient caps.
+    parseOrThrow(menuItemArgsSchema, args);
     return await ctx.db.insert("menuItems", {
       restaurantId: menu.restaurantId,
       menuId: args.menuId,
@@ -586,12 +588,7 @@ export const updateMenuItem = mutation({
     if (!item) throw new Error("Item not found.");
     await requireOwner(ctx, item.restaurantId);
 
-    if (args.priceCents !== undefined && (args.priceCents < 0 || args.priceCents > 1000000)) {
-      throw new Error("Invalid price.");
-    }
-    if (args.spiceLevel !== undefined && args.spiceLevel !== "" && !SPICE_VALUES.includes(args.spiceLevel as SpiceLevel)) {
-      throw new Error("Invalid spice level.");
-    }
+    parseOrThrow(menuItemUpdateSchema, args);
 
     // photo transitions: replace/remove uploaded files and clear the paired field
     let imageStorageId = item.imageStorageId;

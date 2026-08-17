@@ -4,6 +4,7 @@ import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { attemptBooking, type BookingArgs } from "./bookings";
+import { bookingArgsSchema, parseOrThrow } from "./validation";
 
 /**
  * Kamix booking queue.
@@ -39,14 +40,11 @@ export const enqueue = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to book a table.");
 
-    // Cheap validation up front so junk never enters the queue.
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(args.date)) throw new Error("Invalid date.");
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(args.time)) throw new Error("Invalid time.");
-    if (!Number.isInteger(args.partySize) || args.partySize < 1 || args.partySize > 20) {
-      throw new Error("Party size must be between 1 and 20.");
-    }
+    // Zod: real calendar date, HH:mm time, party size 1–20, non-empty name —
+    // junk never enters the queue.
+    parseOrThrow(bookingArgsSchema, args);
+
     const name = args.name.trim().slice(0, 80);
-    if (!name) throw new Error("Please enter your name.");
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
 
