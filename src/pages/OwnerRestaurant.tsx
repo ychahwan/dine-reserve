@@ -9,6 +9,7 @@ import {
   OwnerMenuRequestsTab,
   OwnerOrdersTab,
 } from "@/components/OwnerDiningTabs";
+import { OwnerGiftsTab, OwnerGiftsTabCount } from "@/components/OwnerGiftsTab";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -174,6 +175,7 @@ export default function OwnerRestaurant() {
             { key: "orders", label: "Orders", badge: "orders" as const },
             { key: "requests", label: "Requests", badge: "assists" as const },
             { key: "menuideas", label: "Menu ideas", badge: "menuRequests" as const },
+            { key: "gifts", label: "Gifts", badge: "gifts" as const },
             { key: "insights", label: "Insights" },
             { key: "notifications", label: "Notifications", badge: "notifications" as const },
           ].map((t) => (
@@ -187,7 +189,8 @@ export default function OwnerRestaurant() {
               {t.badge === "notifications" && (
                 <NotificationsBadge restaurantId={r._id} active={tab === "notifications"} />
               )}
-              {t.badge && t.badge !== "notifications" && (
+              {t.badge === "gifts" && <OwnerGiftsTabCount restaurantId={r._id} />}
+              {t.badge && t.badge !== "notifications" && t.badge !== "gifts" && (
                 <DiningTabCount restaurantId={r._id} kind={t.badge} />
               )}
             </TabsTrigger>
@@ -223,6 +226,9 @@ export default function OwnerRestaurant() {
         </TabsContent>
         <TabsContent value="menuideas" className="mt-5">
           <OwnerMenuRequestsTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="gifts" className="mt-5">
+          <OwnerGiftsTab restaurantId={r._id} />
         </TabsContent>
         <TabsContent value="insights" className="mt-5">
           <OwnerInsightsTab restaurantId={r._id} />

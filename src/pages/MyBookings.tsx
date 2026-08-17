@@ -1,5 +1,6 @@
 import { CustomerShell } from "@/components/CustomerShell";
 import { DiningDialog } from "@/components/DiningDialog";
+import { SocializeDialog } from "@/components/SocializeDialog";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -36,6 +37,7 @@ import {
   Copy,
   MapPin,
   MessageCircle,
+  PartyPopper,
   Send,
   ShieldCheck,
   Sparkles,
@@ -131,6 +133,12 @@ export default function MyBookings() {
   const [dineBookingId, setDineBookingId] = useState<string | null>(null);
   const dineBooking = dineBookingId
     ? (bookings ?? []).find((b) => b._id === dineBookingId) ?? null
+    : null;
+
+  // Socialize dialog: who's dining + diner-to-diner gifts
+  const [socializeBookingId, setSocializeBookingId] = useState<string | null>(null);
+  const socializeBooking = socializeBookingId
+    ? (bookings ?? []).find((b) => b._id === socializeBookingId) ?? null
     : null;
 
   const nowKey = `${today()}T00:00`;
@@ -516,6 +524,15 @@ export default function MyBookings() {
                               variant="ghost"
                               size="sm"
                               className="h-8 hover:bg-primary/10 hover:text-primary"
+                              title="See who's dining and send a gift"
+                              onClick={() => setSocializeBookingId(b._id)}
+                            >
+                              <PartyPopper className="size-3.5" /> Socialize
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 hover:bg-primary/10 hover:text-primary"
                               title="Order, ping the team, view your bill"
                               onClick={() => setDineBookingId(b._id)}
                             >
@@ -630,6 +647,14 @@ export default function MyBookings() {
         booking={dineBooking}
         onOpenChange={(open) => {
           if (!open) setDineBookingId(null);
+        }}
+      />
+
+      {/* Socialize: who's dining + diner-to-diner gifts */}
+      <SocializeDialog
+        booking={socializeBooking}
+        onOpenChange={(open) => {
+          if (!open) setSocializeBookingId(null);
         }}
       />
 
