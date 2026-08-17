@@ -63,8 +63,8 @@ docker compose --profile dev up --build -d    # http://localhost:5174
 ### 4. Android APK in Docker (no Android Studio needed)
 
 ```bash
-docker compose build apk            # ~5–10 min first time (SDK + Gradle deps)
-docker compose run --rm apk         # copies apk/kamix-debug.apk to ./apk/
+npm run mobile:docker               # build image + compile APK in one command
+# → apk/kamix-debug.apk
 adb install apk/kamix-debug.apk     # install on a connected device
 ```
 
@@ -82,6 +82,14 @@ Kamix uses **Capacitor** to wrap the Vite build into native apps. The web bundle
 is built with `npm run build` (which bakes `VITE_CONVEX_URL` in), then synced
 into the native project and compiled.
 
+### One-command builds
+
+| Command | What it does | Output |
+|---|---|---|
+| `npm run mobile:convex` | **Full Convex pipeline**: push backend functions (`convex dev --once`) → web build with the live Convex URL → `cap add android` (once) → `cap sync` → Gradle `assembleDebug`. Requires JDK 17+ and Android SDK locally. | `apk/kamix-debug.apk` |
+| `npm run mobile:docker` | **Docker build** — `docker compose build apk && docker compose run --rm apk`. No local JDK/SDK needed; everything (SDK + Gradle) runs in the container. Expects the Convex backend to already be deployed. | `apk/kamix-debug.apk` |
+| `KAMIX_RELEASE=1 npm run mobile:convex` | Signed **production release** APK — set `KAMIX_KEYSTORE_FILE`, `KAMIX_KEYSTORE_PASS`, `KAMIX_KEY_ALIAS`, `KAMIX_KEY_PASS` to sign. Play Store ready. | `apk/kamix-release.apk` |
+
 ### Android APK
 
 Local build (needs JDK 17+ and Android Studio / Android SDK):
@@ -95,8 +103,9 @@ adb install apk/kamix-debug.apk
 Or build the APK in Docker (no local SDK required):
 
 ```bash
-docker compose build apk
-docker compose run --rm apk          # → ./apk/kamix-debug.apk
+npm run mobile:docker                # build image + compile + copy APK in one command
+# → apk/kamix-debug.apk
+adb install apk/kamix-debug.apk
 ```
 
 ### iOS (macOS + Xcode only — Apple licensing prevents Docker/Linux builds)
@@ -114,6 +123,7 @@ KAMIX_IOS_DEST="generic/platform=iOS" npm run build:ios
 | Script | What it does |
 |---|---|
 | `./scripts/build-mobile.sh apk \| ios \| all` | Wrapper around both builds |
+| `./scripts/build-mobile-convex.sh` | Convex pipeline: push backend → web build → `cap add android` (once) → `cap sync` → `./gradlew assembleDebug` (or signed `assembleRelease` with `KAMIX_RELEASE=1`) → `apk/kamix-debug.apk` / `apk/kamix-release.apk` |
 | `./scripts/build-apk.sh` | Web build → `cap add android` (once) → `cap sync` → `./gradlew assembleDebug` → `apk/kamix-debug.apk` |
 | `./scripts/build-ios.sh` | macOS check → web build → `cap add ios` (once) → `cap sync` → `xcodebuild` (simulator by default) |
 | `npm run mobile:sync` | `npx cap sync` — copy the latest web build into native projects |
