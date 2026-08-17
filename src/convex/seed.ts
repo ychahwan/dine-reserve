@@ -16,6 +16,44 @@ function daysFromNow(days: number): string {
 }
 
 // ---------------------------------------------------------------------------
+// demo gift catalog (Socialize)
+// ---------------------------------------------------------------------------
+
+/**
+ * Gift lists the demo venues ship with so the Socialize room is usable on a
+ * fresh install. Owners can edit or extend these from the Gifts tab.
+ */
+const SEED_GIFTS: Record<
+  string,
+  { name: string; emoji: string; description?: string; priceCents: number }[]
+> = {
+  Trullo: [
+    { name: "Aperol spritz", emoji: "🍊", description: "Sunset in a glass", priceCents: 900 },
+    { name: "House negroni", emoji: "🥃", description: "Gin, Campari, sweet vermouth", priceCents: 1200 },
+    { name: "Panna cotta", emoji: "🍮", description: "Vanilla bean, berries", priceCents: 800 },
+  ],
+  "Sakura House": [
+    { name: "Yuzu highball", emoji: "🍋", description: "Yuzu, soda, ice", priceCents: 1100 },
+    { name: "Sake flight", emoji: "🍶", description: "Three pours, chef's pick", priceCents: 1500 },
+    { name: "Mochi trio", emoji: "🍡", description: "Matcha, strawberry, black sesame", priceCents: 700 },
+  ],
+  "Casa Oliva": [
+    { name: "Rose spritz", emoji: "🌹", description: "Rosé, Aperol, soda", priceCents: 900 },
+    { name: "Croquetas de jamón", emoji: "🧆", description: "Four to share", priceCents: 800 },
+  ],
+  "La Brasa": [
+    { name: "Malbec glass", emoji: "🍷", description: "Local malbec", priceCents: 900 },
+    { name: "Provoleta", emoji: "🧀", description: "Melted provolone, oregano", priceCents: 900 },
+  ],
+};
+
+/** Fallback list for demo restaurants without a curated set. */
+const DEFAULT_GIFTS = [
+  { name: "House drink", emoji: "🍸", description: "Ask the bartender", priceCents: 900 },
+  { name: "Dessert to share", emoji: "🍰", description: "Chef's pick", priceCents: 800 },
+];
+
+// ---------------------------------------------------------------------------
 // seed
 // ---------------------------------------------------------------------------
 
@@ -409,6 +447,24 @@ async function runSeed(ctx: MutationCtx) {
     createdAt: now - 1000 * 60 * 30,
   });
 
+  // --------------------------------------- demo gift catalog (Socialize)
+  // A few gifts per venue so the Socialize room works on a fresh install.
+  for (const r of [trullo, sakura, oliva, asado]) {
+    const doc = await ctx.db.get(r);
+    const list = (doc && SEED_GIFTS[doc.name]) ?? DEFAULT_GIFTS;
+    for (const g of list) {
+      await ctx.db.insert("giftTypes", {
+        restaurantId: r,
+        name: g.name,
+        emoji: g.emoji,
+        description: g.description,
+        priceCents: g.priceCents,
+        available: true,
+        createdAt: now,
+      });
+    }
+  }
+
   // ------------------------------------------------ verified demo reviews
   await ctx.db.insert("reviews", {
     restaurantId: trullo,
@@ -448,7 +504,7 @@ export const seed = mutation({
 /**
  * Seeds demo data when the database is empty; otherwise retrofits older
  * deployments with the latest demo attributes (solo flag, menu attributes,
- * ingredients). Safe to call on every app boot.
+ * ingredients, gift catalog). Safe to call on every app boot.
  */
 export const ensureDemoData = mutation({
   args: {},
@@ -501,14 +557,16 @@ const SEED_ITEM_ATTRS: Record<
 /**
  * Idempotent data upgrade for deployments that were seeded before the
  * enrichment improvements (solo-friendly flag, menu-item photos/attributes,
- * dietary search, ingredients). Only touches restaurants owned by seeded demo
- * accounts (@kamix.demo / @seatly.demo) and only fills *missing* fields, so
- * owner customizations are never overwritten. Safe to run repeatedly.
+ * dietary search, ingredients, Socialize gift catalog). Only touches
+ * restaurants owned by seeded demo accounts (@kamix.demo / @seatly.demo) and
+ * only fills *missing* fields, so owner customizations are never overwritten.
+ * Safe to run repeatedly.
  */
 async function runRetrofit(ctx: MutationCtx) {
   const restaurants = await ctx.db.query("restaurants").collect();
   let patchedRestaurants = 0;
   let patchedItems = 0;
+  let patchedGifts = 0;
 
   for (const r of restaurants) {
     // safeGet: tolerate owners stored as bare auth subjects (e.g. test/legacy
@@ -547,8 +605,29 @@ async function runRetrofit(ctx: MutationCtx) {
         patchedItems++;
       }
     }
+
+    // Socialize gift catalog (only where completely empty — owner edits win)
+    const existingGift = await ctx.db
+      .query("giftTypes")
+      .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+      .first();
+    if (!existingGift) {
+      const list = SEED_GIFTS[r.name] ?? DEFAULT_GIFTS;
+      for (const g of list) {
+        await ctx.db.insert("giftTypes", {
+          restaurantId: r._id,
+          name: g.name,
+          emoji: g.emoji,
+          description: g.description,
+          priceCents: g.priceCents,
+          available: true,
+          createdAt: Date.now(),
+        });
+      }
+      patchedGifts += list.length;
+    }
   }
-  return { patchedRestaurants, patchedItems };
+  return { patchedRestaurants, patchedItems, patchedGifts };
 }
 
 export const retrofitDemoData = mutation({

@@ -9,7 +9,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { Check, CheckCircle2, Gift, Pencil, Plus, Trash2 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatPrice, formatTime } from "@/lib/format";
 import { toast } from "sonner";
@@ -77,12 +77,7 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!draft) return;
-    // keep the form in sync if the catalog reloads (e.g. after a save)
-  }, [draft]);
-
-  const startEdit = (g: (typeof gifts)[number]) => {
+  const startEdit = (g: NonNullable<typeof gifts>[number]) => {
     setDraft({
       id: g._id,
       name: g.name,

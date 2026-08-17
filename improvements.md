@@ -20,6 +20,7 @@ Status legend: **Todo** (not started) · **In progress** (being built) · **Done
 | I-12 | Itemized bill at the table | Persistent itemized bill per booking (lines, quantities, totals, paid flag). Payment via Stripe is the Tier-2 I-20 item — the bill is already shaped for it. | **Done** |
 | I-13 | Journey continuity (date carry-over) | Selected date + party size carry over from search into the restaurant detail booking sheet — the date is never asked twice. | **Done** |
 | I-14 | Menu ingredients + order customization | Restaurants define each dish's ingredients in the menu editor (chips in the item form). Diners customize at the table — leave any ingredient out (validated against the restaurant's list) and add per-line instructions; the kitchen's order view and the itemized bill both carry the customization. Seed demo items now ship ingredient lists. | **Done** |
+| I-15 | Socialize room | Diner-to-diner space next to booking: appear/invisible on the day of a visit, live "who's dining" room, and send drinks/desserts from the restaurant's gift catalog — charged to the sender's bill, revealed now or as a delivery surprise. Owner Gifts tab manages the catalog and the prepare/deliver queue; demo venues ship gift catalogs (seed + retrofit). | **Done** |
 
 ## Tier 2 — Needs API keys (payments / notifications / AI)
 

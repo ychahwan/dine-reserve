@@ -54,7 +54,7 @@ type VisibleDiner = {
   name: string;
   image?: string;
   checkedIn: boolean;
-  booking: { time: string; sectionName: string; partySize: number; code: string };
+  booking: { time: string; sectionName?: string; partySize: number; code: string };
 };
 
 type GiftLike = {
