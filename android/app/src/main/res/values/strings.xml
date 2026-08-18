@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Kamix</string>
+    <string name="title_activity_main">Kamix</string>
+    <string name="package_name">com.kamix.app</string>
+    <string name="custom_url_scheme">com.kamix.app</string>
+</resources>

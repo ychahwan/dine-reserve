@@ -1,0 +1,39 @@
+# ---------------------------------------------------------------------------
+# Kamix — Render Blueprint
+#
+# Deploys the self-hosted Convex backend as a Web Service on Render.
+#
+# Usage:
+#   1. Push this repo to GitHub/GitLab.
+#   2. In Render dashboard → New → Blueprint, connect the repo.
+#   3. Render reads this file and creates the service automatically.
+#
+# Or use the CLI:
+#   render blueprint apply render.yaml
+#
+# After deployment, set VITE_CONVEX_URL in your .env to the service URL:
+#   VITE_CONVEX_URL=https://convex-kamix.onrender.com
+# ---------------------------------------------------------------------------
+services:
+  - type: web
+    name: convex-kamix
+    runtime: docker
+    dockerfilePath: Dockerfile.convex
+    envVars:
+      - key: CONVEX_SITE_URL
+        sync: false
+        # Render auto-generates this; override if needed.
+        # After deploy, set this to the service's public URL.
+        value: https://convex-kamix.onrender.com
+      - key: NODE_ENV
+        value: production
+    # Persistent disk for Convex data (requires Render paid plan).
+    # Remove this block for free-tier (data resets on redeploy).
+    disk:
+      name: convex-data
+      mountPath: /app/data
+      sizeGB: 1
+    healthCheckPath: /
+    autoDeploy: true
+    # Convex needs more than the default 512MB for the backend binary.
+    plan: starter

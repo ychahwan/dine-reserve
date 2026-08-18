@@ -1,14 +1,37 @@
 services:
   # ---------------------------------------------------------------
-  # Production app: builds the web bundle and serves it with nginx.
-  #   docker compose up --build -d   → http://localhost:5173
+  # Convex self-hosted backend.
+  #   docker compose up convex          # start backend on :3210
+  #   docker compose up -d convex web   # backend + production web
+  # ---------------------------------------------------------------
+  convex:
+    build:
+      context: .
+      dockerfile: Dockerfile.convex
+    image: kamix-convex:latest
+    container_name: kamix-convex
+    ports:
+      - "3210:3210"
+    volumes:
+      - convex-data:/app/data
+    environment:
+      CONVEX_SITE_URL: ${CONVEX_SITE_URL:-http://localhost:3210}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://localhost:3210/"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------
+  # Production web app: builds the web bundle and serves with nginx.
+  #   docker compose up --build -d web   → http://localhost:5173
   # ---------------------------------------------------------------
   web:
     build:
       context: .
       args:
-        # Baked into the production bundle at build time. Set VITE_CONVEX_URL
-        # in .env to the Convex deployment URL (e.g. https://<project>.convex.site)
         VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
         VLY_INTEGRATION_KEY: ${VLY_INTEGRATION_KEY:-}
     image: kamix-web:latest
@@ -17,11 +40,14 @@ services:
       - "5173:80"
     env_file:
       - .env
+    depends_on:
+      convex:
+        condition: service_healthy
     restart: unless-stopped
 
   # ---------------------------------------------------------------
   # Local development with hot reload (Vite).
-  #   docker compose --profile dev up --build -d   → http://localhost:5174
+  #   docker compose --profile dev up --build   → http://localhost:5174
   # ---------------------------------------------------------------
   dev:
     profiles: ["dev"]
@@ -29,14 +55,15 @@ services:
     working_dir: /app
     volumes:
       - .:/app
-      # Anonymous volume so the container installs its own node_modules and
-      # never clobbers the host's.
       - /app/node_modules
     ports:
       - "5174:5173"
     environment:
-      VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
+      VITE_CONVEX_URL: ${VITE_CONVEX_URL:-http://localhost:3210}
     command: sh -c "npm ci && npm run dev"
+    depends_on:
+      convex:
+        condition: service_healthy
     restart: unless-stopped
 
   # ---------------------------------------------------------------
@@ -57,3 +84,7 @@ services:
       - ./apk:/apk
     environment:
       VITE_CONVEX_URL: ${VITE_CONVEX_URL:-}
+
+volumes:
+  convex-data:
+    driver: local
