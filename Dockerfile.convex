@@ -51,7 +51,7 @@ RUN mkdir -p /app/data
 
 EXPOSE 3210
 
-# 4. Entrypoint.
+# 5. Entrypoint.
 COPY docker/convex-entrypoint.sh /app/convex-entrypoint.sh
 RUN chmod +x /app/convex-entrypoint.sh
 

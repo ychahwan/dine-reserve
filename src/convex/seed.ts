@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 import { mutation, MutationCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { ensureSlotsForDate } from "./availability";
 import { applyDemoRules } from "./demoRules";
 import { safeGet } from "./helpers";
@@ -37,13 +37,17 @@ const SEED_GIFTS: Record<
     { name: "Sake flight", emoji: "🍶", description: "Three pours, chef's pick", priceCents: 1500 },
     { name: "Mochi trio", emoji: "🍡", description: "Matcha, strawberry, black sesame", priceCents: 700 },
   ],
-  "Casa Oliva": [
-    { name: "Rose spritz", emoji: "🌹", description: "Rosé, Aperol, soda", priceCents: 900 },
-    { name: "Croquetas de jamón", emoji: "🧆", description: "Four to share", priceCents: 800 },
+  "Beit Zaytoun": [
+    { name: "Rose lemonade", emoji: "🌹", description: "Rosewater, mint, lemon", priceCents: 700 },
+    { name: "Baklava trio", emoji: "🍯", description: "Pistachio, walnut, cashew", priceCents: 800 },
   ],
   "La Brasa": [
-    { name: "Malbec glass", emoji: "🍷", description: "Local malbec", priceCents: 900 },
-    { name: "Provoleta", emoji: "🧀", description: "Melted provolone, oregano", priceCents: 900 },
+    { name: "Margarita", emoji: "🍹", description: "Tequila, lime, salt rim", priceCents: 1000 },
+    { name: "Churros & cajeta", emoji: "🍩", description: "Warm churros, goat-milk caramel", priceCents: 800 },
+  ],
+  "Meridian Kitchen": [
+    { name: "Rooftop cocktail", emoji: "🍸", description: "Ask the bartender", priceCents: 1100 },
+    { name: "Tasting dessert", emoji: "🍰", description: "Chef's fusion pick", priceCents: 900 },
   ],
 };
 
@@ -52,6 +56,26 @@ const DEFAULT_GIFTS = [
   { name: "House drink", emoji: "🍸", description: "Ask the bartender", priceCents: 900 },
   { name: "Dessert to share", emoji: "🍰", description: "Chef's pick", priceCents: 800 },
 ];
+
+// ---------------------------------------------------------------------------
+// 100-customer generation
+// ---------------------------------------------------------------------------
+
+const FIRST_NAMES = [
+  "Ava", "Leo", "Mia", "Noah", "Zoe", "Liam", "Emma", "Ethan", "Grace", "Lucas",
+  "Sofia", "Mason", "Chloe", "Oscar", "Ruby", "Felix", "Nora", "Adam", "Ivy", "Owen",
+];
+const LAST_NAMES = [
+  "Rossi", "Bianchi", "Romano", "Ferrari", "Esposito", "Ricci", "Marino", "Greco",
+  "Conti", "De Luca", "Costa", "Fontana", "Villa", "Rinaldi", "Caruso", "Moretti",
+  "Barbieri", "Santoro", "Mariani", "Serra",
+];
+
+function customerName(i: number): string {
+  const first = FIRST_NAMES[i % FIRST_NAMES.length];
+  const last = LAST_NAMES[Math.floor(i / FIRST_NAMES.length) % LAST_NAMES.length];
+  return `${first} ${last}`;
+}
 
 // ---------------------------------------------------------------------------
 // seed
@@ -73,10 +97,25 @@ async function runSeed(ctx: MutationCtx) {
   // claimDemo can identify them and a fresh sign-in can take over the venue.
   const ownerMarco = await mkUser("Marco", "marco@kamix.demo", "owner", "+15550001001");
   const ownerYuki = await mkUser("Yuki", "yuki@kamix.demo", "owner", "+15550001002");
-  const ownerSofia = await mkUser("Sofia", "sofia@kamix.demo", "owner", "+15550001003");
+  const ownerRania = await mkUser("Rania", "rania@kamix.demo", "owner", "+15550001003");
   const ownerLuis = await mkUser("Luis", "luis@kamix.demo", "owner", "+15550001004");
-  const ava = await mkUser("Ava", "ava@kamix.demo", "customer", "+15550001111");
-  const leo = await mkUser("Leo", "leo@kamix.demo", "customer", "+15550002222");
+  const ownerNoah = await mkUser("Noah", "noah@kamix.demo", "owner", "+15550001005");
+
+  // ------------------------------------------------- 100 demo customers
+  // customers[0] = Ava, customers[1] = Leo (kept as the two "hero" accounts
+  // used below for sample bookings / waitlist / reviews); the remaining 98
+  // are generated for a realistic customer base.
+  const customers: Id<"users">[] = [];
+  customers.push(await mkUser("Ava", "ava@kamix.demo", "customer", "+15550001111"));
+  customers.push(await mkUser("Leo", "leo@kamix.demo", "customer", "+15550002222"));
+  for (let i = 2; i < 100; i++) {
+    const name = customerName(i);
+    const email = `customer${i + 1}@kamix.demo`;
+    const phone = `+1555010${String(i).padStart(3, "0")}`;
+    customers.push(await mkUser(name, email, "customer", phone));
+  }
+  const ava = customers[0];
+  const leo = customers[1];
 
   // ---------------------------------------------------------- restaurants
   const trullo = await ctx.db.insert("restaurants", {
@@ -111,40 +150,56 @@ async function runSeed(ctx: MutationCtx) {
     searchText: "",
     createdAt: now,
   });
-  const oliva = await ctx.db.insert("restaurants", {
-    ownerId: ownerSofia,
-    name: "Casa Oliva",
-    cuisine: "Mediterranean",
+  const zaytoun = await ctx.db.insert("restaurants", {
+    ownerId: ownerRania,
+    name: "Beit Zaytoun",
+    cuisine: "Lebanese",
     city: "Rome",
     address: "Via del Governo Vecchio 90",
     neighborhood: "Ponte",
     phone: "+39 06 555 0303",
     priceRange: "$$",
     description:
-      "Sun-drenched courtyard, olive-oil everything, and the best aperitivo in Rome after work.",
-    imageUrl: "https://images.unsplash.com/photo-1537047902294-62a40c20a6ae?w=900&q=70",
+      "Family-style mezze on a sun-drenched terrace — hummus, kibbeh, and slow-grilled shawarma.",
+    imageUrl: "https://images.unsplash.com/photo-1544025162-d76694265947?w=900&q=70",
     features: { inside: true, outside: true, bar: true, smoking: false, parking: false, liveMusic: true, soloFriendly: true },
     searchText: "",
     createdAt: now,
   });
-  const asado = await ctx.db.insert("restaurants", {
+  const brasa = await ctx.db.insert("restaurants", {
     ownerId: ownerLuis,
     name: "La Brasa",
-    cuisine: "Steakhouse",
+    cuisine: "Mexican",
     city: "Rome",
     address: "Via Ostiense 300",
     neighborhood: "Testaccio",
     phone: "+39 06 555 0404",
     priceRange: "$$$$",
     description:
-      "Argentine-style asado over open flame. Late-night bar section with a smoking terrace.",
+      "Wood-fired tacos and mezcal over open flame. Late-night bar section with a smoking terrace.",
     imageUrl: "https://images.unsplash.com/photo-1600891964092-4316c288032e?w=900&q=70",
     features: { inside: true, outside: true, bar: true, smoking: true, parking: true, liveMusic: true, soloFriendly: true },
     searchText: "",
     createdAt: now,
   });
+  const meridian = await ctx.db.insert("restaurants", {
+    ownerId: ownerNoah,
+    name: "Meridian Kitchen",
+    cuisine: "International",
+    city: "Barcelona",
+    address: "Passeig de Gràcia 45",
+    neighborhood: "Eixample",
+    phone: "+34 93 555 0505",
+    priceRange: "$$$",
+    description:
+      "A rooftop kitchen crossing continents — wagyu burgers, pad thai, and butter chicken under the stars.",
+    imageUrl: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=70",
+    features: { inside: true, outside: true, bar: true, smoking: false, parking: false, liveMusic: true, soloFriendly: true },
+    searchText: "",
+    createdAt: now,
+  });
 
-  for (const r of [trullo, sakura, oliva, asado]) {
+  for (const r of [trullo, sakura, zaytoun, brasa, meridian]) {
     const doc = await ctx.db.get(r);
     const searchText = [doc!.name, doc!.cuisine, doc!.city, doc!.neighborhood ?? "", doc!.description ?? ""].join(" ").toLowerCase();
     // no-show protection: Trullo demoes the free-cancel-until policy
@@ -162,11 +217,13 @@ async function runSeed(ctx: MutationCtx) {
   const trulloTerrace = await sec(trullo, "Terrace", "outside", false, 16);
   const sakuraCounter = await sec(sakura, "Omakase counter", "inside", false, 12);
   const sakuraBar = await sec(sakura, "Sake bar", "bar", false, 10);
-  const olivaCourtyard = await sec(oliva, "Courtyard", "outside", false, 24);
-  const olivaBar = await sec(oliva, "Aperitivo bar", "bar", false, 12);
-  const asadoMain = await sec(asado, "Main hall", "inside", false, 40);
-  const asadoTerrace = await sec(asado, "Smoking terrace", "outside", true, 14);
-  const asadoBar = await sec(asado, "Grill bar", "bar", false, 12);
+  const zaytounTerrace = await sec(zaytoun, "Terrace", "outside", false, 24);
+  const zaytounDining = await sec(zaytoun, "Dining room", "inside", false, 24);
+  const brasaMain = await sec(brasa, "Main hall", "inside", false, 40);
+  const brasaTerrace = await sec(brasa, "Smoking terrace", "outside", true, 14);
+  const brasaBar = await sec(brasa, "Grill bar", "bar", false, 12);
+  const meridianDining = await sec(meridian, "Dining room", "inside", false, 30);
+  const meridianRooftop = await sec(meridian, "Rooftop", "outside", false, 20);
 
   // ---------------------------------------------------------------- hours
   const hours: { restaurantId: string; dayOfWeek: number; open: string; close: string; enabled: boolean }[] = [];
@@ -175,8 +232,9 @@ async function runSeed(ctx: MutationCtx) {
   for (const dow of [0, 1, 2, 3, 4, 5, 6]) {
     addHours(trullo, dow, dow === 6 || dow === 0 ? "12:00" : "17:30", "23:30", true);
     addHours(sakura, dow, dow === 6 || dow === 0 ? "12:00" : "18:00", "23:00", true);
-    addHours(oliva, dow, "12:00", "23:30", true);
-    addHours(asado, dow, dow === 6 || dow === 0 ? "12:00" : "19:00", "00:30", true);
+    addHours(zaytoun, dow, "12:00", "23:30", true);
+    addHours(brasa, dow, dow === 6 || dow === 0 ? "12:00" : "19:00", "00:30", true);
+    addHours(meridian, dow, "12:00", "23:00", true);
   }
   for (const h of hours) await ctx.db.insert("hours", h as never);
 
@@ -288,64 +346,111 @@ async function runSeed(ctx: MutationCtx) {
     ingredients: ["Yuzu", "Soda", "Ice"],
   });
 
-  const olivaMenu = await mkMenu(oliva, "Sharing plates", "All day");
-  await mkItem(olivaMenu, oliva, "Patatas bravas", 700, {
-    category: "Tapas",
+  const zaytounMenu = await mkMenu(zaytoun, "Mezze & Grill", "All day");
+  await mkItem(zaytounMenu, zaytoun, "Hummus", 700, {
+    category: "Mezze",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1585032226651-759b368d7246?w=400&q=70",
-    tags: ["Vegan", "Spicy", "Shareable"],
-    spiceLevel: "medium",
-    ingredients: ["Potato", "Brava sauce", "Aioli", "Paprika"],
+    imageUrl: "https://images.unsplash.com/photo-1615937691194-97dbd3ffcd28?w=400&q=70",
+    tags: ["Vegan", "Shareable"],
+    ingredients: ["Chickpeas", "Tahini", "Lemon", "Olive oil"],
   });
-  await mkItem(olivaMenu, oliva, "Croquetas de jamón", 800, {
-    category: "Tapas",
-    tags: ["Shareable"],
-    allergens: ["Gluten", "Dairy"],
-    ingredients: ["Ham", "Béchamel", "Breadcrumbs"],
+  await mkItem(zaytounMenu, zaytoun, "Tabbouleh", 750, {
+    category: "Mezze",
+    tags: ["Vegan", "Shareable"],
+    ingredients: ["Parsley", "Bulgur", "Tomato", "Lemon"],
   });
-  await mkItem(olivaMenu, oliva, "Grilled octopus", 1600, {
+  await mkItem(zaytounMenu, zaytoun, "Kibbeh", 900, {
     category: "Mains",
     popular: true,
-    tags: ["Grilled", "Local"],
-    allergens: ["Molluscs"],
-    ingredients: ["Octopus", "Smoked paprika", "Potato cream", "Olive oil"],
+    tags: ["Fried"],
+    allergens: ["Gluten"],
+    ingredients: ["Bulgur", "Ground beef", "Pine nuts", "Spices"],
   });
-  await mkItem(olivaMenu, oliva, "Rose spritz", 900, {
-    category: "Drinks",
-    tags: ["House-made"],
-    ingredients: ["Rosé", "Aperol", "Soda", "Orange"],
+  await mkItem(zaytounMenu, zaytoun, "Chicken shawarma", 1400, {
+    category: "Mains",
+    popular: true,
+    tags: ["Grilled"],
+    ingredients: ["Chicken", "Garlic sauce", "Pickles", "Flatbread"],
+  });
+  await mkItem(zaytounMenu, zaytoun, "Baklava", 700, {
+    category: "Dessert",
+    tags: ["Vegetarian", "Shareable"],
+    allergens: ["Nuts", "Gluten"],
+    ingredients: ["Phyllo", "Pistachio", "Honey syrup"],
   });
 
-  const asadoMenu = await mkMenu(asado, "Asado", "From the fire");
-  await mkItem(asadoMenu, asado, "Entraña (skirt steak) 400g", 3400, {
-    category: "Cuts",
+  const brasaMenu = await mkMenu(brasa, "Fuego Mexicano", "From the fire");
+  await mkItem(brasaMenu, brasa, "Tacos al pastor", 1300, {
+    category: "Tacos",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1544025162-d76694265947?w=400&q=70",
+    imageUrl: "https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=400&q=70",
     tags: ["Chef's special", "Grilled"],
-    ingredients: ["Skirt steak", "Chimichurri", "Charred lemon"],
+    ingredients: ["Pork", "Pineapple", "Onion", "Cilantro", "Corn tortilla"],
   });
-  await mkItem(asadoMenu, asado, "Chorizo criollo", 1300, {
-    category: "Cuts",
-    tags: ["Spicy"],
-    allergens: ["Gluten", "Sulphites"],
-    spiceLevel: "hot",
-    ingredients: ["Beef sausage", "Smoked paprika", "Peppers"],
+  await mkItem(brasaMenu, brasa, "Guacamole", 800, {
+    category: "Starters",
+    tags: ["Vegan", "Shareable"],
+    ingredients: ["Avocado", "Lime", "Cilantro", "Serrano chile"],
   });
-  await mkItem(asadoMenu, asado, "Provoleta", 900, {
+  await mkItem(brasaMenu, brasa, "Elote", 700, {
     category: "Starters",
     popular: true,
-    tags: ["Vegetarian", "Shareable"],
+    tags: ["Vegetarian", "Spicy"],
+    spiceLevel: "medium",
     allergens: ["Dairy"],
-    ingredients: ["Provolone", "Oregano", "Olive oil"],
+    ingredients: ["Grilled corn", "Cotija", "Chili powder", "Lime"],
   });
-  await mkItem(asadoMenu, asado, "Malbec glass", 900, {
+  await mkItem(brasaMenu, brasa, "Carne asada 400g", 3400, {
+    category: "Cuts",
+    popular: true,
+    tags: ["Grilled"],
+    ingredients: ["Skirt steak", "Chimichurri", "Charred lime"],
+  });
+  await mkItem(brasaMenu, brasa, "Margarita", 1000, {
     category: "Drinks",
-    tags: ["Local"],
-    ingredients: ["Malbec"],
+    tags: ["House-made"],
+    ingredients: ["Tequila", "Lime", "Triple sec"],
+  });
+
+  const meridianMenu = await mkMenu(meridian, "Rooftop Fusion", "Global small plates");
+  await mkItem(meridianMenu, meridian, "Wagyu burger", 2200, {
+    category: "Mains",
+    popular: true,
+    imageUrl: "https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=70",
+    tags: ["Chef's special", "Grilled"],
+    allergens: ["Gluten", "Dairy"],
+    ingredients: ["Wagyu beef", "Brioche bun", "Truffle aioli", "Cheddar"],
+  });
+  await mkItem(meridianMenu, meridian, "Pad thai", 1500, {
+    category: "Mains",
+    popular: true,
+    tags: ["Spicy"],
+    spiceLevel: "medium",
+    allergens: ["Peanuts", "Shellfish", "Gluten"],
+    ingredients: ["Rice noodles", "Shrimp", "Peanuts", "Tamarind"],
+  });
+  await mkItem(meridianMenu, meridian, "Butter chicken curry", 1700, {
+    category: "Mains",
+    tags: ["Mild spice"],
+    spiceLevel: "mild",
+    allergens: ["Dairy"],
+    ingredients: ["Chicken", "Tomato", "Cream", "Garam masala"],
+  });
+  await mkItem(meridianMenu, meridian, "Poke bowl", 1600, {
+    category: "Mains",
+    tags: ["Raw", "Gluten-free"],
+    allergens: ["Fish", "Soy"],
+    ingredients: ["Ahi tuna", "Rice", "Avocado", "Edamame", "Ponzu"],
+  });
+  await mkItem(meridianMenu, meridian, "Rooftop tiramisu", 900, {
+    category: "Dessert",
+    tags: ["Vegetarian"],
+    allergens: ["Dairy", "Gluten", "Eggs"],
+    ingredients: ["Mascarpone", "Espresso", "Cocoa", "Ladyfingers"],
   });
 
   // ------------------------------------------------------------ slots (10 days)
-  for (const restaurantId of [trullo, sakura, oliva, asado]) {
+  for (const restaurantId of [trullo, sakura, zaytoun, brasa, meridian]) {
     for (let i = 0; i < 10; i++) {
       await ensureSlotsForDate(ctx, restaurantId, daysFromNow(i));
     }
@@ -449,7 +554,7 @@ async function runSeed(ctx: MutationCtx) {
 
   // --------------------------------------- demo gift catalog (Socialize)
   // A few gifts per venue so the Socialize room works on a fresh install.
-  for (const r of [trullo, sakura, oliva, asado]) {
+  for (const r of [trullo, sakura, zaytoun, brasa, meridian]) {
     const doc = await ctx.db.get(r);
     const list = (doc && SEED_GIFTS[doc.name]) ?? DEFAULT_GIFTS;
     for (const g of list) {
@@ -489,7 +594,12 @@ async function runSeed(ctx: MutationCtx) {
     createdAt: now - 1000 * 60 * 60 * 24 * 6,
   });
 
-  return { seeded: true, restaurants: [trullo, sakura, oliva, asado], booking: b1 };
+  return {
+    seeded: true,
+    customers: customers.length,
+    restaurants: [trullo, sakura, zaytoun, brasa, meridian],
+    booking: b1,
+  };
 }
 
 export const seed = mutation({
@@ -544,14 +654,21 @@ const SEED_ITEM_ATTRS: Record<
   "Salmon sashimi": { tags: ["Raw"], allergens: ["Fish"], ingredients: ["Fresh salmon", "Daikon", "Wasabi", "Soy"] },
   "Miso soup": { tags: ["Vegan"], allergens: ["Soy", "Gluten"] },
   "Yuzu highball": { tags: ["House-made"], ingredients: ["Yuzu", "Soda", "Ice"] },
-  "Patatas bravas": { tags: ["Vegan", "Spicy", "Shareable"], spiceLevel: "medium", ingredients: ["Potato", "Brava sauce", "Aioli", "Paprika"] },
-  "Croquetas de jamón": { tags: ["Shareable"], allergens: ["Gluten", "Dairy"], ingredients: ["Ham", "Béchamel", "Breadcrumbs"] },
-  "Grilled octopus": { tags: ["Grilled", "Local"], allergens: ["Molluscs"], ingredients: ["Octopus", "Smoked paprika", "Potato cream", "Olive oil"] },
-  "Rose spritz": { tags: ["House-made"], ingredients: ["Rosé", "Aperol", "Soda", "Orange"] },
-  "Entraña (skirt steak) 400g": { tags: ["Chef's special", "Grilled"], ingredients: ["Skirt steak", "Chimichurri", "Charred lemon"] },
-  "Chorizo criollo": { tags: ["Spicy"], allergens: ["Gluten", "Sulphites"], spiceLevel: "hot", ingredients: ["Beef sausage", "Smoked paprika", "Peppers"] },
-  "Provoleta": { tags: ["Vegetarian", "Shareable"], allergens: ["Dairy"], ingredients: ["Provolone", "Oregano", "Olive oil"] },
-  "Malbec glass": { tags: ["Local"], ingredients: ["Malbec"] },
+  "Hummus": { tags: ["Vegan", "Shareable"], ingredients: ["Chickpeas", "Tahini", "Lemon", "Olive oil"] },
+  "Tabbouleh": { tags: ["Vegan", "Shareable"], ingredients: ["Parsley", "Bulgur", "Tomato", "Lemon"] },
+  "Kibbeh": { tags: ["Fried"], allergens: ["Gluten"], ingredients: ["Bulgur", "Ground beef", "Pine nuts", "Spices"] },
+  "Chicken shawarma": { tags: ["Grilled"], ingredients: ["Chicken", "Garlic sauce", "Pickles", "Flatbread"] },
+  "Baklava": { tags: ["Vegetarian", "Shareable"], allergens: ["Nuts", "Gluten"], ingredients: ["Phyllo", "Pistachio", "Honey syrup"] },
+  "Tacos al pastor": { tags: ["Chef's special", "Grilled"], ingredients: ["Pork", "Pineapple", "Onion", "Cilantro", "Corn tortilla"] },
+  "Guacamole": { tags: ["Vegan", "Shareable"], ingredients: ["Avocado", "Lime", "Cilantro", "Serrano chile"] },
+  "Elote": { tags: ["Vegetarian", "Spicy"], spiceLevel: "medium", allergens: ["Dairy"], ingredients: ["Grilled corn", "Cotija", "Chili powder", "Lime"] },
+  "Carne asada 400g": { tags: ["Grilled"], ingredients: ["Skirt steak", "Chimichurri", "Charred lime"] },
+  "Margarita": { tags: ["House-made"], ingredients: ["Tequila", "Lime", "Triple sec"] },
+  "Wagyu burger": { tags: ["Chef's special", "Grilled"], allergens: ["Gluten", "Dairy"], ingredients: ["Wagyu beef", "Brioche bun", "Truffle aioli", "Cheddar"] },
+  "Pad thai": { tags: ["Spicy"], spiceLevel: "medium", allergens: ["Peanuts", "Shellfish", "Gluten"], ingredients: ["Rice noodles", "Shrimp", "Peanuts", "Tamarind"] },
+  "Butter chicken curry": { tags: ["Mild spice"], spiceLevel: "mild", allergens: ["Dairy"], ingredients: ["Chicken", "Tomato", "Cream", "Garam masala"] },
+  "Poke bowl": { tags: ["Raw", "Gluten-free"], allergens: ["Fish", "Soy"], ingredients: ["Ahi tuna", "Rice", "Avocado", "Edamame", "Ponzu"] },
+  "Rooftop tiramisu": { tags: ["Vegetarian"], allergens: ["Dairy", "Gluten", "Eggs"], ingredients: ["Mascarpone", "Espresso", "Cocoa", "Ladyfingers"] },
 };
 
 /**
@@ -577,7 +694,7 @@ async function runRetrofit(ctx: MutationCtx) {
 
     // solo-friendly flag (defaults match the current seed)
     if (r.features.soloFriendly === undefined) {
-      const solo = ["Sakura House", "Casa Oliva", "La Brasa"].includes(r.name);
+      const solo = ["Sakura House", "Beit Zaytoun", "La Brasa", "Meridian Kitchen"].includes(r.name);
       await ctx.db.patch(r._id, { features: { ...r.features, soloFriendly: solo } });
       patchedRestaurants++;
     }
@@ -690,9 +807,11 @@ export const wipeAllData = mutation({
 });
 
 /**
- * `npm run seed` — wipe everything, then recreate the full demo dataset
- * (restaurants, menus, gift catalogs, bookings for today/tomorrow, waitlist,
- * reviews). Always produces a fresh, consistent dataset.
+ * `npm run seed` — wipe everything, then recreate the full demo dataset:
+ * 100 customers, 5 cuisine-themed restaurants (Italian, Japanese, Lebanese,
+ * Mexican, International), each with its own menu, bookings for
+ * today/tomorrow, waitlist, and reviews. Always produces a fresh, consistent
+ * dataset.
  */
 export const resetData = mutation({
   args: {},

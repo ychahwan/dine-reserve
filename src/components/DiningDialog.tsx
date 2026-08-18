@@ -368,9 +368,20 @@ export function DiningDialog({
     .map(([id, entry]) => ({ item: availableItems.find((i) => i._id === id), entry }))
     .filter((x) => x.item);
 
+  // The customize sheet below is its own Radix Dialog, portaled to
+  // document.body as a *sibling* of this dialog's content — not nested
+  // inside it in the DOM. That makes Radix's outside-click/dismiss
+  // detection on this outer dialog treat clicks inside the customize sheet
+  // as "outside", closing the whole order screen. Guard against that: never
+  // let this dialog close while the customize sheet is open.
+  const handleOuterOpenChange = (open: boolean) => {
+    if (!open && customizing !== null) return;
+    onOpenChange(open);
+  };
+
   return (
-    <Dialog open={!!booking} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
+    <Dialog open={!!booking} onOpenChange={handleOuterOpenChange}>
+      <DialogContent className="relative max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="tracking-tight">
             {booking?.restaurant?.name ?? "Your table"}
@@ -384,7 +395,22 @@ export function DiningDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Check-in strip */}
+        {customizing !== null ? (
+          /* Customize sheet: fully replaces the tab content below (rather
+             than overlaying it) so the dialog's own height always matches
+             the sheet's real content instead of whatever the underlying
+             tab happened to render at. Since this is just a normal sibling
+             swap inside the same DialogContent — not a second Dialog — it
+             can never trigger the outer dialog's dismiss handling either. */
+          <CustomizeSheet
+            item={customizing.item}
+            initial={customizing.existing}
+            onClose={() => setCustomizing(null)}
+            onConfirm={(entry) => confirmCustomize(customizing.item, entry)}
+          />
+        ) : (
+          <>
+            {/* Check-in strip */}
         {booking &&
           (booking.checkedInAt ? (
             <div className="flex items-center gap-2 rounded-xl border border-emerald-600/30 bg-emerald-600/10 px-3.5 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
@@ -867,18 +893,9 @@ export function DiningDialog({
             <BellRing className="size-3" /> Live — updates arrive instantly
           </span>
         </div>
+          </>
+        )}
       </DialogContent>
-
-      {/* Customize dialog (nested): pick what to leave out of each dish */}
-      <CustomizeDialog
-        open={customizing !== null}
-        item={customizing?.item ?? null}
-        initial={customizing?.existing}
-        onClose={() => setCustomizing(null)}
-        onConfirm={(entry) => {
-          if (customizing) confirmCustomize(customizing.item, entry);
-        }}
-      />
     </Dialog>
   );
 }
@@ -887,32 +904,39 @@ export function DiningDialog({
 // Customize dialog — ingredient removals + note + quantity
 // ---------------------------------------------------------------------------
 
-function CustomizeDialog({
-  open,
+// ---------------------------------------------------------------------------
+// Customize sheet — ingredient removals + note + quantity
+//
+// Rendered as an in-place overlay inside the order dialog's own
+// DialogContent (see above), not as a second Radix Dialog. Two independently
+// portaled Dialogs previously caused the outer order screen to treat clicks
+// inside this sheet as "outside" and dismiss itself.
+// ---------------------------------------------------------------------------
+
+function CustomizeSheet({
   item,
   initial,
   onClose,
   onConfirm,
 }: {
-  open: boolean;
-  item: MenuItemLike | null;
+  item: MenuItemLike;
   initial?: CartEntry;
   onClose: () => void;
   onConfirm: (entry: CartEntry) => void;
 }) {
-  const [qty, setQty] = useState(1);
-  const [removed, setRemoved] = useState<string[]>([]);
-  const [note, setNote] = useState("");
+  const [qty, setQty] = useState(initial?.qty ?? 1);
+  const [removed, setRemoved] = useState<string[]>(initial?.removed ?? []);
+  const [note, setNote] = useState(initial?.note ?? "");
 
-  // Reset local state whenever the dialog targets a different item.
+  // Reset local state whenever the sheet targets a different item.
   useEffect(() => {
-    if (!open) return;
     setQty(initial?.qty ?? 1);
     setRemoved(initial?.removed ?? []);
     setNote(initial?.note ?? "");
-  }, [open, item?._id, initial]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [item._id]);
 
-  const ingredients = item?.ingredients ?? [];
+  const ingredients = item.ingredients ?? [];
 
   const toggleRemoved = (ing: string) =>
     setRemoved((prev) =>
@@ -920,95 +944,91 @@ function CustomizeDialog({
     );
 
   const handleConfirm = () => {
-    if (!item || qty < 1) return;
+    if (qty < 1) return;
     onConfirm({ qty, removed, note: note.trim() || undefined });
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="tracking-tight">Customize {item?.name ?? ""}</DialogTitle>
-          <DialogDescription>
-            Tap any ingredient to leave it out — the kitchen sees exactly what you want.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="flex flex-col">
+      <div className="mb-1">
+        <p className="text-base font-semibold tracking-tight">Customize {item.name}</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Tap any ingredient to leave it out — the kitchen sees exactly what you want.
+        </p>
+      </div>
 
-        {item && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3.5 py-2.5">
-              <span className="text-sm font-semibold">{formatPrice(item.priceCents)}</span>
-              <span className="flex items-center gap-2">
-                <Button variant="outline" size="icon-sm" onClick={() => setQty((q) => Math.max(1, q - 1))}>
-                  <Minus className="size-3.5" />
-                </Button>
-                <span className="w-5 text-center text-sm font-semibold">{qty}</span>
-                <Button size="icon-sm" onClick={() => setQty((q) => Math.min(20, q + 1))}>
-                  <Plus className="size-3.5" />
-                </Button>
-              </span>
-            </div>
+      <div className="mt-3 space-y-4">
+        <div className="flex items-center justify-between rounded-xl bg-muted/50 px-3.5 py-2.5">
+          <span className="text-sm font-semibold">{formatPrice(item.priceCents)}</span>
+          <span className="flex items-center gap-2">
+            <Button variant="outline" size="icon-sm" onClick={() => setQty((q) => Math.max(1, q - 1))}>
+              <Minus className="size-3.5" />
+            </Button>
+            <span className="w-5 text-center text-sm font-semibold">{qty}</span>
+            <Button size="icon-sm" onClick={() => setQty((q) => Math.min(20, q + 1))}>
+              <Plus className="size-3.5" />
+            </Button>
+          </span>
+        </div>
 
-            {ingredients.length > 0 ? (
-              <div>
-                <p className="text-sm font-medium">Leave something out?</p>
-                <p className="mb-1.5 text-[11px] text-muted-foreground">
-                  Tap an ingredient to remove it from this dish.
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {ingredients.map((ing) => {
-                    const off = removed.includes(ing);
-                    return (
-                      <button
-                        key={ing}
-                        type="button"
-                        onClick={() => toggleRemoved(ing)}
-                        className={cn(
-                          "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
-                          off
-                            ? "border-destructive/40 bg-destructive/10 text-destructive line-through"
-                            : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
-                        )}
-                      >
-                        {off ? "No " : ""}
-                        {ing}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-            ) : (
-              <p className="text-xs text-muted-foreground">
-                No ingredient list on this one — add a note below if you&apos;d like to change something.
-              </p>
-            )}
-
-            <div className="space-y-1.5">
-              <Label htmlFor="customize-note" className="text-xs text-muted-foreground">
-                Extra instructions <span className="font-normal">(optional)</span>
-              </Label>
-              <Textarea
-                id="customize-note"
-                rows={2}
-                value={note}
-                maxLength={120}
-                onChange={(e) => setNote(e.target.value)}
-                placeholder="e.g. Extra parmesan on the side"
-              />
-            </div>
-
-            <div className="flex gap-3">
-              <Button variant="outline" className="flex-1" onClick={onClose}>
-                Cancel
-              </Button>
-              <Button className="flex-1" onClick={handleConfirm}>
-                <Plus className="size-4" /> Add {qty > 1 ? `${qty} ` : ""}to order ·{" "}
-                {formatPrice(item.priceCents * qty)}
-              </Button>
+        {ingredients.length > 0 ? (
+          <div>
+            <p className="text-sm font-medium">Leave something out?</p>
+            <p className="mb-1.5 text-[11px] text-muted-foreground">
+              Tap an ingredient to remove it from this dish.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              {ingredients.map((ing) => {
+                const off = removed.includes(ing);
+                return (
+                  <button
+                    key={ing}
+                    type="button"
+                    onClick={() => toggleRemoved(ing)}
+                    className={cn(
+                      "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                      off
+                        ? "border-destructive/40 bg-destructive/10 text-destructive line-through"
+                        : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
+                    )}
+                  >
+                    {off ? "No " : ""}
+                    {ing}
+                  </button>
+                );
+              })}
             </div>
           </div>
+        ) : (
+          <p className="text-xs text-muted-foreground">
+            No ingredient list on this one — add a note below if you&apos;d like to change something.
+          </p>
         )}
-      </DialogContent>
-    </Dialog>
+
+        <div className="space-y-1.5">
+          <Label htmlFor="customize-note" className="text-xs text-muted-foreground">
+            Extra instructions <span className="font-normal">(optional)</span>
+          </Label>
+          <Textarea
+            id="customize-note"
+            rows={2}
+            value={note}
+            maxLength={120}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="e.g. Extra parmesan on the side"
+          />
+        </div>
+
+        <div className="flex gap-3">
+          <Button variant="outline" className="flex-1" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button className="flex-1" onClick={handleConfirm}>
+            <Plus className="size-4" /> Add {qty > 1 ? `${qty} ` : ""}to order ·{" "}
+            {formatPrice(item.priceCents * qty)}
+          </Button>
+        </div>
+      </div>
+    </div>
   );
 }

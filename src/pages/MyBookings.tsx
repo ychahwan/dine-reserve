@@ -56,6 +56,7 @@ import {
   dateLabel,
   formatDate,
   formatTime,
+  publicAppUrl,
   today,
   whatsappShareUrl,
 } from "@/lib/format";
@@ -276,7 +277,7 @@ export default function MyBookings() {
   };
 
   const copyInviteLink = async (code: string) => {
-    const link = `${window.location.origin}/invite/${code}`;
+    const link = `${publicAppUrl()}/invite/${code}`;
     try {
       await navigator.clipboard.writeText(link);
       toast.success("Invite link copied!");
@@ -961,7 +962,7 @@ export default function MyBookings() {
               </div>
               <div className="flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-2.5">
                 <code className="min-w-0 flex-1 truncate font-mono text-xs text-muted-foreground">
-                  {window.location.origin}/invite/{bookingToInvite.code}
+                  {publicAppUrl()}/invite/{bookingToInvite.code}
                 </code>
                 <Button
                   size="sm"
@@ -981,7 +982,7 @@ export default function MyBookings() {
                     `🍽️ Join us at ${bookingToInvite.restaurant?.name ?? "our table"} on ${formatDate(
                       bookingToInvite.date,
                     )} at ${formatTime(bookingToInvite.time)}!\nTap here to confirm your seat: ${
-                      window.location.origin
+                      publicAppUrl()
                     }/invite/${bookingToInvite.code}`,
                   )}
                   target="_blank"

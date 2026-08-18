@@ -13,7 +13,13 @@
     "wipe": "bash scripts/wipe.sh",
     "mobile:local": "bash scripts/mobile-local.sh",
     "mobile:hosted": "bash scripts/mobile-hosted.sh",
+    "mobile:android": "bash scripts/mobile-hosted.sh",
+    "mobile:ios": "bash scripts/mobile-ios.sh",
+    "mobile:android:release": "KAMIX_RELEASE=1 bash scripts/mobile-hosted.sh",
     "mobile:open": "cap open",
+    "cap:add:ios": "npx cap add ios",
+    "cap:add:android": "npx cap add android",
+    "convex:deploy": "npx convex deploy",
     "deploy:render": "bash scripts/deploy-render.sh",
     "convex:up": "docker compose up -d convex",
     "convex:up:build": "docker compose up --build -d convex",
@@ -100,5 +106,8 @@
     "@capacitor/cli": "^8.5.0",
     "@capacitor/android": "^8.5.0",
     "@capacitor/ios": "^8.5.0"
+  },
+  "allowScripts": {
+    "esbuild@0.27.0": true
   }
 }

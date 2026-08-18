@@ -1,3 +1,32 @@
+/**
+ * The public, shareable base URL for the app (e.g. for invite links).
+ *
+ * Inside a Capacitor native shell, `window.location.origin` resolves to the
+ * WebView's internal origin (`https://localhost` / `http://localhost`), not
+ * a real address a recipient could ever open — so links built from it look
+ * broken ("localhost" in a text message). On the web, `window.location.origin`
+ * is correct and should be preferred (keeps preview/staging links working).
+ *
+ * `VITE_PUBLIC_APP_URL` is baked in at build time and used as the source of
+ * truth whenever the real browser origin isn't a usable public address.
+ */
+export function publicAppUrl(): string {
+  const configured = (
+    (import.meta as unknown as { env?: Record<string, string | undefined> }).env
+      ?.VITE_PUBLIC_APP_URL
+  )?.trim();
+  if (typeof window === "undefined") return configured || "";
+
+  const origin = window.location.origin;
+  const isUsableWebOrigin =
+    /^https?:\/\//.test(origin) &&
+    !/^https?:\/\/localhost(:\d+)?$/i.test(origin) &&
+    !/^https?:\/\/10\.0\.2\.2(:\d+)?$/i.test(origin);
+
+  if (isUsableWebOrigin) return origin;
+  return configured || origin;
+}
+
 /** Format cents as a price string. */
 export function formatPrice(cents: number): string {
   return new Intl.NumberFormat("en-US", {

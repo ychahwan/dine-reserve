@@ -10,12 +10,35 @@ import { giftTypeSchema, parseOrThrow, sendGiftSchema } from "./validation";
 // helpers
 // ---------------------------------------------------------------------------
 
-/** Today's local date as "YYYY-MM-DD". */
+/** Today's date (server clock, effectively UTC on Convex Cloud) as "YYYY-MM-DD". */
 function todayKey(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
     now.getDate(),
   ).padStart(2, "0")}`;
+}
+
+/**
+ * Resolve "today" for a day-of-visit check, preferring the caller's own
+ * local date over the server clock.
+ *
+ * The server's clock is effectively UTC, while diners are on their phone's
+ * local timezone — near midnight local time these disagree by a day, which
+ * previously made day-of-visit actions (Socialize visibility, gifting)
+ * silently fail even though the booking really was "today" for the diner.
+ * A client-supplied date is only trusted if it's within one day of the
+ * server's own date (bounds any deliberate skew to a plausible timezone
+ * offset, at most ±24h either side).
+ */
+function resolveTodayKey(clientDate?: string): string {
+  const serverToday = todayKey();
+  if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate)) return serverToday;
+
+  const msPerDay = 24 * 60 * 60 * 1000;
+  const diffMs = Math.abs(
+    new Date(`${clientDate}T00:00:00Z`).getTime() - new Date(`${serverToday}T00:00:00Z`).getTime(),
+  );
+  return diffMs <= msPerDay ? clientDate : serverToday;
 }
 
 async function isOwnerOf(
@@ -32,11 +55,12 @@ async function requireActiveTodayBooking(
   ctx: MutationCtx,
   userId: Id<"users">,
   bookingId: Id<"bookings">,
+  clientDate?: string,
 ) {
   const booking = await ctx.db.get(bookingId);
   if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
   if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
-  if (booking.date !== todayKey()) {
+  if (booking.date !== resolveTodayKey(clientDate)) {
     throw new Error("Socialize is available on the day of your booking.");
   }
   return booking;
@@ -157,11 +181,12 @@ export const setVisibility = mutation({
   args: {
     bookingId: v.id("bookings"),
     visible: v.boolean(),
+    clientDate: v.optional(v.string()),
   },
-  handler: async (ctx, { bookingId, visible }) => {
+  handler: async (ctx, { bookingId, visible, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
-    const booking = await requireActiveTodayBooking(ctx, userId, bookingId);
+    const booking = await requireActiveTodayBooking(ctx, userId, bookingId, clientDate);
 
     const existing = await ctx.db
       .query("dinerPresence")
@@ -296,15 +321,16 @@ export const sendGift = mutation({
     receiverUserId: v.id("users"),
     note: v.optional(v.string()),
     reveal: v.union(v.literal("now"), v.literal("on_delivery")),
+    clientDate: v.optional(v.string()),
   },
-  handler: async (ctx, { bookingId, giftId, receiverUserId, note, reveal }) => {
+  handler: async (ctx, { bookingId, giftId, receiverUserId, note, reveal, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to send a gift.");
     if (receiverUserId === userId) throw new Error("You can't send a gift to yourself.");
 
     parseOrThrow(sendGiftSchema, { giftId, receiverUserId, note, reveal });
 
-    const booking = await requireActiveTodayBooking(ctx, userId, bookingId);
+    const booking = await requireActiveTodayBooking(ctx, userId, bookingId, clientDate);
     const gift = await ctx.db.get(giftId);
     if (!gift || gift.restaurantId !== booking.restaurantId) {
       throw new Error("That gift isn't available at this restaurant.");

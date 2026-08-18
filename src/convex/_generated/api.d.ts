@@ -18,6 +18,7 @@ import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as notifications from "../notifications.js";
 import type * as queue from "../queue.js";
+import type * as reminders from "../reminders.js";
 import type * as restaurants from "../restaurants.js";
 import type * as reviews from "../reviews.js";
 import type * as seed from "../seed.js";
@@ -46,6 +47,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   notifications: typeof notifications;
   queue: typeof queue;
+  reminders: typeof reminders;
   restaurants: typeof restaurants;
   reviews: typeof reviews;
   seed: typeof seed;

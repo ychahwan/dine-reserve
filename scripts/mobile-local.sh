@@ -57,15 +57,21 @@ find_jdk() {
   # If JAVA_HOME is set and meets the requirement, use it.
   if [ -n "${JAVA_HOME:-}" ]; then
     local ver; ver="$( "$JAVA_HOME/bin/java" -version 2>&1 | head -1 | sed -E 's/.*version "([0-9]+).*/\1/' )"
-    if [ "${ver:-0}" -ge "$min_major" ]; then return 0; fi
+    local vendor; vendor="$( "$JAVA_HOME/bin/java" -version 2>&1 | tr '[:upper:]' '[:lower:]' )"
+    if [[ "$vendor" != *graalvm* ]] && [ "${ver:-0}" -ge "$min_major" ]; then return 0; fi
   fi
-  # Scan macOS JDK locations.
+  # Scan macOS JDK locations. GraalVM fails Gradle's jlink-based
+  # "androidJdkImage" transform, so prefer plain OpenJDK/Temurin/Zulu and
+  # explicitly skip GraalVM even if it reports a satisfying version.
   for dir in \
-    /Library/Java/JavaVirtualMachines/*/Contents/Home \
+    /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
+    /opt/homebrew/opt/openjdk*/libexec/openjdk.jdk/Contents/Home \
     "$HOME/Library/Java/JavaVirtualMachines"/*/Contents/Home \
-    /opt/homebrew/opt/openjdk*/libexec/openjdk.jdk/Contents/Home; do
+    /Library/Java/JavaVirtualMachines/*/Contents/Home; do
     if [ -x "$dir/bin/java" ]; then
       local ver; ver="$( "$dir/bin/java" -version 2>&1 | head -1 | sed -E 's/.*version "([0-9]+).*/\1/' )"
+      local vendor; vendor="$( "$dir/bin/java" -version 2>&1 | tr '[:upper:]' '[:lower:]' )"
+      if [[ "$vendor" == *graalvm* ]]; then continue; fi
       if [ "${ver:-0}" -ge "$min_major" ]; then
         export JAVA_HOME="$dir"
         return 0

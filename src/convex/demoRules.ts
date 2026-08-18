@@ -6,7 +6,7 @@ import { dateFromNow } from "../lib/format";
 import { rebuildRestaurantSlots } from "./availability";
 
 /**
- * Demo service windows for the four seeded restaurants. Demonstrates the full
+ * Demo service windows for the five seeded restaurants. Demonstrates the full
  * slot-rules engine: 60-min fine-dining seatings, 30-min casual windows, fixed
  * single seatings (omakase), section-restricted windows, and a deliberate
  * lunch→dinner gap that the smart preview flags.
@@ -43,24 +43,34 @@ const DEMO_DEFS: DemoDef[] = [
     ],
   },
   {
-    name: "Casa Oliva",
+    name: "Beit Zaytoun",
     rules: [
       { name: "Lunch", days: [1, 2, 3, 4, 5], start: "12:00", end: "14:30", step: 30 },
       { name: "Dinner", days: [0, 1, 2, 3, 4, 5, 6], start: "18:00", end: "23:00", step: 30 },
     ],
     zoneRules: [
-      { name: "Aperitivo bar", days: [5, 6, 0], start: "17:00", end: "20:00", step: 30, zones: ["Aperitivo bar"] },
+      { name: "Terrace mezze", days: [5, 6, 0], start: "17:00", end: "20:00", step: 30, zones: ["Terrace"] },
     ],
-    customSlot: { dateOffset: 3, time: "15:30", note: "Wine tasting walk-in seating" },
+    customSlot: { dateOffset: 3, time: "15:30", note: "Mezze tasting walk-in seating" },
   },
   {
     name: "La Brasa",
     rules: [
       { name: "Dinner", days: [1, 2, 3, 4, 5], start: "19:00", end: "23:00", step: 60 },
-      { name: "Weekend asado", days: [0, 6], start: "12:00", end: "22:00", step: 60 },
+      { name: "Weekend fiesta", days: [0, 6], start: "12:00", end: "22:00", step: 60 },
     ],
     zoneRules: [
       { name: "Late bar & terrace", days: [5, 6, 0], start: "22:00", end: "23:30", step: 30, zones: ["Grill bar", "Smoking terrace"] },
+    ],
+  },
+  {
+    name: "Meridian Kitchen",
+    rules: [
+      { name: "Lunch", days: [1, 2, 3, 4, 5], start: "12:00", end: "14:30", step: 30 },
+      { name: "Dinner", days: [0, 1, 2, 3, 4, 5, 6], start: "18:30", end: "22:30", step: 30 },
+    ],
+    zoneRules: [
+      { name: "Rooftop", days: [4, 5, 6], start: "18:00", end: "22:00", step: 30, zones: ["Rooftop"] },
     ],
   },
 ];

@@ -149,7 +149,7 @@ export function SocializeDialog({
     if (!booking || busy) return;
     setBusy("visibility");
     try {
-      await setVisibility({ bookingId: booking._id as never, visible: !visible });
+      await setVisibility({ bookingId: booking._id as never, visible: !visible, clientDate: today() });
       toast.success(
         visible
           ? "You're now invisible — diners here won't see you or send gifts."
@@ -162,9 +162,20 @@ export function SocializeDialog({
     }
   };
 
+  // The send-gift sheet below is its own Radix Dialog, portaled to
+  // document.body as a *sibling* of this dialog's content (not DOM-nested
+  // inside it). That makes this outer dialog's outside-click/dismiss
+  // detection treat clicks inside the send-gift sheet as "outside", closing
+  // the whole Socialize screen. Guard against that: never let this dialog
+  // close while the send-gift sheet is open.
+  const handleOuterOpenChange = (open: boolean) => {
+    if (!open && sendingTo !== null) return;
+    onOpenChange(open);
+  };
+
   return (
-    <Dialog open={!!booking} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
+    <Dialog open={!!booking} onOpenChange={handleOuterOpenChange}>
+      <DialogContent className="relative max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 tracking-tight">
             <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
@@ -181,7 +192,22 @@ export function SocializeDialog({
           </DialogDescription>
         </DialogHeader>
 
-        {/* Tabs */}
+        {sendingTo !== null ? (
+          /* Send-gift sheet: fully replaces the tab content below (rather
+             than overlaying it) so the dialog's own height always matches
+             the sheet's real content instead of whatever the underlying
+             tab happened to render at. Since this is just a normal sibling
+             swap inside the same DialogContent — not a second Dialog — it
+             can never trigger the outer dialog's dismiss handling either. */
+          <SendGiftSheet
+            recipient={sendingTo}
+            gifts={gifts}
+            bookingId={booking?._id ?? null}
+            onClose={() => setSendingTo(null)}
+          />
+        ) : (
+          <>
+            {/* Tabs */}
         <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
           {[
             { key: "room" as const, label: "Who's dining", icon: Users, count: isToday ? openCount : 0 },
@@ -445,33 +471,29 @@ export function SocializeDialog({
             <BellRing className="size-3" /> Gifts are added to your bill
           </span>
         </div>
+          </>
+        )}
       </DialogContent>
-
-      {/* Send-gift dialog (nested): pick a gift, a note, and how it's revealed */}
-      <SendGiftDialog
-        open={sendingTo !== null}
-        recipient={sendingTo}
-        gifts={gifts}
-        bookingId={booking?._id ?? null}
-        onClose={() => setSendingTo(null)}
-      />
     </Dialog>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Send-gift dialog
+// Send-gift sheet
+//
+// Rendered as an in-place overlay inside the Socialize dialog's own
+// DialogContent (see above), not as a second Radix Dialog. Two independently
+// portaled Dialogs previously caused the outer screen to treat clicks inside
+// this sheet as "outside" and dismiss itself.
 // ---------------------------------------------------------------------------
 
-function SendGiftDialog({
-  open,
+function SendGiftSheet({
   recipient,
   gifts,
   bookingId,
   onClose,
 }: {
-  open: boolean;
-  recipient: VisibleDiner | null;
+  recipient: VisibleDiner;
   gifts: GiftLike[];
   bookingId: string | null;
   onClose: () => void;
@@ -484,14 +506,14 @@ function SendGiftDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Reset local state whenever the dialog targets a different recipient.
+  // Reset local state whenever the sheet targets a different recipient.
   useEffect(() => {
-    if (!open) return;
     setGiftId(null);
     setNote("");
     setReveal("now");
     setError(null);
-  }, [open, recipient?._id]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recipient._id]);
 
   const selected = gifts.find((g) => g._id === giftId);
 
@@ -506,6 +528,7 @@ function SendGiftDialog({
         receiverUserId: recipient.userId as never,
         note: note.trim() || undefined,
         reveal,
+        clientDate: today(),
       });
       toast.success(
         reveal === "now"
@@ -521,19 +544,18 @@ function SendGiftDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && !busy && onClose()}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 tracking-tight">
-            <Gift className="size-4 text-primary" />
-            Send {recipient?.name ? `to ${recipient.name}` : "a gift"}
-          </DialogTitle>
-          <DialogDescription>
-            Picked from this restaurant's gift list — it lands on your bill at the table.
-          </DialogDescription>
-        </DialogHeader>
+    <div className="flex flex-col">
+      <div className="mb-1">
+        <p className="flex items-center gap-2 text-base font-semibold tracking-tight">
+          <Gift className="size-4 text-primary" />
+          Send {recipient?.name ? `to ${recipient.name}` : "a gift"}
+        </p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Picked from this restaurant's gift list — it lands on your bill at the table.
+        </p>
+      </div>
 
-        <div className="space-y-4">
+      <div className="mt-3 space-y-4">
           {/* Gift picker */}
           {gifts.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
@@ -647,7 +669,6 @@ function SendGiftDialog({
             </Button>
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
   );
 }
