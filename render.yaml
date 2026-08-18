@@ -21,19 +21,12 @@ services:
     dockerfilePath: Dockerfile.convex
     envVars:
       - key: CONVEX_SITE_URL
-        sync: false
-        # Render auto-generates this; override if needed.
-        # After deploy, set this to the service's public URL.
         value: https://convex-kamix.onrender.com
       - key: NODE_ENV
         value: production
-    # Persistent disk for Convex data (requires Render paid plan).
-    # Remove this block for free-tier (data resets on redeploy).
-    disk:
-      name: convex-data
-      mountPath: /app/data
-      sizeGB: 1
+      - key: VLY_CONVEX_AUTH_ISSUER
+        value: https://freebuff.com
+
     healthCheckPath: /
     autoDeploy: true
-    # Convex needs more than the default 512MB for the backend binary.
-    plan: starter
+    plan: free
