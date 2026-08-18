@@ -1,12 +1,5 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
@@ -14,6 +7,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
+  ArrowLeft,
   BellRing,
   CheckCircle2,
   ChefHat,
@@ -368,40 +362,41 @@ export function DiningDialog({
     .map(([id, entry]) => ({ item: availableItems.find((i) => i._id === id), entry }))
     .filter((x) => x.item);
 
-  // The customize sheet below is its own Radix Dialog, portaled to
-  // document.body as a *sibling* of this dialog's content — not nested
-  // inside it in the DOM. That makes Radix's outside-click/dismiss
-  // detection on this outer dialog treat clicks inside the customize sheet
-  // as "outside", closing the whole order screen. Guard against that: never
-  // let this dialog close while the customize sheet is open.
-  const handleOuterOpenChange = (open: boolean) => {
-    if (!open && customizing !== null) return;
-    onOpenChange(open);
+  if (!booking) return null;
+
+  // Back button: when customizing an item, go back to the menu first;
+  // otherwise leave the dine-in screen entirely.
+  const handleBack = () => {
+    if (customizing !== null) {
+      setCustomizing(null);
+    } else {
+      onOpenChange(false);
+    }
   };
 
   return (
-    <Dialog open={!!booking} onOpenChange={handleOuterOpenChange}>
-      <DialogContent className="relative max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="tracking-tight">
-            {booking?.restaurant?.name ?? "Your table"}
-          </DialogTitle>
-          <DialogDescription>
-            {booking
-              ? `${formatDate(booking.date)} · ${formatTime(booking.time)} · ${booking.partySize} ${
-                  booking.partySize === 1 ? "guest" : "guests"
-                } · code ${booking.code}`
-              : ""}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-3 sm:px-4">
+        <Button variant="ghost" size="icon" onClick={handleBack} aria-label="Back">
+          <ArrowLeft className="size-5" />
+        </Button>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold tracking-tight">
+            {booking.restaurant?.name ?? "Your table"}
+          </p>
+          <p className="truncate text-xs text-muted-foreground">
+            {`${formatDate(booking.date)} · ${formatTime(booking.time)} · ${booking.partySize} ${
+              booking.partySize === 1 ? "guest" : "guests"
+            } · code ${booking.code}`}
+          </p>
+        </div>
+      </div>
 
+      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-4">
         {customizing !== null ? (
           /* Customize sheet: fully replaces the tab content below (rather
-             than overlaying it) so the dialog's own height always matches
-             the sheet's real content instead of whatever the underlying
-             tab happened to render at. Since this is just a normal sibling
-             swap inside the same DialogContent — not a second Dialog — it
-             can never trigger the outer dialog's dismiss handling either. */
+             than overlaying it) so this always shows correctly regardless
+             of how much content the underlying tab had. */
           <CustomizeSheet
             item={customizing.item}
             initial={customizing.existing}
@@ -895,22 +890,19 @@ export function DiningDialog({
         </div>
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 
 // ---------------------------------------------------------------------------
 // Customize dialog — ingredient removals + note + quantity
 // ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Customize sheet — ingredient removals + note + quantity
 //
-// Rendered as an in-place overlay inside the order dialog's own
-// DialogContent (see above), not as a second Radix Dialog. Two independently
-// portaled Dialogs previously caused the outer order screen to treat clicks
-// inside this sheet as "outside" and dismiss itself.
+// Rendered as an in-place content swap inside the dine-in page above (not a
+// separate overlay/dialog): picking removals/quantity/note here fully
+// replaces the menu tab until confirmed or cancelled.
 // ---------------------------------------------------------------------------
 
 function CustomizeSheet({
