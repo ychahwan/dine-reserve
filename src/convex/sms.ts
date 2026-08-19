@@ -150,6 +150,44 @@ export const sendBookingReminder = action({
 });
 
 /**
+ * Send a 6-digit OTP code via SMS for phone-based authentication.
+ * Replaces the old Freebuff email OTP delivery.
+ */
+export const sendOtpSms = action({
+  args: {
+    phone: v.string(), // E.164 phone number
+    code: v.string(),  // 6-digit OTP
+  },
+  handler: async (_ctx, { phone, code }) => {
+    const cfg = twilioConfig();
+    if (!cfg) {
+      return { sent: false, skipped: true, reason: "twilio not configured" };
+    }
+    if (!phone) return { sent: false, skipped: true, reason: "no phone" };
+
+    const body = `Your Kamix verification code is: ${code}. It expires in 15 minutes.`;
+
+    try {
+      const res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${cfg.accountSid}/Messages.json`, {
+        method: "POST",
+        headers: {
+          Authorization: cfg.authHeader,
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: new URLSearchParams({
+          To: phone,
+          ...senderParams(cfg),
+          Body: body.slice(0, 1600),
+        }),
+      });
+      return { sent: res.ok, status: res.status };
+    } catch (e) {
+      return { sent: false, error: e instanceof Error ? e.message : "unknown" };
+    }
+  },
+});
+
+/**
  * Notify a diner that a table on their waitlist just freed up.
  * Same Twilio env-guard and no-op behavior as sendBookingSms.
  */

@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/input-otp";
 
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Loader2, Mail, Store, UserX } from "lucide-react";
+import { ArrowRight, Loader2, Phone, Store, UserX } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -41,7 +41,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     searchParams.get("returnTo"),
     redirectAfterAuth,
   );
-  const [step, setStep] = useState<"signIn" | { email: string }>("signIn");
+  const [step, setStep] = useState<"signIn" | { phone: string }>("signIn");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -58,8 +58,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
-      setStep({ email: formData.get("email") as string });
+      await signIn("phone-otp", formData);
+      setStep({ phone: formData.get("phone") as string });
       setIsLoading(false);
     } catch (error) {
       console.error("Email sign-in error:", error);
@@ -78,7 +78,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
-      await signIn("email-otp", formData);
+      await signIn("phone-otp", formData);
       navigate(redirect);
     } catch (error) {
       console.error("OTP verification error:", error);
@@ -141,18 +141,18 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <CardHeader className="text-center">
                 <CardTitle className="text-xl">Get Started</CardTitle>
                 <CardDescription>
-                  Enter your email to log in or sign up
+                  Enter your phone number to log in or sign up
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleEmailSubmit}>
                 <CardContent>
                   <div className="relative flex items-center gap-2">
                     <div className="relative flex-1">
-                      <Mail className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                      <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                       <Input
-                        name="email"
-                        placeholder="name@example.com"
-                        type="email"
+                        name="phone"
+                        placeholder="+961 71 123 456"
+                        type="tel"
                         className="pl-9"
                         disabled={isLoading}
                         required
@@ -204,12 +204,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               <CardHeader className="text-center mt-4">
                 <CardTitle>Check your email</CardTitle>
                 <CardDescription>
-                  We&apos;ve sent a code to {step.email}
+                  We&apos;ve sent a code to {step.phone}
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleOtpSubmit}>
                 <CardContent className="pb-4">
-                  <input type="hidden" name="email" value={step.email} />
+                  <input type="hidden" name="phone" value={step.phone} />
                   <input type="hidden" name="code" value={otp} />
 
                   <div className="flex justify-center">
@@ -276,24 +276,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     disabled={isLoading}
                     className="w-full"
                   >
-                    Use different email
+                    Use different phone number
                   </Button>
                 </CardFooter>
               </form>
             </>
           )}
 
-          <div className="py-4 px-6 text-xs text-center text-muted-foreground bg-muted border-t rounded-b-lg">
-            Secured by{" "}
-            <a
-              href="https://freebuff.com"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline hover:text-primary transition-colors"
-            >
-              freebuff.com
-            </a>
-          </div>
         </Card>
       </div>
     </div>
