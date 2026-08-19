@@ -11,6 +11,8 @@ import {
   BellRing,
   CheckCircle2,
   ChefHat,
+  ChevronDown,
+  ChevronUp,
   GlassWater,
   Hand,
   MapPin,
@@ -143,8 +145,8 @@ function removalSummary(removed: string[] | undefined, note?: string): string | 
 
 /**
  * The dine-in experience for one booking: order from the menu (with per-dish
- * customization), ping the waiter/manager, ask for something off-menu, and
- * view the saved bill. Everything is reactive — the restaurant's screens
+ * customization), ping the waiter/manager, and ask for something off-menu.
+ * The bill is shown inline in the Order tab. Everything is reactive — the restaurant's screens
  * update the instant the diner acts, and this dialog updates the instant the
  * kitchen responds.
  */
@@ -183,7 +185,8 @@ export function DiningDialog({
   const cancelAssist = useMutation(api.dining.cancelAssist);
   const createMenuRequest = useMutation(api.dining.createMenuRequest);
 
-  const [tab, setTab] = useState<"order" | "assist" | "menu" | "bill">("order");
+  const [tab, setTab] = useState<"order" | "assist" | "menu">("order");
+  const [billExpanded, setBillExpanded] = useState(false);
   const [cart, setCart] = useState<Record<string, CartEntry>>({});
   const [orderNote, setOrderNote] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
@@ -433,7 +436,6 @@ export function DiningDialog({
             { key: "order" as const, label: "Order", icon: ShoppingBag, count: orders?.length },
             { key: "assist" as const, label: "Ask the team", icon: Hand, count: (assists ?? []).filter((a) => a.status === "open").length },
             { key: "menu" as const, label: "Menu ideas", icon: Utensils, count: menuReqs?.length },
-            { key: "bill" as const, label: "Bill", icon: Receipt },
           ].map((t) => (
             <button
               key={t.key}
@@ -518,6 +520,64 @@ export function DiningDialog({
                     </div>
                   );
                 })}
+              </div>
+            )}
+
+            {/* Bill summary — only shown when there are charges */}
+            {bill && bill.lines.length > 0 && (
+              <div className="rounded-2xl border border-border/70 bg-card">
+                <button
+                  type="button"
+                  onClick={() => setBillExpanded((v) => !v)}
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Receipt className="size-4 text-primary" />
+                    <span className="text-sm font-medium">Your bill</span>
+                    <span className="text-xs text-muted-foreground">
+                      · {bill.orderCount} order{bill.orderCount === 1 ? "" : "s"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-base font-bold tracking-tight">
+                      {formatPrice(bill.totalCents)}
+                    </span>
+                    {billExpanded ? (
+                      <ChevronUp className="size-4 text-muted-foreground" />
+                    ) : (
+                      <ChevronDown className="size-4 text-muted-foreground" />
+                    )}
+                  </div>
+                </button>
+                {billExpanded && (
+                  <div className="border-t border-border/60 px-4 py-3">
+                    <div className="space-y-1.5">
+                      {bill.lines.map((line: BillLineLike) => {
+                        const summary = removalSummary(line.removeIngredients, line.note);
+                        return (
+                          <div
+                            key={`${line.name}-${summary ?? "plain"}`}
+                            className="flex items-center justify-between gap-2 text-sm"
+                          >
+                            <span className="min-w-0 flex-1 text-muted-foreground">
+                              {line.name}
+                              <span className="ml-1.5 text-xs">× {line.quantity}</span>
+                              {summary ? (
+                                <span className="block text-[11px] italic">({summary})</span>
+                              ) : null}
+                            </span>
+                            <span className="shrink-0 font-medium">
+                              {formatPrice(line.lineTotal)}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                    <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <Receipt className="size-3" /> Saved to this booking — pay at the table.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
 
@@ -825,57 +885,6 @@ export function DiningDialog({
                   );
                 })}
               </div>
-            )}
-          </div>
-        )}
-
-        {/* ── Bill tab ──────────────────────────────────────────────── */}
-        {tab === "bill" && (
-          <div className="space-y-3">
-            {bill === undefined ? (
-              <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Spinner className="size-4" /> Loading your bill…
-              </div>
-            ) : bill.lines.length === 0 ? (
-              <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
-                <Receipt className="mx-auto size-8 text-muted-foreground/50" />
-                <p className="mt-2 text-sm font-medium">No charges yet</p>
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Order from the menu and your bill builds up here automatically — no paper, no
-                  waiting for the waiter.
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
-                  <div className="divide-y divide-border/60">
-                    {bill.lines.map((line: BillLineLike) => {
-                      const summary = removalSummary(line.removeIngredients, line.note);
-                      return (
-                        <div key={`${line.name}-${summary ?? "plain"}`} className="flex items-center justify-between gap-2 px-3.5 py-2.5 text-sm">
-                          <span className="min-w-0 flex-1 text-muted-foreground">
-                            {line.name}
-                            <span className="ml-1.5 text-xs">× {line.quantity}</span>
-                            {summary ? (
-                              <span className="block text-[11px] italic">({summary})</span>
-                            ) : null}
-                          </span>
-                          <span className="shrink-0 font-medium">{formatPrice(line.lineTotal)}</span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  <div className="flex items-center justify-between border-t border-border bg-muted/40 px-3.5 py-3">
-                    <span className="text-sm font-semibold">Total ({bill.orderCount} order{bill.orderCount === 1 ? "" : "s"})</span>
-                    <span className="text-lg font-bold tracking-tight">{formatPrice(bill.totalCents)}</span>
-                  </div>
-                </div>
-                <p className="flex items-start gap-1.5 rounded-lg bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
-                  <Receipt className="mt-0.5 size-3.5 shrink-0" />
-                  Your bill is saved to this booking. Pay at the table for now — in-app card payment
-                  is coming in the next milestone.
-                </p>
-              </>
             )}
           </div>
         )}

@@ -18,6 +18,11 @@ import { action } from "./_generated/server";
  * reports "delivered". At least one of the two must be set.
  */
 function twilioConfig() {
+  // Respect the TWILIO_ENABLED kill-switch: when set to "false" all SMS
+  // sending is skipped regardless of whether credentials are present.
+  const enabled = process.env.TWILIO_ENABLED;
+  if (enabled !== undefined && enabled.toLowerCase() === "false") return null;
+
   const accountSid = process.env.TWILIO_ACCOUNT_SID;
   const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
   const from = process.env.TWILIO_FROM_NUMBER;

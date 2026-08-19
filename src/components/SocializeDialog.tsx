@@ -1,12 +1,5 @@
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
@@ -15,6 +8,7 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import {
+  ArrowLeft,
   BellRing,
   CheckCircle2,
   Clock,
@@ -162,43 +156,42 @@ export function SocializeDialog({
     }
   };
 
-  // The send-gift sheet below is its own Radix Dialog, portaled to
-  // document.body as a *sibling* of this dialog's content (not DOM-nested
-  // inside it). That makes this outer dialog's outside-click/dismiss
-  // detection treat clicks inside the send-gift sheet as "outside", closing
-  // the whole Socialize screen. Guard against that: never let this dialog
-  // close while the send-gift sheet is open.
-  const handleOuterOpenChange = (open: boolean) => {
-    if (!open && sendingTo !== null) return;
-    onOpenChange(open);
+  if (!booking) return null;
+
+  // Back button: when the send-gift sheet is open, go back to the room
+  // first; otherwise leave the Socialize screen entirely.
+  const handleBack = () => {
+    if (sendingTo !== null) {
+      setSendingTo(null);
+    } else {
+      onOpenChange(false);
+    }
   };
 
   return (
-    <Dialog open={!!booking} onOpenChange={handleOuterOpenChange}>
-      <DialogContent className="relative max-h-[90vh] overflow-y-auto rounded-3xl sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2 tracking-tight">
-            <span className="flex size-7 items-center justify-center rounded-lg bg-primary/10 text-primary">
-              <PartyPopper className="size-4" />
-            </span>
-            Socialize
-          </DialogTitle>
-          <DialogDescription>
-            {booking
-              ? `${booking.restaurant?.name ?? "Your table"} · ${formatDate(booking.date)} at ${formatTime(
-                  booking.time,
-                )} · code ${booking.code}`
-              : ""}
-          </DialogDescription>
-        </DialogHeader>
+    <div className="fixed inset-0 z-50 flex flex-col bg-background">
+      <div className="flex items-center gap-2 border-b border-border px-3 py-3 sm:px-4">
+        <Button variant="ghost" size="icon" onClick={handleBack} aria-label="Back">
+          <ArrowLeft className="size-5" />
+        </Button>
+        <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+          <PartyPopper className="size-4" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold tracking-tight">Socialize</p>
+          <p className="truncate text-xs text-muted-foreground">
+            {`${booking.restaurant?.name ?? "Your table"} · ${formatDate(booking.date)} at ${formatTime(
+              booking.time,
+            )} · code ${booking.code}`}
+          </p>
+        </div>
+      </div>
 
+      <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-4">
         {sendingTo !== null ? (
           /* Send-gift sheet: fully replaces the tab content below (rather
-             than overlaying it) so the dialog's own height always matches
-             the sheet's real content instead of whatever the underlying
-             tab happened to render at. Since this is just a normal sibling
-             swap inside the same DialogContent — not a second Dialog — it
-             can never trigger the outer dialog's dismiss handling either. */
+             than overlaying it) so this always shows correctly regardless
+             of how much content the underlying tab had. */
           <SendGiftSheet
             recipient={sendingTo}
             gifts={gifts}
@@ -473,8 +466,8 @@ export function SocializeDialog({
         </div>
           </>
         )}
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   );
 }
 
