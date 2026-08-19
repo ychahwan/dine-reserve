@@ -13,6 +13,24 @@ const profileNameSchema = z
 const profilePhoneSchema = z.string().trim().max(20, "Phone number is too long.").optional();
 
 /**
+ * Check if a phone number has a password account.
+ * Queries the authAccounts table for a "password" provider account
+ * where providerAccountId matches the phone number.
+ */
+export const hasPasswordAccount = query({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const account = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) =>
+        q.eq("provider", "password").eq("providerAccountId", phone),
+      )
+      .first();
+    return { exists: account !== null };
+  },
+});
+
+/**
  * Get the current signed in user. Returns null if the user is not signed in.
  * Usage: const signedInUser = await ctx.runQuery(api.authHelpers.currentUser);
  */

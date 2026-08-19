@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "web:hosted": "vite --host",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",
@@ -26,6 +27,7 @@
     "convex:down": "docker compose down -v"
   },
   "dependencies": {
+    "@capacitor/core": "^8.5.0",
     "@convex-dev/auth": "^0.0.90",
     "@hookform/resolvers": "^5.2.2",
     "@jridgewell/trace-mapping": "^0.3.31",
@@ -57,9 +59,7 @@
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tailwindcss/vite": "^4.1.17",
-    "@vly-ai/integrations": "^0.6.12",
     "@zumer/snapdom": "^2.0.1",
-    "axios": "^1.13.2",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -83,10 +83,12 @@
     "tailwind-merge": "^3.4.0",
     "tailwindcss": "^4.1.17",
     "vaul": "^1.1.2",
-    "zod": "^4.1.13",
-    "@capacitor/core": "^8.5.0"
+    "zod": "^4.1.13"
   },
   "devDependencies": {
+    "@capacitor/android": "^8.5.0",
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/ios": "^8.5.0",
     "@eslint/js": "^9.39.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
@@ -102,10 +104,7 @@
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.48.1",
     "vite": "^7.2.6",
-    "ws": "^8.21.3",
-    "@capacitor/cli": "^8.5.0",
-    "@capacitor/android": "^8.5.0",
-    "@capacitor/ios": "^8.5.0"
+    "ws": "^8.21.3"
   },
   "allowScripts": {
     "esbuild@0.27.0": true

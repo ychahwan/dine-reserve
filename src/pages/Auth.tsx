@@ -13,9 +13,11 @@ import {
   InputOTPGroup,
   InputOTPSlot,
 } from "@/components/ui/input-otp";
-
+import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
-import { ArrowRight, Loader2, Phone, Store, UserX } from "lucide-react";
+import { api } from "@/convex/_generated/api";
+import { useQuery } from "convex/react";
+import { ArrowRight, Loader2, Phone, Store, KeyRound, MessageSquare } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -33,6 +35,13 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
+type AuthStep =
+  | "enter-phone"
+  | { phone: string; mode: "password" }
+  | { phone: string; mode: "otp" }
+  | { phone: string; mode: "otp"; verified: true }
+  | { phone: string; mode: "set-password" };
+
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
   const navigate = useNavigate();
@@ -41,10 +50,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     searchParams.get("returnTo"),
     redirectAfterAuth,
   );
-  const [step, setStep] = useState<"signIn" | { phone: string }>("signIn");
+
+  const [step, setStep] = useState<AuthStep>("enter-phone");
+  const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Check if phone has a password account (only query when we have a phone)
+  const phone = typeof step === "object" ? step.phone : undefined;
+  const hasPassword = useQuery(
+    api.users.hasPasswordAccount,
+    phone ? { phone } : "skip",
+  );
 
   useEffect(() => {
     if (!authLoading && isAuthenticated) {
@@ -52,26 +70,72 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   }, [authLoading, isAuthenticated, navigate, redirect]);
 
-  const handleEmailSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+  // Once we know whether the user has a password, route to the right step
+  useEffect(() => {
+    if (typeof step === "object" && step.mode === "otp" && hasPassword !== undefined) {
+      // If we just entered phone and know the password status
+      if (step.phone && hasPassword.exists) {
+        setStep({ phone: step.phone, mode: "password" });
+      }
+    }
+  }, [hasPassword, step]);
+
+  // Step 1: Submit phone number
+  const handlePhoneSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    const formData = new FormData(event.currentTarget);
+    const phoneValue = formData.get("phone") as string;
+
+    // Set step to trigger the hasPassword query
+    setStep({ phone: phoneValue, mode: "otp" });
+    setIsLoading(false);
+  };
+
+  // Step 2a: Password login
+  const handlePasswordSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
     try {
       const formData = new FormData(event.currentTarget);
-      await signIn("phone-otp", formData);
-      setStep({ phone: formData.get("phone") as string });
+      await signIn("password", formData);
+      navigate(redirect);
+    } catch (err) {
+      console.error("Password sign-in error:", err);
+      setError("Invalid phone number or password.");
       setIsLoading(false);
-    } catch (error) {
-      console.error("Email sign-in error:", error);
-      setError(
-        error instanceof Error
-          ? error.message
-          : "Failed to send verification code. Please try again.",
-      );
+      setPassword("");
+    }
+  };
+
+  // Step 2b: Send OTP
+  const handleSendOtp = async () => {
+    if (typeof step !== "object" || step.mode !== "otp" || hasPassword?.exists) return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.set("phone", step.phone);
+      await signIn("phone-otp", formData);
+      setStep({ phone: step.phone, mode: "otp" });
+      setIsLoading(false);
+    } catch (err) {
+      console.error("OTP send error:", err);
+      setError("Failed to send verification code. Please try again.");
       setIsLoading(false);
     }
   };
 
+  // Auto-send OTP when we determine user has no password
+  useEffect(() => {
+    if (typeof step === "object" && step.mode === "otp" && step.phone && hasPassword && !hasPassword.exists) {
+      handleSendOtp();
+    }
+  }, [hasPassword, step]);
+
+  // Step 2b: Verify OTP
   const handleOtpSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
@@ -79,30 +143,44 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     try {
       const formData = new FormData(event.currentTarget);
       await signIn("phone-otp", formData);
-      navigate(redirect);
-    } catch (error) {
-      console.error("OTP verification error:", error);
-      setError("The verification code you entered is incorrect.");
+      // After successful OTP, offer to set a password
+      if (typeof step === "object" && step.phone) {
+        setStep({ phone: step.phone, mode: "set-password" });
+      }
+      setIsLoading(false);
+    } catch (err) {
+      console.error("OTP verification error:", err);
+      setError("The verification code is incorrect.");
       setIsLoading(false);
       setOtp("");
     }
   };
 
-  const handleGuestLogin = async () => {
+  // Step 3: Set password after first OTP login
+  const handleSetPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
     setIsLoading(true);
     setError(null);
     try {
-      await signIn("anonymous");
+      const formData = new FormData(event.currentTarget);
+      await signIn("password", formData);
       navigate(redirect);
-    } catch (error) {
-      console.error("Guest login error:", error);
-      setError(
-        `Failed to sign in as guest: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
-      );
+    } catch (err) {
+      console.error("Set password error:", err);
+      setError(err instanceof Error ? err.message : "Failed to set password.");
       setIsLoading(false);
     }
+  };
+
+  const handleSkipPassword = () => {
+    navigate(redirect);
+  };
+
+  const handleBack = () => {
+    setStep("enter-phone");
+    setPassword("");
+    setOtp("");
+    setError(null);
   };
 
   return (
@@ -136,15 +214,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       {/* Auth Content */}
       <div className="relative flex flex-1 items-center justify-center px-4 py-8">
         <Card className="w-full max-w-sm border-border/70 shadow-xl shadow-black/5">
-          {step === "signIn" ? (
+
+          {/* ─── Step 1: Enter phone ─── */}
+          {step === "enter-phone" && (
             <>
               <CardHeader className="text-center">
-                <CardTitle className="text-xl">Get Started</CardTitle>
+                <CardTitle className="text-xl">Welcome</CardTitle>
                 <CardDescription>
-                  Enter your phone number to log in or sign up
+                  Enter your phone number to continue
                 </CardDescription>
               </CardHeader>
-              <form onSubmit={handleEmailSubmit}>
+              <form onSubmit={handlePhoneSubmit}>
                 <CardContent>
                   <div className="relative flex items-center gap-2">
                     <div className="relative flex-1">
@@ -156,6 +236,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         className="pl-9"
                         disabled={isLoading}
                         required
+                        autoFocus
                       />
                     </div>
                     <Button
@@ -172,39 +253,87 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     </Button>
                   </div>
                   {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-
-                  <div className="mt-4">
-                    <div className="relative">
-                      <div className="absolute inset-0 flex items-center">
-                        <span className="w-full border-t" />
-                      </div>
-                      <div className="relative flex justify-center text-xs uppercase">
-                        <span className="bg-background px-2 text-muted-foreground">
-                          Or
-                        </span>
-                      </div>
-                    </div>
-
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="w-full mt-4"
-                      onClick={handleGuestLogin}
-                      disabled={isLoading}
-                    >
-                      <UserX className="mr-2 h-4 w-4" />
-                      Continue as Guest
-                    </Button>
-                  </div>
                 </CardContent>
               </form>
             </>
-          ) : (
+          )}
+
+          {/* ─── Step 2a: Password login ─── */}
+          {typeof step === "object" && step.mode === "password" && (
             <>
-              <CardHeader className="text-center mt-4">
-                <CardTitle>Check your email</CardTitle>
+              <CardHeader className="text-center">
+                <CardTitle className="flex items-center justify-center gap-2">
+                  <KeyRound className="size-5" /> Password login
+                </CardTitle>
                 <CardDescription>
-                  We&apos;ve sent a code to {step.phone}
+                  Enter your password for {step.phone}
+                </CardDescription>
+              </CardHeader>
+              <form onSubmit={handlePasswordSubmit}>
+                <CardContent className="space-y-3">
+                  <input type="hidden" name="phone" value={step.phone} />
+                  <input type="hidden" name="flow" value="signIn" />
+                  <div className="space-y-2">
+                    <Label htmlFor="password">Password</Label>
+                    <Input
+                      id="password"
+                      name="password"
+                      type="password"
+                      placeholder="Enter your password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={isLoading}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                  {error && (
+                    <p className="text-sm text-red-500 text-center">{error}</p>
+                  )}
+                </CardContent>
+                <CardFooter className="flex-col gap-2">
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoading || password.length < 8}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Signing in...
+                      </>
+                    ) : (
+                      <>
+                        Sign in
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleBack}
+                    disabled={isLoading}
+                    className="w-full"
+                  >
+                    Use a different phone number
+                  </Button>
+                </CardFooter>
+              </form>
+            </>
+          )}
+
+          {/* ─── Step 2b: OTP verify ─── */}
+          {typeof step === "object" && step.mode === "otp" && !hasPassword?.exists && (
+            <>
+              <CardHeader className="text-center">
+                <CardTitle className="flex items-center justify-center gap-2">
+                  <MessageSquare className="size-5" /> Verify your phone
+                </CardTitle>
+                <CardDescription>
+                  {isLoading
+                    ? "Sending code..."
+                    : `Enter the code sent to ${step.phone}`}
                 </CardDescription>
               </CardHeader>
               <form onSubmit={handleOtpSubmit}>
@@ -220,11 +349,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       disabled={isLoading}
                       onKeyDown={(e) => {
                         if (e.key === "Enter" && otp.length === 6 && !isLoading) {
-                          // Find the closest form and submit it
                           const form = (e.target as HTMLElement).closest("form");
-                          if (form) {
-                            form.requestSubmit();
-                          }
+                          if (form) form.requestSubmit();
                         }
                       }}
                     >
@@ -241,13 +367,16 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                     </p>
                   )}
                   <p className="text-sm text-muted-foreground text-center mt-4">
-                    Didn&apos;t receive a code?{" "}
+                    Didn't receive a code?{" "}
                     <Button
                       variant="link"
                       className="p-0 h-auto"
-                      onClick={() => setStep("signIn")}
+                      onClick={() => {
+                        setError(null);
+                        handleSendOtp();
+                      }}
                     >
-                      Try again
+                      Resend
                     </Button>
                   </p>
                 </CardContent>
@@ -264,7 +393,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       </>
                     ) : (
                       <>
-                        Verify code
+                        Verify
                         <ArrowRight className="ml-2 h-4 w-4" />
                       </>
                     )}
@@ -272,11 +401,76 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   <Button
                     type="button"
                     variant="ghost"
-                    onClick={() => setStep("signIn")}
+                    onClick={handleBack}
                     disabled={isLoading}
                     className="w-full"
                   >
-                    Use different phone number
+                    Use a different phone number
+                  </Button>
+                </CardFooter>
+              </form>
+            </>
+          )}
+
+          {/* ─── Step 3: Set a password (optional, after first OTP login) ─── */}
+          {typeof step === "object" && step.mode === "set-password" && (
+            <>
+              <CardHeader className="text-center">
+                <CardTitle className="flex items-center justify-center gap-2">
+                  <KeyRound className="size-5" /> Set a password
+                </CardTitle>
+                <CardDescription>
+                  Speed up your next login — no SMS needed
+                </CardDescription>
+              </CardHeader>
+              <form onSubmit={handleSetPassword}>
+                <CardContent className="space-y-3">
+                  <input type="hidden" name="phone" value={step.phone} />
+                  <input type="hidden" name="flow" value="signUp" />
+                  <div className="space-y-2">
+                    <Label htmlFor="new-password">Password</Label>
+                    <Input
+                      id="new-password"
+                      name="password"
+                      type="password"
+                      placeholder="At least 8 characters"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      disabled={isLoading}
+                      autoFocus
+                      required
+                    />
+                  </div>
+                  {error && (
+                    <p className="text-sm text-red-500 text-center">{error}</p>
+                  )}
+                </CardContent>
+                <CardFooter className="flex-col gap-2">
+                  <Button
+                    type="submit"
+                    className="w-full"
+                    disabled={isLoading || password.length < 8}
+                  >
+                    {isLoading ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Saving...
+                      </>
+                    ) : (
+                      <>
+                        Save password
+                        <ArrowRight className="ml-2 h-4 w-4" />
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={handleSkipPassword}
+                    disabled={isLoading}
+                    className="w-full"
+                  >
+                    Skip for now
                   </Button>
                 </CardFooter>
               </form>

@@ -124,7 +124,7 @@ export default function Account() {
               <div className="min-w-0">
                 <p className="truncate font-semibold">{user?.name ?? "…"}</p>
                 <p className="truncate text-sm text-muted-foreground">
-                  {user?.email ?? (user?.isAnonymous ? "Guest account" : "…")}
+                  {user?.phone ?? user?.email ?? "…"}
                 </p>
                 <Badge
                   variant="secondary"
