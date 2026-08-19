@@ -6,7 +6,7 @@ import { api } from "@/convex/_generated/api";
 import { Loader2, ShoppingBag, Store, Utensils } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router";
+import { Navigate, useNavigate, useSearchParams } from "react-router";
 import { useMutation } from "convex/react";
 
 export default function Dashboard() {
@@ -34,7 +34,13 @@ export default function Dashboard() {
 
 function Onboarding({ onDone }: { onDone: () => void }) {
   const onboard = useMutation(api.users.onboard);
-  const [role, setRole] = useState<"customer" | "owner" | null>(null);
+  // The login page passes ?role=customer|owner so first-run onboarding
+  // opens with the role already picked — no redundant tap.
+  const [searchParams] = useSearchParams();
+  const paramRole = searchParams.get("role");
+  const [role, setRole] = useState<"customer" | "owner" | null>(
+    paramRole === "owner" ? "owner" : paramRole === "customer" ? "customer" : null,
+  );
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);

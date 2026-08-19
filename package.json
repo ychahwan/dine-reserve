@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "web:hosted": "vite --host",
+    "web:hosted": "bash scripts/web-hosted.sh",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",

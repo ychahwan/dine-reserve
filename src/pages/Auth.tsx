@@ -17,7 +17,18 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
-import { ArrowRight, Loader2, Phone, Store, KeyRound, MessageSquare } from "lucide-react";
+import { AnimatePresence, motion } from "framer-motion";
+import {
+  ArrowLeft,
+  ArrowRight,
+  KeyRound,
+  Loader2,
+  MessageSquare,
+  Phone,
+  ShieldCheck,
+  Store,
+  Utensils,
+} from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
@@ -35,23 +46,43 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
+type RoleChoice = "customer" | "owner";
+
 type AuthStep =
+  | "choose-role"
   | "enter-phone"
   | { phone: string; mode: "password" }
   | { phone: string; mode: "otp" }
   | { phone: string; mode: "otp"; verified: true }
   | { phone: string; mode: "set-password" };
 
+const ROLE_OPTIONS: {
+  value: RoleChoice;
+  title: string;
+  description: string;
+  icon: typeof Utensils;
+}[] = [
+  {
+    value: "customer",
+    title: "I'm a diner",
+    description: "Find restaurants, check availability and book tables.",
+    icon: Utensils,
+  },
+  {
+    value: "owner",
+    title: "I run a restaurant",
+    description: "Publish availability, manage menus and track bookings.",
+    icon: Store,
+  },
+];
+
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
-  const { isLoading: authLoading, isAuthenticated, signIn } = useAuth();
+  const { isLoading: authLoading, isAuthenticated, user, signIn } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const redirect = resolveRedirectAfterAuth(
-    searchParams.get("returnTo"),
-    redirectAfterAuth,
-  );
 
-  const [step, setStep] = useState<AuthStep>("enter-phone");
+  const [step, setStep] = useState<AuthStep>("choose-role");
+  const [role, setRole] = useState<RoleChoice | null>(null);
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -64,11 +95,32 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     phone ? { phone } : "skip",
   );
 
-  useEffect(() => {
-    if (!authLoading && isAuthenticated) {
-      navigate(redirect);
+  // Where should a freshly signed-in user land?
+  //   1. A validated same-origin returnTo wins.
+  //   2. An existing profile role opens that profile's tabs.
+  //   3. The role picked on the login page preselects onboarding.
+  //   4. Fall back to the default dashboard.
+  const resolveTarget = () => {
+    const returnTo = searchParams.get("returnTo");
+    if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
+      return returnTo;
     }
-  }, [authLoading, isAuthenticated, navigate, redirect]);
+    if (user?.role === "customer") return "/explore";
+    if (user?.role === "owner") return "/owner";
+    if (role === "owner") return "/dashboard?role=owner";
+    if (role === "customer") return "/dashboard?role=customer";
+    return resolveRedirectAfterAuth(null, redirectAfterAuth);
+  };
+
+  useEffect(() => {
+    // Don't auto-redirect while the post-first-login "set a password"
+    // screen is up — the user must explicitly save or skip it.
+    const isSetPassword =
+      typeof step === "object" && step.mode === "set-password";
+    if (!authLoading && isAuthenticated && user !== undefined && !isSetPassword) {
+      navigate(resolveTarget());
+    }
+  }, [authLoading, isAuthenticated, user, navigate, step]);
 
   // Once we know whether the user has a password, route to the right step
   useEffect(() => {
@@ -101,7 +153,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     try {
       const formData = new FormData(event.currentTarget);
       await signIn("password", formData);
-      navigate(redirect);
+      navigate(resolveTarget());
     } catch (err) {
       console.error("Password sign-in error:", err);
       setError("Invalid phone number or password.");
@@ -164,7 +216,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     try {
       const formData = new FormData(event.currentTarget);
       await signIn("password", formData);
-      navigate(redirect);
+      navigate(resolveTarget());
     } catch (err) {
       console.error("Set password error:", err);
       setError(err instanceof Error ? err.message : "Failed to set password.");
@@ -173,22 +225,29 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   const handleSkipPassword = () => {
-    navigate(redirect);
+    navigate(resolveTarget());
   };
 
   const handleBack = () => {
-    setStep("enter-phone");
+    if (typeof step === "object") {
+      setStep("enter-phone");
+    } else if (step === "enter-phone") {
+      setStep("choose-role");
+    }
     setPassword("");
     setOtp("");
     setError(null);
   };
 
+  const stepKey = typeof step === "string" ? step : step.mode;
+
   return (
-    <div className="relative flex min-h-screen flex-col overflow-hidden bg-background">
-      {/* Decorative theme */}
+    <div className="relative flex min-h-screen flex-col overflow-hidden bg-gradient-to-b from-background via-background to-primary/5">
+      {/* Decorative theme — soft, light */}
       <div className="pointer-events-none absolute inset-0" aria-hidden>
         <div className="absolute -left-24 -top-24 size-72 rounded-full bg-primary/10 blur-3xl" />
-        <div className="absolute -bottom-32 -right-20 size-80 rounded-full bg-emerald-500/10 blur-3xl" />
+        <div className="absolute -bottom-32 -right-20 size-80 rounded-full bg-emerald-200/50 blur-3xl dark:bg-emerald-500/10" />
+        <div className="absolute right-1/4 top-16 size-40 rounded-full bg-amber-200/40 blur-3xl dark:bg-amber-500/10" />
       </div>
 
       {/* Brand */}
@@ -197,7 +256,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
           onClick={() => navigate("/")}
           className="group flex items-center gap-2.5 transition-opacity hover:opacity-90"
         >
-          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-lg shadow-primary/25 transition-transform group-hover:scale-105">
+          <span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-transform group-hover:scale-105">
             <Store className="size-5" />
           </span>
           <span className="text-left">
@@ -213,270 +272,334 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
       {/* Auth Content */}
       <div className="relative flex flex-1 items-center justify-center px-4 py-8">
-        <Card className="w-full max-w-sm border-border/70 shadow-xl shadow-black/5">
-
-          {/* ─── Step 1: Enter phone ─── */}
-          {step === "enter-phone" && (
-            <>
-              <CardHeader className="text-center">
-                <CardTitle className="text-xl">Welcome</CardTitle>
-                <CardDescription>
-                  Enter your phone number to continue
-                </CardDescription>
-              </CardHeader>
-              <form onSubmit={handlePhoneSubmit}>
-                <CardContent>
-                  <div className="relative flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
-                      <Input
-                        name="phone"
-                        placeholder="+961 71 123 456"
-                        type="tel"
-                        className="pl-9"
-                        disabled={isLoading}
-                        required
-                        autoFocus
-                      />
-                    </div>
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      size="icon"
-                      disabled={isLoading}
-                    >
-                      {isLoading ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <ArrowRight className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                  {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
-                </CardContent>
-              </form>
-            </>
-          )}
-
-          {/* ─── Step 2a: Password login ─── */}
-          {typeof step === "object" && step.mode === "password" && (
-            <>
-              <CardHeader className="text-center">
-                <CardTitle className="flex items-center justify-center gap-2">
-                  <KeyRound className="size-5" /> Password login
-                </CardTitle>
-                <CardDescription>
-                  Enter your password for {step.phone}
-                </CardDescription>
-              </CardHeader>
-              <form onSubmit={handlePasswordSubmit}>
-                <CardContent className="space-y-3">
-                  <input type="hidden" name="phone" value={step.phone} />
-                  <input type="hidden" name="flow" value="signIn" />
-                  <div className="space-y-2">
-                    <Label htmlFor="password">Password</Label>
-                    <Input
-                      id="password"
-                      name="password"
-                      type="password"
-                      placeholder="Enter your password"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={isLoading}
-                      autoFocus
-                      required
-                    />
-                  </div>
-                  {error && (
-                    <p className="text-sm text-red-500 text-center">{error}</p>
-                  )}
-                </CardContent>
-                <CardFooter className="flex-col gap-2">
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isLoading || password.length < 8}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Signing in...
-                      </>
-                    ) : (
-                      <>
-                        Sign in
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleBack}
-                    disabled={isLoading}
-                    className="w-full"
-                  >
-                    Use a different phone number
-                  </Button>
-                </CardFooter>
-              </form>
-            </>
-          )}
-
-          {/* ─── Step 2b: OTP verify ─── */}
-          {typeof step === "object" && step.mode === "otp" && !hasPassword?.exists && (
-            <>
-              <CardHeader className="text-center">
-                <CardTitle className="flex items-center justify-center gap-2">
-                  <MessageSquare className="size-5" /> Verify your phone
-                </CardTitle>
-                <CardDescription>
-                  {isLoading
-                    ? "Sending code..."
-                    : `Enter the code sent to ${step.phone}`}
-                </CardDescription>
-              </CardHeader>
-              <form onSubmit={handleOtpSubmit}>
-                <CardContent className="pb-4">
-                  <input type="hidden" name="phone" value={step.phone} />
-                  <input type="hidden" name="code" value={otp} />
-
-                  <div className="flex justify-center">
-                    <InputOTP
-                      value={otp}
-                      onChange={setOtp}
-                      maxLength={6}
-                      disabled={isLoading}
-                      onKeyDown={(e) => {
-                        if (e.key === "Enter" && otp.length === 6 && !isLoading) {
-                          const form = (e.target as HTMLElement).closest("form");
-                          if (form) form.requestSubmit();
-                        }
-                      }}
-                    >
-                      <InputOTPGroup>
-                        {Array.from({ length: 6 }).map((_, index) => (
-                          <InputOTPSlot key={index} index={index} />
-                        ))}
-                      </InputOTPGroup>
-                    </InputOTP>
-                  </div>
-                  {error && (
-                    <p className="mt-2 text-sm text-red-500 text-center">
-                      {error}
+        <Card className="w-full max-w-md border-border/60 bg-card/90 shadow-none backdrop-blur-sm">
+          <AnimatePresence mode="wait">
+            <motion.div
+              key={stepKey}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -8 }}
+              transition={{ duration: 0.22, ease: "easeOut" }}
+            >
+              {/* ─── Step 0: Choose who you are ─── */}
+              {step === "choose-role" && (
+                <>
+                  <CardHeader className="text-center">
+                    <CardTitle className="text-2xl">Welcome</CardTitle>
+                    <CardDescription className="mx-auto max-w-xs">
+                      Sign in as a diner or a restaurant owner
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-3 px-6">
+                    {ROLE_OPTIONS.map((option) => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => {
+                          setRole(option.value);
+                          setStep("enter-phone");
+                        }}
+                        className="group flex w-full items-center gap-4 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/50 hover:bg-primary/5"
+                      >
+                        <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                          <option.icon className="size-5" />
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block font-semibold">
+                            {option.title}
+                          </span>
+                          <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
+                            {option.description}
+                          </span>
+                        </span>
+                        <ArrowRight className="size-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
+                      </button>
+                    ))}
+                  </CardContent>
+                  <CardFooter className="justify-center pt-2">
+                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                      <ShieldCheck className="size-3.5 text-primary" />
+                      Secure phone login — no passwords needed
                     </p>
-                  )}
-                  <p className="text-sm text-muted-foreground text-center mt-4">
-                    Didn't receive a code?{" "}
-                    <Button
-                      variant="link"
-                      className="p-0 h-auto"
-                      onClick={() => {
-                        setError(null);
-                        handleSendOtp();
-                      }}
-                    >
-                      Resend
-                    </Button>
-                  </p>
-                </CardContent>
-                <CardFooter className="flex-col gap-2">
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isLoading || otp.length !== 6}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Verifying...
-                      </>
-                    ) : (
-                      <>
-                        Verify
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleBack}
-                    disabled={isLoading}
-                    className="w-full"
-                  >
-                    Use a different phone number
-                  </Button>
-                </CardFooter>
-              </form>
-            </>
-          )}
+                  </CardFooter>
+                </>
+              )}
 
-          {/* ─── Step 3: Set a password (optional, after first OTP login) ─── */}
-          {typeof step === "object" && step.mode === "set-password" && (
-            <>
-              <CardHeader className="text-center">
-                <CardTitle className="flex items-center justify-center gap-2">
-                  <KeyRound className="size-5" /> Set a password
-                </CardTitle>
-                <CardDescription>
-                  Speed up your next login — no SMS needed
-                </CardDescription>
-              </CardHeader>
-              <form onSubmit={handleSetPassword}>
-                <CardContent className="space-y-3">
-                  <input type="hidden" name="phone" value={step.phone} />
-                  <input type="hidden" name="flow" value="signUp" />
-                  <div className="space-y-2">
-                    <Label htmlFor="new-password">Password</Label>
-                    <Input
-                      id="new-password"
-                      name="password"
-                      type="password"
-                      placeholder="At least 8 characters"
-                      value={password}
-                      onChange={(e) => setPassword(e.target.value)}
-                      disabled={isLoading}
-                      autoFocus
-                      required
-                    />
-                  </div>
-                  {error && (
-                    <p className="text-sm text-red-500 text-center">{error}</p>
-                  )}
-                </CardContent>
-                <CardFooter className="flex-col gap-2">
-                  <Button
-                    type="submit"
-                    className="w-full"
-                    disabled={isLoading || password.length < 8}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Saving...
-                      </>
-                    ) : (
-                      <>
-                        Save password
-                        <ArrowRight className="ml-2 h-4 w-4" />
-                      </>
-                    )}
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={handleSkipPassword}
-                    disabled={isLoading}
-                    className="w-full"
-                  >
-                    Skip for now
-                  </Button>
-                </CardFooter>
-              </form>
-            </>
-          )}
+              {/* ─── Step 1: Enter phone ─── */}
+              {step === "enter-phone" && (
+                <>
+                  <CardHeader className="text-center">
+                    <CardTitle className="text-xl">Enter your phone</CardTitle>
+                    <CardDescription>
+                      We&apos;ll text you a code to sign in
+                    </CardDescription>
+                  </CardHeader>
+                  <form onSubmit={handlePhoneSubmit}>
+                    <CardContent>
+                      <div className="relative flex items-center gap-2">
+                        <div className="relative flex-1">
+                          <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
+                          <Input
+                            name="phone"
+                            placeholder="+961 71 123 456"
+                            type="tel"
+                            className="pl-9"
+                            disabled={isLoading}
+                            required
+                            autoFocus
+                          />
+                        </div>
+                        <Button
+                          type="submit"
+                          variant="outline"
+                          size="icon"
+                          disabled={isLoading}
+                        >
+                          {isLoading ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <ArrowRight className="h-4 w-4" />
+                          )}
+                        </Button>
+                      </div>
+                      {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
+                    </CardContent>
+                    <CardFooter className="flex-col gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={handleBack}
+                        disabled={isLoading}
+                        className="w-full text-muted-foreground"
+                      >
+                        <ArrowLeft className="size-4" />
+                        Change who&apos;s signing in
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </>
+              )}
 
+              {/* ─── Step 2a: Password login ─── */}
+              {typeof step === "object" && step.mode === "password" && (
+                <>
+                  <CardHeader className="text-center">
+                    <CardTitle className="flex items-center justify-center gap-2">
+                      <KeyRound className="size-5" /> Password login
+                    </CardTitle>
+                    <CardDescription>
+                      Enter your password for {step.phone}
+                    </CardDescription>
+                  </CardHeader>
+                  <form onSubmit={handlePasswordSubmit}>
+                    <CardContent className="space-y-3">
+                      <input type="hidden" name="phone" value={step.phone} />
+                      <input type="hidden" name="flow" value="signIn" />
+                      <div className="space-y-2">
+                        <Label htmlFor="password">Password</Label>
+                        <Input
+                          id="password"
+                          name="password"
+                          type="password"
+                          placeholder="Enter your password"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          disabled={isLoading}
+                          autoFocus
+                          required
+                        />
+                      </div>
+                      {error && (
+                        <p className="text-sm text-red-500 text-center">{error}</p>
+                      )}
+                    </CardContent>
+                    <CardFooter className="flex-col gap-2">
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={isLoading || password.length < 8}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Signing in...
+                          </>
+                        ) : (
+                          <>
+                            Sign in
+                            <ArrowRight className="ml-2 h-4 w-4" />
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={handleBack}
+                        disabled={isLoading}
+                        className="w-full"
+                      >
+                        Use a different phone number
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </>
+              )}
+
+              {/* ─── Step 2b: OTP verify ─── */}
+              {typeof step === "object" && step.mode === "otp" && !hasPassword?.exists && (
+                <>
+                  <CardHeader className="text-center">
+                    <CardTitle className="flex items-center justify-center gap-2">
+                      <MessageSquare className="size-5" /> Verify your phone
+                    </CardTitle>
+                    <CardDescription>
+                      {isLoading
+                        ? "Sending code..."
+                        : `Enter the code sent to ${step.phone}`}
+                    </CardDescription>
+                  </CardHeader>
+                  <form onSubmit={handleOtpSubmit}>
+                    <CardContent className="pb-4">
+                      <input type="hidden" name="phone" value={step.phone} />
+                      <input type="hidden" name="code" value={otp} />
+
+                      <div className="flex justify-center">
+                        <InputOTP
+                          value={otp}
+                          onChange={setOtp}
+                          maxLength={6}
+                          disabled={isLoading}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && otp.length === 6 && !isLoading) {
+                              const form = (e.target as HTMLElement).closest("form");
+                              if (form) form.requestSubmit();
+                            }
+                          }}
+                        >
+                          <InputOTPGroup>
+                            {Array.from({ length: 6 }).map((_, index) => (
+                              <InputOTPSlot key={index} index={index} />
+                            ))}
+                          </InputOTPGroup>
+                        </InputOTP>
+                      </div>
+                      {error && (
+                        <p className="mt-2 text-sm text-red-500 text-center">
+                          {error}
+                        </p>
+                      )}
+                      <p className="text-sm text-muted-foreground text-center mt-4">
+                        Didn&apos;t receive a code?{" "}
+                        <Button
+                          variant="link"
+                          className="p-0 h-auto"
+                          onClick={() => {
+                            setError(null);
+                            handleSendOtp();
+                          }}
+                        >
+                          Resend
+                        </Button>
+                      </p>
+                    </CardContent>
+                    <CardFooter className="flex-col gap-2">
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={isLoading || otp.length !== 6}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Verifying...
+                          </>
+                        ) : (
+                          <>
+                            Verify
+                            <ArrowRight className="ml-2 h-4 w-4" />
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={handleBack}
+                        disabled={isLoading}
+                        className="w-full"
+                      >
+                        Use a different phone number
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </>
+              )}
+
+              {/* ─── Step 3: Set a password (optional, after first OTP login) ─── */}
+              {typeof step === "object" && step.mode === "set-password" && (
+                <>
+                  <CardHeader className="text-center">
+                    <CardTitle className="flex items-center justify-center gap-2">
+                      <KeyRound className="size-5" /> Set a password
+                    </CardTitle>
+                    <CardDescription>
+                      Speed up your next login — no SMS needed
+                    </CardDescription>
+                  </CardHeader>
+                  <form onSubmit={handleSetPassword}>
+                    <CardContent className="space-y-3">
+                      <input type="hidden" name="phone" value={step.phone} />
+                      <input type="hidden" name="flow" value="signUp" />
+                      <div className="space-y-2">
+                        <Label htmlFor="new-password">Password</Label>
+                        <Input
+                          id="new-password"
+                          name="password"
+                          type="password"
+                          placeholder="At least 8 characters"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          disabled={isLoading}
+                          autoFocus
+                          required
+                        />
+                      </div>
+                      {error && (
+                        <p className="text-sm text-red-500 text-center">{error}</p>
+                      )}
+                    </CardContent>
+                    <CardFooter className="flex-col gap-2">
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={isLoading || password.length < 8}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Saving...
+                          </>
+                        ) : (
+                          <>
+                            Save password
+                            <ArrowRight className="ml-2 h-4 w-4" />
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={handleSkipPassword}
+                        disabled={isLoading}
+                        className="w-full"
+                      >
+                        Skip for now
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </>
+              )}
+            </motion.div>
+          </AnimatePresence>
         </Card>
       </div>
     </div>
