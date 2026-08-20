@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { motion } from "framer-motion";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useState } from "react";
@@ -32,6 +32,15 @@ export default function SetPassword() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Check if the user already has a password account. If not (OTP-only
+  // user tagged as restaurant), the "current password" field is unnecessary.
+  const hasPassword = useQuery(
+    api.users.hasPasswordAccount,
+    user?.phone ? { phone: user.phone } : "skip",
+  );
+
+  const showCurrentPassword = hasPassword?.exists === true;
 
   if (isLoading) {
     return (
@@ -94,6 +103,7 @@ export default function SetPassword() {
             </CardHeader>
             <form onSubmit={handleSubmit}>
               <CardContent className="space-y-3">
+              {showCurrentPassword && (
                 <div className="space-y-2">
                   <Label htmlFor="current-password">Current password</Label>
                   <Input
@@ -107,6 +117,7 @@ export default function SetPassword() {
                     required
                   />
                 </div>
+              )}
                 <div className="space-y-2">
                   <Label htmlFor="new-password">New password</Label>
                   <Input

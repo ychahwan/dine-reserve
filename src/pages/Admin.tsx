@@ -20,7 +20,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { motion } from "framer-motion";
-import { Loader2, Store, UserCog, UtensilsCrossed } from "lucide-react";
+import { Eye, EyeOff, Loader2, Store, UserCog, UtensilsCrossed } from "lucide-react";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 
@@ -154,6 +154,7 @@ function RegisterRestaurant() {
   const [ownerPhone, setOwnerPhone] = useState("");
   const [ownerName, setOwnerName] = useState("");
   const [tempPassword, setTempPassword] = useState("");
+  const [showTempPass, setShowTempPass] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -235,7 +236,12 @@ function RegisterRestaurant() {
             </div>
             <div className="mt-4 space-y-2">
               <Label htmlFor="a-temp-pass">Temporary password *</Label>
-              <Input id="a-temp-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters" type="text" required disabled={saving} />
+              <div className="relative">
+                <Input id="a-temp-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters" type={showTempPass ? "text" : "password"} required disabled={saving} className="pr-10" />
+                <button type="button" tabIndex={-1} onClick={() => setShowTempPass((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                  {showTempPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                </button>
+              </div>
               <p className="text-xs text-muted-foreground">
                 Share this with the owner — they must change it at first login.
               </p>
@@ -337,6 +343,7 @@ function TagOwner() {
   const [phone, setPhone] = useState("");
   const [name, setName] = useState("");
   const [tempPassword, setTempPassword] = useState("");
+  const [showTagPass, setShowTagPass] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -390,7 +397,12 @@ function TagOwner() {
           </div>
           <div className="space-y-2">
             <Label htmlFor="t-pass">Temporary password (optional)</Label>
-            <Input id="t-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters — if the account has none" type="text" disabled={saving} />
+            <div className="relative">
+              <Input id="t-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters — if the account has none" type={showTagPass ? "text" : "password"} disabled={saving} className="pr-10" />
+              <button type="button" tabIndex={-1} onClick={() => setShowTagPass((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                {showTagPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
           </div>
           {error && (
             <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">

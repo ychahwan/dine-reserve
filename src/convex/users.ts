@@ -53,7 +53,9 @@ export const currentUser = query({
  */
 export const onboard = mutation({
   args: {
-    role: v.union(v.literal(ROLES.CUSTOMER), v.literal(ROLES.OWNER)),
+    // Only customer role allowed — owner/admin roles are assigned
+    // exclusively by admin mutations (registerRestaurant, tagAsRestaurant).
+    role: v.literal(ROLES.CUSTOMER),
     name: v.string(),
     phone: v.optional(v.string()),
   },
