@@ -26,7 +26,7 @@ import {
   Phone,
   Store,
 } from "lucide-react";
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useRef, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 
 interface AuthProps {
@@ -111,6 +111,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
+    otpSentRef.current = false;
     const formData = new FormData(event.currentTarget);
     const phoneValue = formData.get("phone") as string;
 
@@ -136,27 +137,35 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
+  // Track whether OTP has already been auto-sent to prevent the infinite loop
+  // where setStep in handleSendOtp re-triggers this effect.
+  const otpSentRef = useRef(false);
+
   // Step 2b: Send OTP
-  const handleSendOtp = async () => {
+  const handleSendOtp = async (force = false) => {
     if (typeof step !== "object" || step.mode !== "otp" || hasPassword?.exists) return;
+    if (otpSentRef.current && !force) return;
+    otpSentRef.current = true;
     setIsLoading(true);
     setError(null);
     try {
       const formData = new FormData();
       formData.set("phone", step.phone);
       await signIn("phone-otp", formData);
-      setStep({ phone: step.phone, mode: "otp" });
+      // Do NOT call setStep here — it would create a new object reference
+      // that re-triggers the auto-send effect, causing an infinite loop.
       setIsLoading(false);
     } catch (err) {
       console.error("OTP send error:", err);
       setError("Failed to send verification code. Please try again.");
+      otpSentRef.current = false;
       setIsLoading(false);
     }
   };
 
   // Auto-send OTP when we determine user has no password
   useEffect(() => {
-    if (typeof step === "object" && step.mode === "otp" && step.phone && hasPassword && !hasPassword.exists) {
+    if (typeof step === "object" && step.mode === "otp" && step.phone && hasPassword && !hasPassword.exists && !otpSentRef.current) {
       handleSendOtp();
     }
   }, [hasPassword, step]);
@@ -239,6 +248,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   const handleBack = () => {
+    otpSentRef.current = false;
     if (typeof step === "object") {
       if (step.mode === "reset-otp") {
         // Back from reset lands on the password login screen for this phone
@@ -551,7 +561,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                           className="p-0 h-auto"
                           onClick={() => {
                             setError(null);
-                            handleSendOtp();
+                            otpSentRef.current = false;
+                            handleSendOtp(true);
                           }}
                         >
                           Resend

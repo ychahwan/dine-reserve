@@ -64,11 +64,11 @@ export default function Landing() {
             </a>
           </nav>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" asChild className="hidden sm:inline-flex">
+            <Button variant="ghost" size="sm" asChild>
               <Link to="/auth">Sign in</Link>
             </Button>
             <Button size="sm" asChild>
-              <Link to="/auth">Find a table</Link>
+              <Link to="/auth">Get started</Link>
             </Button>
           </div>
         </div>
@@ -76,7 +76,7 @@ export default function Landing() {
 
       {/* ---------- Hero ---------- */}
       <section className="relative overflow-hidden">
-        <div className="pointer-events-none absolute -top-32 left-1/2 h-72 w-[46rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="pointer-events-none absolute -top-32 left-1/2 h-72 w-[46rem] -translate-x-1/2 rounded-full bg-primary/8 blur-3xl" />
         <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 pb-16 pt-14 sm:px-6 lg:grid-cols-2 lg:pb-20 lg:pt-20">
           <div>
             <motion.div
@@ -111,7 +111,7 @@ export default function Landing() {
                 </Link>
               </Button>
               <Button size="lg" variant="outline" asChild className="h-12 px-7 text-base">
-                <Link to="/auth?returnTo=/owner">I run a restaurant</Link>
+                <Link to="/auth">Sign in to your account</Link>
               </Button>
             </motion.div>
             <motion.div
@@ -174,7 +174,7 @@ export default function Landing() {
       </section>
 
       {/* ---------- How it works ---------- */}
-      <section id="how" className="border-t border-border/60 bg-muted/40">
+      <section id="how" className="border-t border-border/60">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-medium uppercase tracking-widest text-primary">How it works</p>
@@ -207,7 +207,7 @@ export default function Landing() {
       </section>
 
       {/* ---------- Cuisines ---------- */}
-      <section id="cuisines" className="border-t border-border/60">
+      <section id="cuisines" className="border-t border-border/60 bg-muted/30">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
@@ -250,7 +250,7 @@ export default function Landing() {
       </section>
 
       {/* ---------- Owners ---------- */}
-      <section id="owners" className="border-t border-border/60 bg-muted/40">
+      <section id="owners" className="border-t border-border/60">
         <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2">
           <div className="relative order-2 lg:order-1">
             <div className="rounded-3xl border border-border bg-card p-5">
@@ -319,7 +319,7 @@ export default function Landing() {
       </section>
 
       {/* ---------- Final CTA ---------- */}
-      <section className="border-t border-border/60">
+      <section className="border-t border-border/60 bg-muted/30">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="relative overflow-hidden rounded-3xl bg-primary px-6 py-12 text-center text-primary-foreground sm:px-16">
             <div className="relative">

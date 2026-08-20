@@ -56,9 +56,10 @@ export async function sendOtpSms(phone: string, token: string): Promise<void> {
     params.set("MessagingServiceSid", messagingServiceSid);
   } else {
     params.set("From", from!);
-  }
-
-  try {
+  }  try {
+    // 10-second timeout so a hung Twilio connection never blocks the auth action.
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10_000);
     const res = await fetch(
       `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
       {
@@ -69,8 +70,10 @@ export async function sendOtpSms(phone: string, token: string): Promise<void> {
           "Content-Type": "application/x-www-form-urlencoded",
         },
         body: params,
+        signal: controller.signal,
       },
     );
+    clearTimeout(timer);
     if (!res.ok) {
       console.error(
         "[phoneOtp] Twilio SMS failed:",
