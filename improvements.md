@@ -38,7 +38,7 @@ this review are marked **Done**; everything else is a recommendation.
 | A-5 | Restaurant search does a full `collect()` + in-memory filter for cuisine/city/seat/dietary. With the 50-restaurant cap this is fine today, but it won't scale to thousands of venues. | Low | Move filtering into the search index (filterFields already exist) and paginate with `paginate` instead of `collect`. | Planned |
 | A-6 | `stats` (insights) scans all bookings for a restaurant then filters by window; fine for demo scale. | Low | Add a `date` range index + `paginate` when datasets grow. | Planned |
 | A-7 | Invite codes use a 31-char alphabet (no `0/O/1/I`); 6 chars ⇒ ~887M combos — good. `generateCode` uses `crypto.getRandomValues`. No change needed. | — | None. | — |
-| A-8 | Secrets (Twilio) live in the Convex env + `.env`. New API key provided but still returns **401** on message send — likely lacks write permissions. | High | Regenerate API key with **Full Access** permissions, or provide the Auth Token. | Todo |
+| A-8 | Secrets (Twilio) live in the Convex env + `.env`. API key belongs to a different Twilio account (confirmed by user). `TWILIO_ENABLED=false` until correct credentials provided. | High | Provide correct API key (Full Access) or Auth Token from account `AC8c826b...`, then set `TWILIO_ENABLED=true` and deploy. | Todo |
 
 ## 2. Authentication & session security
 
@@ -63,7 +63,7 @@ this review are marked **Done**; everything else is a recommendation.
 | S-1 | RBAC: every mutation verifies caller identity; restaurant writes verify `ownerId === caller`; bookings readable only by owner or diner; notifications by owner. | ✅ **Good** | Verified in code (`requireOwner`, `isRestaurantOwner`, `by_user` indexes) and by the test suite (E-2, C-9, H-8). |
 | S-2 | Input validation on every public mutation. | ✅ **Good** | Zod + Convex validators. |
 | S-3 | No secrets in client bundle. | ✅ **Good** | `VITE_CONVEX_URL` only; Twilio reads server-side env. |
-| S-4 | SMS delivery actually works in production. | ❌ **Broken** | Twilio API key returns 401 on message send — likely lacks write permissions. **Regenerate key with Full Access or provide Auth Token.** |
+| S-4 | SMS delivery actually works in production. | ❌ **Broken** | API key belongs to a different Twilio account. `TWILIO_ENABLED=false` (kill-switch). When correct credentials are provided, set `TWILIO_ENABLED=true` and deploy. OTP flow works without SMS (codes stored in DB). |
 | S-5 | OTP brute-force window. | ⚠️ **Partial** | Auth-library rate limiting exists, but verify the effective limit; 6 digits is brute-forceable offline only if the DB leaks — hashing prevents that. |
 | S-6 | Kill-switch honored. | ✅ **Done** | `phoneOtp.ts` now respects `TWILIO_ENABLED` kill-switch, matching `sms.ts`. |
 | S-7 | Admin account protection. | ✅ **Done** | Re-claim blocked when already admin. Audit log (`adminAuditLog` table) records all admin mutations. |
