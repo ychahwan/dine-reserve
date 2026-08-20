@@ -8,8 +8,10 @@
  * @module
  */
 
+import type * as admin from "../admin.js";
 import type * as auth from "../auth.js";
-import type * as auth_emailOtp from "../auth/emailOtp.js";
+import type * as auth_passwordAuth from "../auth/passwordAuth.js";
+import type * as auth_phoneOtp from "../auth/phoneOtp.js";
 import type * as availability from "../availability.js";
 import type * as bookings from "../bookings.js";
 import type * as demoRules from "../demoRules.js";
@@ -18,6 +20,7 @@ import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as notifications from "../notifications.js";
 import type * as queue from "../queue.js";
+import type * as rateLimit from "../rateLimit.js";
 import type * as reminders from "../reminders.js";
 import type * as restaurants from "../restaurants.js";
 import type * as reviews from "../reviews.js";
@@ -37,8 +40,10 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  admin: typeof admin;
   auth: typeof auth;
-  "auth/emailOtp": typeof auth_emailOtp;
+  "auth/passwordAuth": typeof auth_passwordAuth;
+  "auth/phoneOtp": typeof auth_phoneOtp;
   availability: typeof availability;
   bookings: typeof bookings;
   demoRules: typeof demoRules;
@@ -47,6 +52,7 @@ declare const fullApi: ApiFromModules<{
   http: typeof http;
   notifications: typeof notifications;
   queue: typeof queue;
+  rateLimit: typeof rateLimit;
   reminders: typeof reminders;
   restaurants: typeof restaurants;
   reviews: typeof reviews;
