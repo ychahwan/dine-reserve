@@ -63,7 +63,28 @@ export const onboard = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
     const cleanName = parseOrThrow(profileNameSchema, args.name);
-    const cleanPhone = parseOrThrow(profilePhoneSchema, args.phone);
+    let cleanPhone = parseOrThrow(profilePhoneSchema, args.phone);
+
+    // Auto-populate phone from auth account if not explicitly provided.
+    // This ensures the phone-otp user always has a phone on their profile,
+    // which is needed for admin:tagAsRestaurant and booking confirmations.
+    if (!cleanPhone) {
+      const existing = await ctx.db.get(userId);
+      if (existing?.phone) {
+        cleanPhone = existing.phone;
+      } else {
+        // Look up the phone-otp auth account identifier (which IS the phone)
+        const accounts = await ctx.db
+          .query("authAccounts")
+          .withIndex("userIdAndProvider", (q) =>
+            q.eq("userId", userId).eq("provider", "phone-otp")
+          )
+          .first();
+        if (accounts?.providerAccountId) {
+          cleanPhone = accounts.providerAccountId;
+        }
+      }
+    }
 
     await ctx.db.patch(userId, {
       role: args.role,
