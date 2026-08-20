@@ -4,7 +4,7 @@ Status legend: **Todo** (not started) · **In progress** (being built) · **Done
 
 ---
 
-# Security & Architecture Review (2026-08-20)
+# Security & Architecture Review (2026-08-20 — updated)
 
 Full-code review performed as a super-architect / security expert pass. Findings
 are graded **High / Medium / Low** and tied to the code. Items that shipped with
@@ -23,19 +23,22 @@ this review are marked **Done**; everything else is a recommendation.
 | Centralized input validation | Zod schemas in `validation.ts` back every mutation (`parseOrThrow`), with the same error strings the UI/tests match. Wire types are enforced by Convex `v` validators. |
 | Graceful feature degradation | Twilio SMS is a guarded no-op when keys are absent; demo ownership (claimDemo) is strictly scoped to seeded demo accounts. |
 | Clean module boundaries | Domain files (bookings, waitlist, dining, socialize, notifications) each own one surface; helpers (`safeGet`) tolerate legacy/bare-identity rows instead of crashing. |
+| **Admin role model** | Platform admin (`+96176683661`) is the only party allowed to register restaurants and tag accounts. Diner-only self-registration. Forced password change for restaurant accounts. Audit log tracks all admin actions. |
+| **Rate limiting** | Database-backed per-user rate limiter (`rateLimits` table) applied to gift sends (20/hr) and all admin mutations (30–60/hr). |
+| **Auth resilience** | OTP send has dual timeout protection: 10s AbortController on server-side Twilio fetch, 15s Promise.race on client-side signIn call. Stale closure bugs fixed with useRef. |
 
 **Weaknesses / opportunities:**
 
 | # | Finding | Grade | Recommendation | Status |
 |---|---------|-------|----------------|--------|
-| A-1 | **Self-serve owner role was an authorization hole.** Any signed-in user could onboard as `owner` and create restaurants, and a customer could claim demo venues without ever becoming `owner` (OwnerShell bounced them). The role model now has a platform admin who is the **only** party allowed to register restaurants and tag accounts as restaurants. | High | Shipped: `admin.registerRestaurant` / `admin.tagAsRestaurant` (admin-only), diner-only onboarding, `claimDemo` promotes to owner. | **Done** |
+| A-1 | **Self-serve owner role was an authorization hole.** Any signed-in user could onboard as `owner` and create restaurants. The role model now has a platform admin who is the **only** party allowed to register restaurants and tag accounts as restaurants. | High | Shipped: `admin.registerRestaurant` / `admin.tagAsRestaurant` (admin-only), diner-only onboarding, `claimDemo` promotes to owner. | **Done** |
 | A-2 | **No forced password change after admin-issued temporary passwords.** An admin-created owner could keep the temp password forever. | Medium | Shipped: `users.mustChangePassword` flag + `/set-password` flow enforced in `resolveTarget`, `Dashboard` and `SetPassword` page. | **Done** |
 | A-3 | Convex actions with `use node` must live alone; helpers like `safeGet` return `null` on invalid ids. Fine as-is, but a stricter `DataModel` would catch more at compile time. | Low | Keep; consider enabling `schemaValidation` incrementally (currently `false` for auth-table flexibility). | Todo |
 | A-4 | `bookings.byCode` returns the booking + restaurant to **any** signed-in caller (invite flow). Acceptable for invites, but PII (guest names) is exposed via a guessable 6-char code. | Medium | Rate-limit `byCode` lookups and/or require the inviter's session; consider showing names only after the guest confirms. | Todo |
 | A-5 | Restaurant search does a full `collect()` + in-memory filter for cuisine/city/seat/dietary. With the 50-restaurant cap this is fine today, but it won't scale to thousands of venues. | Low | Move filtering into the search index (filterFields already exist) and paginate with `paginate` instead of `collect`. | Planned |
 | A-6 | `stats` (insights) scans all bookings for a restaurant then filters by window; fine for demo scale. | Low | Add a `date` range index + `paginate` when datasets grow. | Planned |
 | A-7 | Invite codes use a 31-char alphabet (no `0/O/1/I`); 6 chars ⇒ ~887M combos — good. `generateCode` uses `crypto.getRandomValues`. No change needed. | — | None. | — |
-| A-8 | Secrets (Twilio) live in the Convex env + `.env`; `TWILIO_ENABLED=false` is the kill-switch. Twilio credentials in this deployment currently return **401** — real SMS is not sending (see §3, S-6). | High | Fix Twilio credentials or remove the feature flag illusion; the OTP code is stored hashed in `authVerificationCodes` so the flow is testable without SMS. | Todo |
+| A-8 | Secrets (Twilio) live in the Convex env + `.env`. New API key provided but still returns **401** on message send — likely lacks write permissions. | High | Regenerate API key with **Full Access** permissions, or provide the Auth Token. | Todo |
 
 ## 2. Authentication & session security
 
@@ -44,9 +47,12 @@ this review are marked **Done**; everything else is a recommendation.
 | A-9 | Phone-OTP with 6-digit codes, 15-min expiry, hashed at rest (`sha256` in `authVerificationCodes`) and 1M-combination space. Codes are rate-limited by the auth library (`isSignInRateLimited`). | — | **Good** — but see S-4 (SMS delivery) and S-5 (OTP brute-force window). |
 | A-10 | Passwords hashed with **Scrypt** (lucia) via the Password provider — memory-hard, per-instance salt. | — | **Good.** |
 | A-11 | JWT access tokens + rotating refresh tokens (`authRefreshTokens`), sessions invalidated on password reset (`invalidateSessions`). | — | **Good.** |
-| A-12 | Password reset (`flow: reset` / `reset-verification`) now wired through a `password-reset` phone provider sharing the OTP sender — no new SMS surface. | Medium | **Done** (this review). |
-| A-13 | `users.setPassword` verifies the current password when one exists before rotating — prevents stale-session password theft. | — | **Done** (this review). |
+| A-12 | Password reset (`flow: reset` / `reset-verification`) wired through a `password-reset` phone provider sharing the OTP sender — no new SMS surface. | Medium | **Done** |
+| A-13 | `users.setPassword` verifies the current password when one exists before rotating — prevents stale-session password theft. | — | **Done** |
 | A-14 | No 2FA, no passkeys, no account-recovery beyond SMS. Acceptable for v1 (SMS OTP is already the 2nd factor). | Low | Optional: TOTP for admin accounts. | Planned |
+| A-15 | **OTP infinite loop (fixed).** `handleSendOtp` called `setStep()` after `signIn`, creating a new object reference that re-triggered the auto-send `useEffect`, causing an infinite loop where `isLoading` stayed `true` forever. Fixed by removing the redundant `setStep` call and adding `otpSentRef`. | High | **Done** |
+| A-16 | **Stale closure in auto-send effect.** `handleSendOtp` captured stale `step` via closure when called from the `useEffect`. Fixed by using `useRef` for the phone value and `useCallback` with proper dependencies. | Medium | **Done** |
+| A-17 | **No timeout on Twilio fetch.** `sendOtpSms` had no timeout on `fetch()` — a hung Twilio connection could block the Convex action indefinitely. Fixed with 10s `AbortController` on server + 15s `Promise.race` on client. | High | **Done** |
 
 ## 3. Non-functional requirements review
 
@@ -57,11 +63,14 @@ this review are marked **Done**; everything else is a recommendation.
 | S-1 | RBAC: every mutation verifies caller identity; restaurant writes verify `ownerId === caller`; bookings readable only by owner or diner; notifications by owner. | ✅ **Good** | Verified in code (`requireOwner`, `isRestaurantOwner`, `by_user` indexes) and by the test suite (E-2, C-9, H-8). |
 | S-2 | Input validation on every public mutation. | ✅ **Good** | Zod + Convex validators. |
 | S-3 | No secrets in client bundle. | ✅ **Good** | `VITE_CONVEX_URL` only; Twilio reads server-side env. |
-| S-4 | SMS delivery actually works in production. | ❌ **Broken** | Twilio 401 (`Authenticate`). `TWILIO_ENABLED=false` in `.env`. OTP flow works only because codes are readable from the DB in dev. **Fix credentials before launch.** |
+| S-4 | SMS delivery actually works in production. | ❌ **Broken** | Twilio API key returns 401 on message send — likely lacks write permissions. **Regenerate key with Full Access or provide Auth Token.** |
 | S-5 | OTP brute-force window. | ⚠️ **Partial** | Auth-library rate limiting exists, but verify the effective limit; 6 digits is brute-forceable offline only if the DB leaks — hashing prevents that. |
-| S-6 | Kill-switch honored. | ✅ **Done** | `phoneOtp.ts` now respects `TWILIO_ENABLED` kill-switch, matching `sms.ts`. | **Done** |
-| S-7 | Admin account protection. | ✅ **Partial** | Admin claim hardened: re-claim blocked when already admin. Audit log (`adminAuditLog` table) records all admin mutations (registerRestaurant, tagAsRestaurant, ensureOwnerPassword, claimPlatformAdmin). | **Done** |
-| S-8 | Abuse: rate limiting on public endpoints (search, invite lookup, gift sends). | ✅ **Partial** | `rateLimits` table + `checkRateLimit()` utility added. Applied to `sendGift` (20/hr) and admin mutations (30–60/hr). `byCode` (query) uses Convex built-in per-user limits + `bookingCodeSchema` validation. | **Done** |
+| S-6 | Kill-switch honored. | ✅ **Done** | `phoneOtp.ts` now respects `TWILIO_ENABLED` kill-switch, matching `sms.ts`. |
+| S-7 | Admin account protection. | ✅ **Done** | Re-claim blocked when already admin. Audit log (`adminAuditLog` table) records all admin mutations. |
+| S-8 | Abuse: rate limiting on public endpoints. | ✅ **Done** | `rateLimits` table + `checkRateLimit()` utility. Applied to `sendGift` (20/hr) and admin mutations (30–60/hr). |
+| S-9 | **`onboard` mutation accepts OWNER role.** The Convex validator still allows `v.union(v.literal(ROLES.CUSTOMER), v.literal(ROLES.OWNER))`, so a malicious client could call `onboard` with `role: "owner"` directly, bypassing the admin-only restriction. The UI always sends `"customer"`, but the backend doesn't enforce this. | Medium | Restrict `onboard` to `v.literal(ROLES.CUSTOMER)` only. Owner role should only be set by admin mutations. | Todo |
+| S-10 | **Temporary password visible in plaintext.** `Admin.tsx` RegisterRestaurant form shows the temp password in `type="text"` input. Anyone looking over the admin's shoulder can see it. | Low | Change to `type="password"` with a show/hide toggle. | Todo |
+| S-11 | **SetPassword page always shows "Current password" field.** For OTP-only users tagged as restaurant (no password account yet), the field is shown but not required by the backend. The UI marks it `required`, which is confusing. | Low | Conditionally hide the "Current password" field when the user has no password account (query `hasPasswordAccount`). | Todo |
 
 ### Performance & scalability (NFR-P)
 
@@ -72,6 +81,7 @@ this review are marked **Done**; everything else is a recommendation.
 | P-3 | Real-time streams. | ✅ | Convex reactive queries; no polling. |
 | P-4 | Image delivery. | ⚠️ | Menu photos resolve storage URLs per query — cacheable, but add CDN + `Cache-Control` headers. | Planned |
 | P-5 | SMS fan-out. | ✅ | Scheduled actions (`scheduler.runAfter`) never block mutations. |
+| P-6 | **Rate limits table grows unbounded.** Old `rateLimits` rows are never cleaned up. At scale, this table will accumulate millions of stale rows. | Low | Add a Convex cron job to delete rows older than 24 hours, or add a TTL index. | Planned |
 
 ### Reliability & availability (NFR-R)
 
@@ -106,16 +116,92 @@ this review are marked **Done**; everything else is a recommendation.
 |----|-------------|--------|-------|
 | Pv-1 | PII minimization. | ⚠️ | Bookings store name/phone/email — needed for SMS. Guest names exposed via invite codes (A-4). Add data-retention policy + export/delete endpoint (`users:deleteAccount`). | Todo |
 | Pv-2 | GDPR-style erasure. | ⚠️ | No account-deletion endpoint. Add `users:deleteAccount` (cascade bookings/orders, keep restaurant data for owner accounts). | Planned |
-| Pv-3 | Logging of auth events. | ✅ **Done** | `adminAuditLog` table with `by_admin` index. Every admin mutation writes an audit entry (who, what, when, target user, details). | **Done** |
+| Pv-3 | Logging of auth events. | ✅ **Done** | `adminAuditLog` table with `by_admin` index. Every admin mutation writes an audit entry. |
 
-## 4. New role model (shipped with this review)
+## 4. Role model & auth flow (current state)
 
-- **Platform admin** — phone `+96176683661` (bootstrap via `admin:claimPlatformAdmin`, gated on the phone). Only role allowed to **register restaurants** (`admin:registerRestaurant`) and **tag accounts as restaurant owners** (`admin:tagAsRestaurant` / `admin:ensureOwnerPassword`). Frontend console at `/admin`. Admin may also view any restaurant (OwnerShell allows `admin`).
-- **Restaurant owner** — created/tagged exclusively by the admin, issued a **temporary password** with `mustChangePassword = true`; on first login the app forces `/set-password` before anything else.
-- **Customer (diner)** — self-registers through the app (`/auth` → OTP → diner onboarding). No role choice at signup.
-- `claimDemo` now promotes the claimer to `owner` so the demo path still works end-to-end.
+### Roles
 
-**Flow summary (login):** enter phone → password or OTP (auto-detected by `hasPasswordAccount`) → forgot password uses the new reset flow → post-login redirect: `mustChangePassword` → `/set-password`; `admin` → `/admin`; `customer` → `/explore`; `owner` → `/owner`; fresh → diner onboarding.
+| Role | How assigned | Permissions |
+|------|-------------|-------------|
+| **Platform admin** | Phone `+96176683661` claims via `admin:claimPlatformAdmin` (one-time bootstrap) | Register restaurants, tag accounts as owner, view audit log, view any restaurant |
+| **Restaurant owner** | Created/tagged exclusively by admin | Manage own restaurant, view bookings, menu, orders, insights |
+| **Customer (diner)** | Self-registers via app (`/auth` → OTP → onboarding) | Browse, book, order, socialize, reviews |
+
+### Login flow
+
+```
+1. Enter phone number
+2. hasPasswordAccount query fires
+   ├── Has password account → Password login screen
+   │   ├── Sign in with password → post-login redirect
+   │   └── Forgot password? → SMS OTP → verify → set new password
+   └── No password account → Auto-send OTP (with 15s timeout)
+       ├── Enter 6-digit code → verify → OTP login
+       └── Optional: "Set a password" screen (skip or save)
+```
+
+### Post-login redirect
+
+```
+mustChangePassword → /set-password (forced)
+role: admin       → /admin
+role: customer    → /explore
+role: owner       → /owner
+fresh (no role)   → Diner onboarding (name + phone)
+```
+
+### Registration flow (diner)
+
+```
+1. /auth → Enter phone → OTP sent
+2. Verify OTP → signed in (no role yet)
+3. Dashboard shows onboarding: name + phone
+4. onboard({ role: "customer", name, phone })
+5. Redirect to /explore
+```
+
+### Restaurant registration (admin-only)
+
+```
+1. Admin logs in → /admin
+2. "Register restaurant" tab:
+   - Owner name, phone, temp password
+   - Restaurant name, cuisine, city, address, features
+3. admin:registerRestaurant → creates:
+   - User doc (role: owner, mustChangePassword: true)
+   - Password auth account (temp password)
+   - Restaurant doc + default section
+   - Audit log entry
+4. Owner logs in with temp password → forced to /set-password
+5. Owner sets new password → can use the app
+```
+
+### Account tagging (admin-only)
+
+```
+1. Admin logs in → /admin
+2. "Tag owner" tab:
+   - Existing account phone
+   - Optional: owner name, temp password
+3. admin:tagAsRestaurant → sets:
+   - role: owner, mustChangePassword: true, onboarded: true
+4. admin:ensureOwnerPassword → creates password account if none exists
+5. Owner logs in → forced to /set-password
+```
+
+## 5. New findings (this review cycle)
+
+| # | Finding | Grade | Recommendation | Status |
+|---|---------|-------|----------------|--------|
+| N-1 | **OTP infinite loop.** `handleSendOtp` called `setStep()` after `signIn`, creating a new object reference that re-triggered the auto-send `useEffect`. UI stuck on "Sending code..." forever. | High | Removed redundant `setStep` call; added `otpSentRef` to prevent double-sends. | **Done** |
+| N-2 | **Stale closure in auto-send effect.** `handleSendOtp` captured stale `step` via closure when called from `useEffect`. | Medium | Used `useRef` for phone value + `useCallback` with proper dependencies. | **Done** |
+| N-3 | **No timeout on Twilio fetch.** `sendOtpSms` had no timeout — a hung connection blocked the auth action indefinitely. | High | Added 10s `AbortController` on server + 15s `Promise.race` on client. | **Done** |
+| N-4 | **`onboard` accepts OWNER role.** Convex validator allows `role: "owner"` in the `onboard` mutation, so a malicious client could self-promote to owner. | Medium | Restrict to `v.literal(ROLES.CUSTOMER)` only. | Todo |
+| N-5 | **Temp password in plaintext.** Admin.tsx shows temp password in `type="text"` input. | Low | Change to `type="password"` with show/hide toggle. | Todo |
+| N-6 | **SetPassword always shows "Current password".** Confusing for OTP-only users who have no password account. | Low | Conditionally hide field when no password account exists. | Todo |
+| N-7 | **Rate limits table grows unbounded.** Old rows never cleaned up. | Low | Add Convex cron to delete rows older than 24h. | Planned |
+| N-8 | **Unused AuthStep variant.** `\| { phone: string; mode: "otp"; verified: true }` is defined but never set anywhere. | Low | Remove dead type variant. | Todo |
 
 ---
 
