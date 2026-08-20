@@ -19,15 +19,12 @@ import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
-  ArrowLeft,
   ArrowRight,
   KeyRound,
   Loader2,
   MessageSquare,
   Phone,
-  ShieldCheck,
   Store,
-  Utensils,
 } from "lucide-react";
 import { Suspense, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
@@ -46,43 +43,20 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
-type RoleChoice = "customer" | "owner";
-
 type AuthStep =
-  | "choose-role"
   | "enter-phone"
   | { phone: string; mode: "password" }
   | { phone: string; mode: "otp" }
   | { phone: string; mode: "otp"; verified: true }
-  | { phone: string; mode: "set-password" };
-
-const ROLE_OPTIONS: {
-  value: RoleChoice;
-  title: string;
-  description: string;
-  icon: typeof Utensils;
-}[] = [
-  {
-    value: "customer",
-    title: "I'm a diner",
-    description: "Find restaurants, check availability and book tables.",
-    icon: Utensils,
-  },
-  {
-    value: "owner",
-    title: "I run a restaurant",
-    description: "Publish availability, manage menus and track bookings.",
-    icon: Store,
-  },
-];
+  | { phone: string; mode: "set-password" }
+  | { phone: string; mode: "reset-otp" };
 
 function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, user, signIn } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [step, setStep] = useState<AuthStep>("choose-role");
-  const [role, setRole] = useState<RoleChoice | null>(null);
+  const [step, setStep] = useState<AuthStep>("enter-phone");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -96,19 +70,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   );
 
   // Where should a freshly signed-in user land?
-  //   1. A validated same-origin returnTo wins.
-  //   2. An existing profile role opens that profile's tabs.
-  //   3. The role picked on the login page preselects onboarding.
-  //   4. Fall back to the default dashboard.
+  //   1. Restaurant accounts that must set a new password go straight there.
+  //   2. A validated same-origin returnTo wins.
+  //   3. An existing profile role opens that profile's tabs.
+  //   4. Fresh users go to onboarding (diner by default).
   const resolveTarget = () => {
+    if (user?.mustChangePassword) return "/set-password";
     const returnTo = searchParams.get("returnTo");
     if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
       return returnTo;
     }
+    if (user?.role === "admin") return "/admin";
     if (user?.role === "customer") return "/explore";
     if (user?.role === "owner") return "/owner";
-    if (role === "owner") return "/dashboard?role=owner";
-    if (role === "customer") return "/dashboard?role=customer";
     return resolveRedirectAfterAuth(null, redirectAfterAuth);
   };
 
@@ -224,15 +198,54 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
+  // Step: Forgot password — send a reset OTP via SMS, then verify + set a new password.
+  const handleForgotPassword = async () => {
+    if (typeof step !== "object" || step.mode !== "password") return;
+    setIsLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData();
+      formData.set("phone", step.phone);
+      formData.set("flow", "reset");
+      await signIn("password", formData);
+      setStep({ phone: step.phone, mode: "reset-otp" });
+      setIsLoading(false);
+    } catch (err) {
+      console.error("Password reset request error:", err);
+      setError("We couldn't start a password reset for this number. Try again.");
+      setIsLoading(false);
+    }
+  };
+
+  // Step: Verify the reset OTP and save the new password.
+  const handleResetPassword = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    try {
+      const formData = new FormData(event.currentTarget);
+      await signIn("password", formData);
+      navigate(resolveTarget());
+    } catch (err) {
+      console.error("Password reset error:", err);
+      setError("The reset code is incorrect or expired. Try again.");
+      setIsLoading(false);
+      setOtp("");
+    }
+  };
+
   const handleSkipPassword = () => {
     navigate(resolveTarget());
   };
 
   const handleBack = () => {
     if (typeof step === "object") {
-      setStep("enter-phone");
-    } else if (step === "enter-phone") {
-      setStep("choose-role");
+      if (step.mode === "reset-otp") {
+        // Back from reset lands on the password login screen for this phone
+        setStep({ phone: step.phone, mode: "password" });
+      } else {
+        setStep("enter-phone");
+      }
     }
     setPassword("");
     setOtp("");
@@ -281,50 +294,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.22, ease: "easeOut" }}
             >
-              {/* ─── Step 0: Choose who you are ─── */}
-              {step === "choose-role" && (
-                <>
-                  <CardHeader className="text-center">
-                    <CardTitle className="text-2xl">Welcome</CardTitle>
-                    <CardDescription className="mx-auto max-w-xs">
-                      Sign in as a diner or a restaurant owner
-                    </CardDescription>
-                  </CardHeader>
-                  <CardContent className="space-y-3 px-6">
-                    {ROLE_OPTIONS.map((option) => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => {
-                          setRole(option.value);
-                          setStep("enter-phone");
-                        }}
-                        className="group flex w-full items-center gap-4 rounded-2xl border-2 border-border bg-card p-4 text-left transition-all hover:border-primary/50 hover:bg-primary/5"
-                      >
-                        <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
-                          <option.icon className="size-5" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="block font-semibold">
-                            {option.title}
-                          </span>
-                          <span className="mt-0.5 block text-xs leading-5 text-muted-foreground">
-                            {option.description}
-                          </span>
-                        </span>
-                        <ArrowRight className="size-4 shrink-0 text-muted-foreground/60 transition-transform group-hover:translate-x-0.5" />
-                      </button>
-                    ))}
-                  </CardContent>
-                  <CardFooter className="justify-center pt-2">
-                    <p className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      <ShieldCheck className="size-3.5 text-primary" />
-                      Secure phone login — no passwords needed
-                    </p>
-                  </CardFooter>
-                </>
-              )}
-
               {/* ─── Step 1: Enter phone ─── */}
               {step === "enter-phone" && (
                 <>
@@ -364,18 +333,6 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       </div>
                       {error && <p className="mt-2 text-sm text-red-500">{error}</p>}
                     </CardContent>
-                    <CardFooter className="flex-col gap-2">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={handleBack}
-                        disabled={isLoading}
-                        className="w-full text-muted-foreground"
-                      >
-                        <ArrowLeft className="size-4" />
-                        Change who&apos;s signing in
-                      </Button>
-                    </CardFooter>
                   </form>
                 </>
               )}
@@ -412,6 +369,17 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       {error && (
                         <p className="text-sm text-red-500 text-center">{error}</p>
                       )}
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          variant="link"
+                          className="h-auto p-0 text-sm text-muted-foreground hover:text-foreground"
+                          onClick={handleForgotPassword}
+                          disabled={isLoading}
+                        >
+                          Forgot password?
+                        </Button>
+                      </div>
                     </CardContent>
                     <CardFooter className="flex-col gap-2">
                       <Button
@@ -439,6 +407,94 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         className="w-full"
                       >
                         Use a different phone number
+                      </Button>
+                    </CardFooter>
+                  </form>
+                </>
+              )}
+
+              {/* ─── Step 2c: Reset password (forgot password) ─── */}
+              {typeof step === "object" && step.mode === "reset-otp" && (
+                <>
+                  <CardHeader className="text-center">
+                    <CardTitle className="flex items-center justify-center gap-2">
+                      <KeyRound className="size-5" /> Reset your password
+                    </CardTitle>
+                    <CardDescription>
+                      Enter the code sent to {step.phone} and choose a new password
+                    </CardDescription>
+                  </CardHeader>
+                  <form onSubmit={handleResetPassword}>
+                    <CardContent className="space-y-4">
+                      <input type="hidden" name="phone" value={step.phone} />
+                      <input type="hidden" name="flow" value="reset-verification" />
+                      <input type="hidden" name="code" value={otp} />
+
+                      <div className="flex justify-center">
+                        <InputOTP
+                          value={otp}
+                          onChange={setOtp}
+                          maxLength={6}
+                          disabled={isLoading}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" && otp.length === 6 && !isLoading) {
+                              const form = (e.target as HTMLElement).closest("form");
+                              if (form) form.requestSubmit();
+                            }
+                          }}
+                        >
+                          <InputOTPGroup>
+                            {Array.from({ length: 6 }).map((_, index) => (
+                              <InputOTPSlot key={index} index={index} />
+                            ))}
+                          </InputOTPGroup>
+                        </InputOTP>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label htmlFor="new-password">New password</Label>
+                        <Input
+                          id="new-password"
+                          name="newPassword"
+                          type="password"
+                          placeholder="At least 8 characters"
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                          disabled={isLoading}
+                          autoFocus
+                          required
+                        />
+                      </div>
+                      {error && (
+                        <p className="text-sm text-red-500 text-center">{error}</p>
+                      )}
+                    </CardContent>
+                    <CardFooter className="flex-col gap-2">
+                      <Button
+                        type="submit"
+                        className="w-full"
+                        disabled={isLoading || otp.length !== 6 || password.length < 8}
+                      >
+                        {isLoading ? (
+                          <>
+                            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                            Resetting...
+                          </>
+                        ) : (
+                          <>
+                            Reset password
+                            <ArrowRight className="ml-2 h-4 w-4" />
+                          </>
+                        )}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        onClick={handleBack}
+                        disabled={isLoading}
+                        className="w-full"
+                      >
+                        Back to login
                       </Button>
                     </CardFooter>
                   </form>

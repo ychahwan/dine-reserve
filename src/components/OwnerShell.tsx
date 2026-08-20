@@ -21,8 +21,8 @@ export function OwnerShell({
     navigate("/");
   };
 
-  // Only restaurant owners may manage restaurants.
-  if (user && user.role !== "owner") {
+  // Only restaurant owners (and the platform admin) may manage restaurants.
+  if (user && user.role !== "owner" && user.role !== "admin") {
     return <Navigate to="/dashboard" replace />;
   }
 

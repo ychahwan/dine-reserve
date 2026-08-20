@@ -374,6 +374,13 @@ export const claimDemo = mutation({
       throw new Error("This restaurant has a real owner — it can't be claimed.");
     }
     await ctx.db.patch(id, { ownerId: userId });
+    // Claiming a demo restaurant makes the claimer an owner so they can use
+    // the manager dashboard (previously the role stayed "customer" and the
+    // OwnerShell bounced them straight back).
+    const user = await ctx.db.get(userId);
+    if (user && user.role !== "owner" && user.role !== "admin") {
+      await ctx.db.patch(userId, { role: "owner", onboarded: true });
+    }
     return await ctx.db.get(id);
   },
 });

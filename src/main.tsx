@@ -12,6 +12,8 @@ import "./index.css";
 const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
+const SetPassword = lazy(() => import("./pages/SetPassword.tsx"));
+const Admin = lazy(() => import("./pages/Admin.tsx"));
 const Explore = lazy(() => import("./pages/Explore.tsx"));
 const RestaurantDetail = lazy(() => import("./pages/RestaurantDetail.tsx"));
 const MyBookings = lazy(() => import("./pages/MyBookings.tsx"));
@@ -112,6 +114,24 @@ createRoot(document.getElementById("root")!).render(
                 element={
                   <RequireAuth>
                     <Dashboard />
+                  </RequireAuth>
+                }
+              />
+              {/* Forced password change for restaurant accounts tagged by admin */}
+              <Route
+                path="/set-password"
+                element={
+                  <RequireAuth>
+                    <SetPassword />
+                  </RequireAuth>
+                }
+              />
+              {/* Platform admin console (role-gated inside the page) */}
+              <Route
+                path="/admin"
+                element={
+                  <RequireAuth>
+                    <Admin />
                   </RequireAuth>
                 }
               />

@@ -158,11 +158,38 @@ const schema = defineSchema(
       role: v.optional(roleValidator), // customer | owner | admin
       phone: v.optional(v.string()), // for SMS confirmations
       onboarded: v.optional(v.boolean()), // completed first-run onboarding
+      // Set on restaurant accounts created/tagged by the platform admin: the
+      // owner must set a new password on their next sign-in before proceeding.
+      mustChangePassword: v.optional(v.boolean()),
       prefs: v.optional(DINING_PREFS), // dining preferences (dietary, seating, occasions)
       favorites: v.optional(v.array(v.id("restaurants"))), // saved restaurants
-    }).index("email", ["email"]),
+    })
+      .index("email", ["email"])
+      .index("phone", ["phone"]),
 
     // ---------- Kamix domain tables ----------
+
+    // Server-side rate limiter (key + window → count). Checked in mutations
+    // that need per-user throttling (e.g. gift sends, invite lookups).
+    rateLimits: defineTable({
+      key: v.string(), // e.g. "sendGift:userId"
+      windowStart: v.number(), // start of the current window (ms)
+      count: v.number(), // calls in this window
+    })
+      .index("by_key_window", ["key", "windowStart"])
+      // garbage-collect old windows; Convex TTL or manual cleanup
+      .index("by_window", [
+        "windowStart",
+      ]),
+
+    // Audit log for platform admin actions. Append-only — never deleted.
+    adminAuditLog: defineTable({
+      adminUserId: v.id("users"),
+      action: v.string(), // e.g. "claimPlatformAdmin", "registerRestaurant"
+      targetUserId: v.optional(v.id("users")),
+      details: v.optional(v.string()), // JSON summary (restaurant name, etc.)
+      createdAt: v.number(),
+    }).index("by_admin", ["adminUserId", "createdAt"]),
 
     restaurants: defineTable({
       ownerId: v.id("users"),

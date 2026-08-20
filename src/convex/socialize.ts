@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { notifyRestaurant } from "./notifications";
 import { safeGet } from "./helpers";
 import { giftTypeSchema, parseOrThrow, sendGiftSchema } from "./validation";
+import { checkRateLimit } from "./rateLimit";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -327,6 +328,14 @@ export const sendGift = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to send a gift.");
     if (receiverUserId === userId) throw new Error("You can't send a gift to yourself.");
+
+    // Rate limit: 20 gifts per hour per sender
+    await checkRateLimit(ctx, {
+      key: "sendGift",
+      userId,
+      limit: 20,
+      windowMs: 60 * 60_000,
+    });
 
     parseOrThrow(sendGiftSchema, { giftId, receiverUserId, note, reveal });
 

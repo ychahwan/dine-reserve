@@ -4,18 +4,11 @@ import {
   ArrowRight,
   CalendarDays,
   Check,
-  Clock,
-  Flame,
-  MapPin,
-  Menu as MenuIcon,
   MessageSquareText,
   Search,
-  ShieldCheck,
   Sofa,
-  Star,
   Store,
   Users,
-  Wind,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { Link } from "react-router";
@@ -47,29 +40,6 @@ const STEPS = [
   },
 ];
 
-const FEATURES = [
-  {
-    icon: Sofa,
-    title: "Seating preferences",
-    text: "Filter by inside, outside, bar, smoking and non-smoking zones — exactly how you like to dine.",
-  },
-  {
-    icon: MenuIcon,
-    title: "Menus before you book",
-    text: "Browse full menus and price ranges up front. No surprises when the check arrives.",
-  },
-  {
-    icon: ShieldCheck,
-    title: "No-overbooking engine",
-    text: "Every seat is booked atomically through a fair FIFO queue — restaurants can't oversell, even at peak hour.",
-  },
-  {
-    icon: Wind,
-    title: "Real-time availability",
-    text: "Restaurant owners publish free spots live, so the calendar you see is always current.",
-  },
-];
-
 export default function Landing() {
   return (
     <div className="min-h-screen bg-background text-foreground">
@@ -77,7 +47,7 @@ export default function Landing() {
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
           <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+            <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
               <Store className="size-5" />
             </span>
             <span className="text-lg font-semibold tracking-tight">Kamix</span>
@@ -106,9 +76,8 @@ export default function Landing() {
 
       {/* ---------- Hero ---------- */}
       <section className="relative overflow-hidden">
-        <div className="texture-dots pointer-events-none absolute inset-0 opacity-60" />
-        <div className="pointer-events-none absolute -top-32 left-1/2 h-96 w-[52rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
-        <div className="relative mx-auto grid max-w-6xl items-center gap-12 px-4 pb-20 pt-16 sm:px-6 lg:grid-cols-2 lg:pb-28 lg:pt-24">
+        <div className="pointer-events-none absolute -top-32 left-1/2 h-72 w-[46rem] -translate-x-1/2 rounded-full bg-primary/10 blur-3xl" />
+        <div className="relative mx-auto grid max-w-6xl items-center gap-10 px-4 pb-16 pt-14 sm:px-6 lg:grid-cols-2 lg:pb-20 lg:pt-20">
           <div>
             <motion.div
               initial={{ opacity: 0, y: 12 }}
@@ -149,31 +118,25 @@ export default function Landing() {
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               transition={{ duration: 0.5, delay: 0.25 }}
-              className="mt-10 flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-muted-foreground"
+              className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3 text-sm text-muted-foreground"
             >
               <span className="flex items-center gap-2">
-                <span className="flex items-center gap-0.5 text-amber-500">
-                  {Array.from({ length: 5 }).map((_, i) => (
-                    <Star key={i} className="size-3.5 fill-current" />
-                  ))}
-                </span>
-                4.9 from 2,300+ diners
+                <Users className="size-4" /> 120+ partner restaurants
               </span>
               <span className="flex items-center gap-2">
-                <Users className="size-4" /> 120+ partner restaurants
+                <Sofa className="size-4" /> Seats by preference
               </span>
             </motion.div>
           </div>
 
-          {/* ---------- Demo card ---------- */}
+          {/* ---------- Booking demo card ---------- */}
           <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.98 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, delay: 0.15 }}
-            className="relative mx-auto w-full max-w-md"
+            className="mx-auto w-full max-w-md"
           >
-            <div className="absolute -inset-4 rounded-[2rem] bg-gradient-to-br from-primary/15 via-transparent to-amber-400/10 blur-xl" />
-            <div className="relative overflow-hidden rounded-3xl border border-border bg-card shadow-xl shadow-primary/5">
+            <div className="overflow-hidden rounded-3xl border border-border bg-card">
               <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
                 <div>
                   <p className="font-semibold">Trullo</p>
@@ -192,34 +155,7 @@ export default function Landing() {
                   <span className="text-muted-foreground">Date</span>
                   <span className="rounded-lg bg-muted px-2.5 py-1 font-medium">Tonight, 7:30 PM</span>
                 </div>
-                <div className="rounded-2xl border border-border/80 bg-muted/40 p-3">
-                  <p className="mb-2.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Seating preference
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {[
-                      { icon: Sofa, label: "Inside", active: true },
-                      { icon: Wind, label: "Outside", active: true },
-                      { icon: Users, label: "Bar", active: false },
-                    ].map((s) => (
-                      <span
-                        key={s.label}
-                        className={
-                          "inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors " +
-                          (s.active
-                            ? "border-primary/30 bg-primary/10 text-primary"
-                            : "border-border text-muted-foreground")
-                        }
-                      >
-                        <s.icon className="size-3.5" /> {s.label}
-                      </span>
-                    ))}
-                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground">
-                      <ShieldCheck className="size-3.5" /> Non-smoking
-                    </span>
-                  </div>
-                </div>
-                <div className="rounded-2xl bg-primary p-4 text-primary-foreground shadow-lg shadow-primary/25">
+                <div className="rounded-2xl bg-primary p-4 text-primary-foreground">
                   <div className="flex items-center justify-between">
                     <div>
                       <p className="text-sm font-semibold">Terrace · Table 9</p>
@@ -228,19 +164,10 @@ export default function Landing() {
                     <Check className="size-5" />
                   </div>
                 </div>
-                <p className="flex items-center gap-1.5 text-center text-xs text-muted-foreground">
+                <p className="flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
                   <MessageSquareText className="size-3.5" /> Confirmation &amp; reminders sent by SMS
                 </p>
               </div>
-            </div>
-            {/* floating chips */}
-            <div className="absolute -left-6 top-24 hidden rounded-2xl border border-border bg-card px-3.5 py-2.5 shadow-lg sm:flex sm:items-center sm:gap-2">
-              <Clock className="size-4 text-primary" />
-              <span className="text-xs font-medium">Table held in 0.4s</span>
-            </div>
-            <div className="absolute -right-4 bottom-24 hidden rounded-2xl border border-border bg-card px-3.5 py-2.5 shadow-lg sm:flex sm:items-center sm:gap-2">
-              <Flame className="size-4 text-amber-500" />
-              <span className="text-xs font-medium">7 spots left at 8:00</span>
             </div>
           </motion.div>
         </div>
@@ -248,14 +175,14 @@ export default function Landing() {
 
       {/* ---------- How it works ---------- */}
       <section id="how" className="border-t border-border/60 bg-muted/40">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
             <p className="text-sm font-medium uppercase tracking-widest text-primary">How it works</p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
               From hungry to seated in three steps
             </h2>
           </div>
-          <div className="mt-12 grid gap-6 md:grid-cols-3">
+          <div className="mt-10 grid gap-5 md:grid-cols-3">
             {STEPS.map((step, i) => (
               <motion.div
                 key={step.title}
@@ -263,7 +190,7 @@ export default function Landing() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-80px" }}
                 transition={{ duration: 0.4, delay: i * 0.08 }}
-                className="group relative rounded-2xl border border-border bg-card p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md"
+                className="group relative rounded-2xl border border-border bg-card p-6"
               >
                 <span className="absolute right-5 top-5 text-4xl font-bold text-border/70">
                   0{i + 1}
@@ -281,7 +208,7 @@ export default function Landing() {
 
       {/* ---------- Cuisines ---------- */}
       <section id="cuisines" className="border-t border-border/60">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="flex flex-wrap items-end justify-between gap-4">
             <div>
               <p className="text-sm font-medium uppercase tracking-widest text-primary">Browse by type</p>
@@ -303,7 +230,7 @@ export default function Landing() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-60px" }}
                 transition={{ duration: 0.35, delay: i * 0.05 }}
-                className="group relative overflow-hidden rounded-2xl border border-border shadow-sm"
+                className="group relative overflow-hidden rounded-2xl border border-border"
               >
                 <img
                   src={c.img}
@@ -322,43 +249,11 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* ---------- Features ---------- */}
-      <section className="border-t border-border/60 bg-muted/40">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-medium uppercase tracking-widest text-primary">Why Kamix</p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-              Built around how you actually dine
-            </h2>
-          </div>
-          <div className="mt-12 grid gap-6 sm:grid-cols-2">
-            {FEATURES.map((f, i) => (
-              <motion.div
-                key={f.title}
-                initial={{ opacity: 0, y: 16 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-60px" }}
-                transition={{ duration: 0.35, delay: i * 0.06 }}
-                className="flex gap-4 rounded-2xl border border-border bg-card p-6 shadow-sm"
-              >
-                <div className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                  <f.icon className="size-5" />
-                </div>
-                <div>
-                  <h3 className="font-semibold">{f.title}</h3>
-                  <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{f.text}</p>
-                </div>
-              </motion.div>
-            ))}
-          </div>
-        </div>
-      </section>
-
       {/* ---------- Owners ---------- */}
-      <section id="owners" className="border-t border-border/60">
-        <div className="mx-auto grid max-w-6xl items-center gap-12 px-4 py-20 sm:px-6 lg:grid-cols-2">
+      <section id="owners" className="border-t border-border/60 bg-muted/40">
+        <div className="mx-auto grid max-w-6xl items-center gap-10 px-4 py-16 sm:px-6 lg:grid-cols-2">
           <div className="relative order-2 lg:order-1">
-            <div className="rounded-3xl border border-border bg-card p-5 shadow-lg">
+            <div className="rounded-3xl border border-border bg-card p-5">
               <div className="mb-4 flex items-center justify-between">
                 <p className="font-semibold">Tonight at La Brasa</p>
                 <Badge variant="secondary">Owner view</Badge>
@@ -384,7 +279,7 @@ export default function Landing() {
                 </div>
               ))}
               <p className="flex items-center gap-2 rounded-xl bg-emerald-600/10 px-4 py-2.5 text-sm text-emerald-700 dark:text-emerald-400">
-                <MapPin className="size-4" /> 120 tables freed up this week — zero double-bookings.
+                <Check className="size-4" /> 120 tables freed up this week — zero double-bookings.
               </p>
             </div>
           </div>
@@ -425,9 +320,8 @@ export default function Landing() {
 
       {/* ---------- Final CTA ---------- */}
       <section className="border-t border-border/60">
-        <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
-          <div className="relative overflow-hidden rounded-3xl bg-primary px-6 py-14 text-center text-primary-foreground shadow-xl shadow-primary/25 sm:px-16">
-            <div className="texture-dots pointer-events-none absolute inset-0 opacity-20" />
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
+          <div className="relative overflow-hidden rounded-3xl bg-primary px-6 py-12 text-center text-primary-foreground sm:px-16">
             <div className="relative">
               <h2 className="mx-auto max-w-2xl text-balance text-3xl font-bold tracking-tight sm:text-4xl">
                 Your table is waiting. Don&apos;t keep it.

@@ -1,4 +1,8 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
+import {
+  createAccount,
+  getAuthUserId,
+  modifyAccountCredentials,
+} from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { z } from "zod";
 import { mutation, query } from "./_generated/server";
@@ -125,6 +129,71 @@ export const toggleFavorite = mutation({
     const next = [...favorites, restaurantId].slice(-50);
     await ctx.db.patch(userId, { favorites: next });
     return { favorited: true };
+  },
+});
+
+/**
+ * Set a new password for the current user's phone (the password provider
+ * stores accounts by phone). Used by the forced "set a new password" step
+ * after a restaurant account is created/tagged by the platform admin, and by
+ * diners who want to set a password later.
+ *
+ * The user must be signed in and must know their current password if one
+ * exists. Clears the mustChangePassword flag on success.
+ */
+export const setPassword = mutation({
+  args: {
+    newPassword: v.string(),
+    currentPassword: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const user = await ctx.db.get(userId);
+    const phone = user?.phone;
+    if (!phone) throw new Error("No phone on this account.");
+
+    const newPassword = args.newPassword;
+    if (newPassword.length < 8) {
+      throw new Error("Password must be at least 8 characters.");
+    }
+
+    // Verify the current password when one exists (prevents a stale session
+    // or a hijacked device from silently rotating the password).
+    const existing = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) =>
+        q.eq("provider", "password").eq("providerAccountId", phone),
+      )
+      .unique();
+    if (existing && args.currentPassword === undefined) {
+      throw new Error("Enter your current password.");
+    }
+
+    if (existing) {
+      // Replace the existing password hash.
+      await modifyAccountCredentials(ctx as never, {
+        provider: "password",
+        account: { id: phone, secret: newPassword },
+      });
+    } else {
+      // No password account yet (e.g. a diner who only used OTP and was then
+      // tagged as a restaurant owner): create one linked to this user.
+      await createAccount(ctx as never, {
+        provider: "password",
+        account: { id: phone, secret: newPassword },
+        profile: {
+          email: phone,
+          phone,
+          ...(user?.name ? { name: user.name } : {}),
+        },
+        shouldLinkViaEmail: false,
+        shouldLinkViaPhone: true,
+      });
+    }
+
+    await ctx.db.patch(userId, { mustChangePassword: false });
+    return true;
   },
 });
 
