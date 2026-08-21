@@ -164,6 +164,10 @@ const schema = defineSchema(
       mustChangePassword: v.optional(v.boolean()),
       prefs: v.optional(DINING_PREFS), // dining preferences (dietary, seating, occasions)
       favorites: v.optional(v.array(v.id("restaurants"))), // saved restaurants
+      // Loyalty points (Idea #18): earned for completed bookings, reviews
+      // and Socialize activity; shown in the diner's account. Awarded via
+      // loyalty.awardPoints (idempotent per source doc).
+      points: v.optional(v.number()),
     })
       .index("email", ["email"])
       .index("phone", ["phone"]),
@@ -511,6 +515,39 @@ const schema = defineSchema(
     })
       .index("by_user", ["userId"])
       .index("by_new_phone", ["newPhone"]),
+
+    // ---------- Restaurant stories (Idea #8) ----------
+
+    // Short behind-the-scenes posts owners publish to their restaurant page:
+    // new menu items, chef's specials, event nights. Shown on the Explore
+    // feed and the restaurant detail page, newest first.
+    stories: defineTable({
+      restaurantId: v.id("restaurants"),
+      text: v.string(),
+      emoji: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index("by_restaurant", ["restaurantId", "createdAt"])
+      .index("by_created", ["createdAt"]),
+
+    // ---------- Loyalty points ledger (Idea #18) ----------
+
+    // Idempotent credit ledger — one row per (user, sourceId) so a booking
+    // can never be credited twice. Balance lives on users.points.
+    loyaltyLedger: defineTable({
+      userId: v.id("users"),
+      amount: v.number(),
+      source: v.union(
+        v.literal("booking_completed"),
+        v.literal("review"),
+        v.literal("gift_sent"),
+        v.literal("check_in"),
+      ),
+      sourceId: v.string(),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_source", ["userId", "sourceId"]),
 
     // A gift one diner sends to another at the same restaurant. The price is
     // snapped at send time and charged to the sender's bill. `reveal` decides

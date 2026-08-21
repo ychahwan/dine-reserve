@@ -10,6 +10,7 @@ import {
   OwnerOrdersTab,
 } from "@/components/OwnerDiningTabs";
 import { OwnerGiftsTab, OwnerGiftsTabCount } from "@/components/OwnerGiftsTab";
+import { OwnerStoriesTab } from "@/components/OwnerStoriesTab";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -176,6 +177,7 @@ export default function OwnerRestaurant() {
             { key: "requests", label: "Requests", badge: "assists" as const },
             { key: "menuideas", label: "Menu ideas", badge: "menuRequests" as const },
             { key: "gifts", label: "Gifts", badge: "gifts" as const },
+            { key: "stories", label: "Stories" },
             { key: "insights", label: "Insights" },
             { key: "notifications", label: "Notifications", badge: "notifications" as const },
           ].map((t) => (
@@ -229,6 +231,9 @@ export default function OwnerRestaurant() {
         </TabsContent>
         <TabsContent value="gifts" className="mt-5">
           <OwnerGiftsTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="stories" className="mt-5">
+          <OwnerStoriesTab restaurantId={r._id} />
         </TabsContent>
         <TabsContent value="insights" className="mt-5">
           <OwnerInsightsTab restaurantId={r._id} />

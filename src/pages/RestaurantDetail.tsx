@@ -90,6 +90,7 @@ export default function RestaurantDetail() {
   const { user } = useAuth();
   const data = useQuery(api.restaurants.get, { id: id as never });
   const reviewsData = useQuery(api.reviews.listForRestaurant, { restaurantId: id as never });
+  const stories = useQuery(api.stories.forRestaurant, { restaurantId: id as never });
   const ensureForDate = useMutation(api.availability.ensureForDate);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
@@ -144,6 +145,12 @@ export default function RestaurantDetail() {
     restaurantId: id as never,
     date,
   });
+  // Predictive availability (Idea #20) — shown only for dates far enough
+  // ahead that real slots aren't materialized yet.
+  const prediction = useQuery(
+    api.analytics.predict,
+    date > dateFromNow(DAYS_TO_SHOW) ? { restaurantId: id as never, date } : "skip",
+  );
 
   const [refresh, setRefresh] = useState(0);
   const [selectedSlot, setSelectedSlot] = useState<{ sectionId: string; time: string } | null>(null);
@@ -425,6 +432,23 @@ export default function RestaurantDetail() {
           <p className="px-4 pt-3 text-sm leading-6 text-muted-foreground">{r.description}</p>
         )}
 
+        {/* Stories (Idea #8) */}
+        {(stories ?? []).length > 0 && (
+          <div className="px-4 pt-4">
+            <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
+              {(stories ?? []).map((s) => (
+                <div
+                  key={s._id}
+                  className="w-40 shrink-0 rounded-2xl border border-border/70 bg-gradient-to-br from-primary/10 to-transparent p-3"
+                >
+                  <p className="text-xl">{s.emoji ?? "🍽️"}</p>
+                  <p className="mt-1.5 text-xs leading-snug">{s.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Booking panel */}
         <Card id="book-panel" className="mx-4 mt-5 rounded-2xl border-border/70 p-5 shadow-sm">
           <div className="flex items-center justify-between gap-2">
@@ -532,6 +556,26 @@ export default function RestaurantDetail() {
               <Sparkles className="size-3.5" /> Non-smoking
             </button>
           </div>
+
+          {/* Predictive availability — far-out dates without real slots yet */}
+          {prediction && prediction.likelySoldOut !== null && (
+            <div
+              className={cn(
+                "mt-4 flex items-start gap-2 rounded-xl border px-3.5 py-2.5 text-xs",
+                prediction.likelySoldOut >= 70
+                  ? "border-rose-500/30 bg-rose-500/10 text-rose-800 dark:text-rose-300"
+                  : prediction.likelySoldOut >= 40
+                    ? "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                    : "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-300",
+              )}
+            >
+              <CalendarDays className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                <span className="font-medium">Prediction:</span> {prediction.message}{" "}
+                <span className="opacity-70">(based on {prediction.sampleWeeks} similar past {prediction.sampleWeeks === 1 ? "week" : "weeks"})</span>
+              </span>
+            </div>
+          )}
 
           {/* Availability */}
           <div className="mt-4">

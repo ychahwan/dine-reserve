@@ -4,6 +4,7 @@ import { mutation, query } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
 import { parseOrThrow, reviewArgsSchema } from "./validation";
+import { awardPoints, POINTS } from "./loyalty";
 
 /**
  * Verified diner reviews.
@@ -62,6 +63,13 @@ export const create = mutation({
       rating,
       text: cleanText,
       createdAt: Date.now(),
+    });
+    // loyalty: writing a review earns points (idempotent per booking)
+    await awardPoints(ctx, {
+      userId,
+      amount: POINTS.REVIEW,
+      source: "review",
+      sourceId: `booking:${booking._id}`,
     });
     return await ctx.db.get(reviewId);
   },

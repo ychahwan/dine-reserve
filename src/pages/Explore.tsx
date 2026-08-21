@@ -1,4 +1,5 @@
 import { CustomerShell } from "@/components/CustomerShell";
+import AiConcierge from "@/components/AiConcierge";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -8,6 +9,7 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
   CalendarDays,
+  Clock,
   Flame,
   Heart,
   MapPin,
@@ -50,6 +52,7 @@ export default function Explore() {
   const restaurants = useQuery(api.restaurants.search, {});
   const trending = useQuery(api.restaurants.trending);
   const forYou = useQuery(api.restaurants.forYou);
+  const stories = useQuery(api.stories.recent, {});
   const ensureDemoData = useMutation(api.seed.ensureDemoData);
   const [seeded, setSeeded] = useState(false);
 
@@ -408,6 +411,37 @@ export default function Explore() {
           </section>
         )}
 
+        {/* Stories — behind-the-scenes from restaurants (Idea #8) */}
+        {(stories ?? []).length > 0 && (
+          <section className="mt-6">
+            <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <Sparkles className="size-3.5 text-primary" /> Fresh from the kitchens
+            </h2>
+            <div className="no-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1">
+              {(stories ?? []).slice(0, 12).map((s) => (
+                <Link
+                  key={s._id}
+                  to={`/restaurant/${s.restaurant?._id}`}
+                  className="w-36 shrink-0 overflow-hidden rounded-2xl border border-border/70 bg-card transition-all hover:-translate-y-0.5 hover:shadow-md"
+                >
+                  <div className="relative flex h-20 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-primary/20 via-primary/5 to-card">
+                    {s.restaurant?.imageUrl ? (
+                      <img src={s.restaurant.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40" />
+                    ) : null}
+                    <span className="relative text-2xl">{s.emoji ?? "🍽️"}</span>
+                  </div>
+                  <div className="px-2.5 py-2">
+                    <p className="truncate text-xs font-semibold">{s.restaurant?.name}</p>
+                    <p className="mt-0.5 line-clamp-2 text-[11px] leading-snug text-muted-foreground">
+                      {s.text}
+                    </p>
+                  </div>
+                </Link>
+              ))}
+            </div>
+          </section>
+        )}
+
         {/* Trending now — popular this week */}
         {!hasActiveFilters && (trending ?? []).length > 0 && (
           <section className="mt-6">
@@ -481,6 +515,7 @@ export default function Explore() {
           )}
         </div>
       </div>
+      <AiConcierge />
     </CustomerShell>
   );
 }
@@ -502,6 +537,7 @@ function RestaurantCard({
   onToggleFavorite: (id: string, name: string) => void;
 }) {
   const data = useQuery(api.restaurants.get, { id: id as never });
+  const wait = useQuery(api.analytics.publicWaitSignal, { restaurantId: id as never });
   if (!data) return null;
   const { restaurant: r, sections, rating } = data;
   const tags: string[] = [];
@@ -584,6 +620,11 @@ function RestaurantCard({
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
             <Users className="size-3.5" /> {totalCapacity} seats
           </span>
+          {wait?.label && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Clock className="size-3.5" /> {wait.label}
+            </span>
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-1">
           <button

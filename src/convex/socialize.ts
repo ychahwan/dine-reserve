@@ -4,6 +4,7 @@ import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { notifyRestaurant } from "./notifications";
 import { safeGet } from "./helpers";
+import { awardPoints, POINTS } from "./loyalty";
 import { giftTypeSchema, parseOrThrow, sendGiftSchema } from "./validation";
 import { checkRateLimit } from "./rateLimit";
 
@@ -189,6 +190,102 @@ export const visibleDiners = query({
       })
       .filter((x): x is NonNullable<typeof x> => x !== null)
       .sort((a, b) => a.booking.time.localeCompare(b.booking.time));
+  },
+});
+
+/**
+ * Taste Twins (Idea #2): among the diners currently visible at a
+ * restaurant, find the ones whose dining preferences overlap the caller's
+ * (shared dietary tags, seating zones, occasions). Each match is scored
+ * 0–100 by how much of the caller's profile the other diner shares, so
+ * social diners can find the people most likely to enjoy the same things.
+ *
+ * Same privacy model as the room: only visible diners at a restaurant the
+ * caller is attending today are ever returned.
+ */
+export const tasteTwins = query({
+  args: { restaurantId: v.id("restaurants") },
+  handler: async (ctx, { restaurantId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+
+    const restaurant = await ctx.db.get(restaurantId);
+    const isOwner = !!restaurant && restaurant.ownerId === userId;
+    if (!isOwner) {
+      const myBookings = await ctx.db
+        .query("bookings")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect();
+      const today = todayKey();
+      const attending = myBookings.some(
+        (b) => b.restaurantId === restaurantId && b.status === "confirmed" && b.date === today,
+      );
+      if (!attending) return [];
+    }
+
+    const me = await safeGet<Doc<"users">>(ctx, userId);
+    const myPrefs = me?.prefs;
+    if (!myPrefs) return []; // no profile → nothing to match on
+    const myDiet = new Set((myPrefs.dietary ?? []).map((d) => d.toLowerCase()));
+    const mySeating = new Set((myPrefs.seating ?? []).map((s) => s.toLowerCase()));
+    const myOccasions = new Set((myPrefs.occasions ?? []).map((o) => o.toLowerCase()));
+    const totalTags = myDiet.size + mySeating.size + myOccasions.size;
+    if (totalTags === 0) return [];
+
+    const presences = await ctx.db
+      .query("dinerPresence")
+      .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+      .collect();
+    const today = todayKey();
+    const visible = presences.filter((p) => p.visible && p.userId !== userId);
+    const [users, bookings] = await Promise.all([
+      Promise.all(visible.map((p) => safeGet<Doc<"users">>(ctx, p.userId))),
+      Promise.all(visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId))),
+    ]);
+
+    const matches: {
+      _id: string;
+      userId: string;
+      name: string;
+      image?: string;
+      checkedIn: boolean;
+      booking: { time: string; sectionName?: string };
+      score: number;
+      sharedTags: string[];
+    }[] = [];
+    for (let i = 0; i < visible.length; i++) {
+      const p = visible[i]!;
+      const other = users[i];
+      const booking = bookings[i];
+      if (!other || !booking || booking.status !== "confirmed" || booking.date !== today) continue;
+      const prefs = other.prefs;
+      if (!prefs) continue;
+
+      const shared: string[] = [];
+      for (const d of prefs.dietary ?? []) if (myDiet.has(d.toLowerCase())) shared.push(d);
+      for (const s of prefs.seating ?? []) if (mySeating.has(s.toLowerCase())) shared.push(s);
+      for (const o of prefs.occasions ?? []) if (myOccasions.has(o.toLowerCase())) shared.push(o);
+      if (shared.length === 0) continue;
+
+      const otherTags = prefs.dietary.length + prefs.seating.length + prefs.occasions.length;
+      // harmonic blend: how much of MY profile they share + how close our
+      // profiles are in size (a 1-tag twin sharing my only tag = 100%)
+      const coverage = shared.length / totalTags;
+      const proximity = otherTags === 0 ? 0 : 1 - Math.abs(totalTags - otherTags) / Math.max(totalTags, otherTags);
+      const score = Math.round(Math.min(100, Math.max(10, (coverage * 0.7 + proximity * 0.3) * 100)));
+
+      matches.push({
+        _id: p._id,
+        userId: p.userId,
+        name: other.name ?? "Guest",
+        image: other.image ?? undefined,
+        checkedIn: !!booking.checkedInAt,
+        booking: { time: booking.time, sectionName: booking.sectionName },
+        score,
+        sharedTags: shared.slice(0, 4),
+      });
+    }
+    return matches.sort((a, b) => b.score - a.score).slice(0, 12);
   },
 });
 
@@ -390,6 +487,14 @@ export const sendGift = mutation({
       status: "ordered",
       revealedAt: reveal === "now" ? now : undefined,
       createdAt: now,
+    });
+
+    // loyalty: sending a gift earns a small bonus (per gift)
+    await awardPoints(ctx, {
+      userId,
+      amount: POINTS.GIFT_SENT,
+      source: "gift_sent",
+      sourceId: `gift:${id}`,
     });
 
     // the restaurant prepares it; the owner sees the order in their Gifts tab

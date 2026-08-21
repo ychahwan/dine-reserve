@@ -49,6 +49,7 @@ export default function Account() {
   const updateProfile = useMutation(api.users.updateProfile);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
   const favorites = useQuery(api.users.myFavorites);
+  const loyalty = useQuery(api.loyalty.myBalance);
   const setPassword = useMutation(api.users.setPassword);
   const startPhoneChange = useMutation(api.users.startPhoneChange);
   const confirmPhoneChange = useMutation(api.users.confirmPhoneChange);
@@ -238,6 +239,49 @@ export default function Account() {
                 </Badge>
               </div>
             </div>
+          </CardContent>
+        </Card>
+
+        {/* Kamix Points (Idea #18) */}
+        <Card className="mt-4 rounded-2xl border border-primary/20 bg-gradient-to-br from-primary/5 to-transparent p-0 shadow-sm">
+          <CardContent className="p-5">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3">
+                <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-xl">⭐</span>
+                <div>
+                  <p className="font-semibold">Kamix Points</p>
+                  <p className="text-xs text-muted-foreground">
+                    Earned for completed bookings, reviews and Socialize activity
+                  </p>
+                </div>
+              </div>
+              <div className="text-right">
+                <p className="text-2xl font-bold tracking-tight text-primary">
+                  {loyalty?.points ?? "…"}
+                </p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">points</p>
+              </div>
+            </div>
+            {(loyalty?.activity ?? []).length > 0 && (
+              <div className="mt-4 space-y-1.5">
+                {loyalty!.activity.slice(0, 5).map((a) => (
+                  <div key={a._id} className="flex items-center justify-between text-xs">
+                    <span className="text-muted-foreground">
+                      {a.source === "booking_completed"
+                        ? "Completed booking"
+                        : a.source === "review"
+                          ? "Wrote a review"
+                          : a.source === "gift_sent"
+                            ? "Sent a Socialize gift"
+                            : "Checked in"}
+                    </span>
+                    <span className="font-semibold text-emerald-600 dark:text-emerald-400">
+                      +{a.amount} pts
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
 

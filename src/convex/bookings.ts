@@ -6,6 +6,7 @@ import type { Id } from "./_generated/dataModel";
 import { SEAT_KIND } from "./schema";
 import { notifyRestaurant } from "./notifications";
 import { notifyWaitlistForFreedSeats } from "./waitlist";
+import { awardPoints, POINTS } from "./loyalty";
 import { bookingArgsSchema, bookingCodeSchema, cancelReasonSchema, guestNameSchema, parseOrThrow } from "./validation";
 
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
@@ -461,6 +462,16 @@ export const updateStatus = mutation({
     }
     if (booking.status === status) return booking;
 
+    // completing a booking earns the diner loyalty points (once)
+    if (status === "completed" && booking.status !== "completed") {
+      await awardPoints(ctx, {
+        userId: booking.userId,
+        amount: POINTS.COMPLETED_BOOKING,
+        source: "booking_completed",
+        sourceId: `booking:${booking._id}`,
+      });
+    }
+
     // cancelling returns seats to availability
     if (status === "cancelled" && booking.sectionId && booking.status !== "cancelled") {
       const slot = await findBestSlotFromDb(ctx, booking);
@@ -490,6 +501,62 @@ export const updateStatus = mutation({
       }
     }
     return await ctx.db.get(bookingId);
+  },
+});
+
+/**
+ * Reservation marketplace (Idea #15): a diner can release a confirmed
+ * booking back to the pool — the seats return to availability and the
+ * waitlist is notified instantly, so a cancelled plan never wastes a table.
+ *
+ * This is intentionally distinct from a plain cancel: the booking is marked
+ * cancelled, but the diner is told the table is being offered to others
+ * (and, when the invite-link flow is used, they can transfer the table to a
+ * specific friend instead — see confirmGuest).
+ */
+export const releaseBooking = mutation({
+  args: { bookingId: v.id("bookings") },
+  handler: async (ctx, { bookingId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const booking = await ctx.db.get(bookingId);
+    if (!booking || booking.userId !== userId) {
+      throw new Error("Booking not found.");
+    }
+    if (booking.status !== "confirmed") {
+      throw new Error("This booking is no longer active.");
+    }
+
+    // restore seats to the pool (same path as cancellation)
+    if (booking.sectionId) {
+      const slot = await findBestSlotFromDb(ctx, booking);
+      if (slot) {
+        await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+      }
+    }
+    await ctx.db.patch(bookingId, { status: "cancelled", updatedAt: Date.now() });
+
+    // tell the next waitlist diner — their table just opened up
+    const freed = await notifyWaitlistForFreedSeats(ctx, {
+      restaurantId: booking.restaurantId,
+      sectionId: booking.sectionId,
+      date: booking.date,
+      time: booking.time,
+      partySize: booking.partySize,
+    });
+    if (freed) {
+      await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
+    }
+
+    await notifyRestaurant(ctx, {
+      restaurantId: booking.restaurantId,
+      bookingId,
+      userId: booking.userId,
+      type: "booking_cancelled",
+      message: "Diner released the table back to the pool — waitlist notified.",
+    });
+
+    return { released: true, waitlistNotified: !!freed };
   },
 });
 

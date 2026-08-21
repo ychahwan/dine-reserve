@@ -257,6 +257,35 @@ async function run() {
         ? fail("Owner login", "wrong password used in test")
         : fail("Owner redirect", `got ${url}`);
     }
+
+    // New features: Stories tab + AI advisor on the restaurant console
+    if (url.includes("/owner")) {
+      await sleep(1500);
+      const firstRestaurant = page.locator("a[href*='/owner/restaurant/']").first();
+      if ((await firstRestaurant.count()) > 0) {
+        await firstRestaurant.click();
+        await page.waitForURL("**/owner/restaurant/**", { timeout: 10000 });
+        await sleep(2500);
+        const body = await page.textContent("body");
+        body.includes("Stories")
+          ? ok("Owner console shows Stories tab (Idea #8)")
+          : fail("Stories tab", "missing");
+        body.includes("Insights")
+          ? ok("Owner console shows Insights tab")
+          : fail("Insights tab", "missing");
+
+        // Open Insights — analytics 2.0 + AI advisor render
+        await page.getByRole("tab", { name: /Insights/ }).click().catch(() => {});
+        await sleep(2500);
+        const insights = await page.textContent("body");
+        insights.includes("Repeat rate")
+          ? ok("Analytics 2.0 repeat-rate card renders (Idea #5)")
+          : fail("Repeat rate card", "missing");
+        insights.includes("AI operations advisor")
+          ? ok("AI operations advisor renders (Idea #12)")
+          : fail("AI advisor", "missing");
+      }
+    }
     await ctx.close();
   }
 

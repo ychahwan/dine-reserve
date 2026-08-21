@@ -11,6 +11,7 @@ import {
 } from "./schema";
 import { notifyRestaurant } from "./notifications";
 import { safeGet } from "./helpers";
+import { awardPoints, POINTS } from "./loyalty";
 import { assistNoteSchema, menuRequestSchema, parseOrThrow, placeOrderSchema } from "./validation";
 
 // ---------------------------------------------------------------------------
@@ -104,6 +105,13 @@ export const checkIn = mutation({
     }
     if (booking.checkedInAt) return booking;
     await ctx.db.patch(bookingId, { checkedInAt: Date.now(), updatedAt: Date.now() });
+    // loyalty: checking in earns a small bonus (once per booking)
+    await awardPoints(ctx, {
+      userId,
+      amount: POINTS.CHECK_IN,
+      source: "check_in",
+      sourceId: `booking:${booking._id}`,
+    });
     await notifyRestaurant(ctx, {
       restaurantId: booking.restaurantId,
       bookingId: booking._id,

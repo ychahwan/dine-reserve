@@ -10,6 +10,8 @@
 
 import type * as admin from "../admin.js";
 import type * as adminView from "../adminView.js";
+import type * as ai from "../ai.js";
+import type * as analytics from "../analytics.js";
 import type * as auth from "../auth.js";
 import type * as auth_passwordAuth from "../auth/passwordAuth.js";
 import type * as auth_phoneOtp from "../auth/phoneOtp.js";
@@ -19,6 +21,7 @@ import type * as demoRules from "../demoRules.js";
 import type * as dining from "../dining.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
+import type * as loyalty from "../loyalty.js";
 import type * as notifications from "../notifications.js";
 import type * as queue from "../queue.js";
 import type * as rateLimit from "../rateLimit.js";
@@ -29,6 +32,7 @@ import type * as seed from "../seed.js";
 import type * as slotRules from "../slotRules.js";
 import type * as sms from "../sms.js";
 import type * as socialize from "../socialize.js";
+import type * as stories from "../stories.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
 import type * as validation from "../validation.js";
@@ -43,6 +47,8 @@ import type {
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   adminView: typeof adminView;
+  ai: typeof ai;
+  analytics: typeof analytics;
   auth: typeof auth;
   "auth/passwordAuth": typeof auth_passwordAuth;
   "auth/phoneOtp": typeof auth_phoneOtp;
@@ -52,6 +58,7 @@ declare const fullApi: ApiFromModules<{
   dining: typeof dining;
   helpers: typeof helpers;
   http: typeof http;
+  loyalty: typeof loyalty;
   notifications: typeof notifications;
   queue: typeof queue;
   rateLimit: typeof rateLimit;
@@ -62,6 +69,7 @@ declare const fullApi: ApiFromModules<{
   slotRules: typeof slotRules;
   sms: typeof sms;
   socialize: typeof socialize;
+  stories: typeof stories;
   uploads: typeof uploads;
   users: typeof users;
   validation: typeof validation;

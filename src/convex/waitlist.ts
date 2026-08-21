@@ -15,9 +15,30 @@ export type WaitlistSmsPayload = {
 };
 
 /**
+ * VIP score (Idea #7): how valuable a waiting diner is to the restaurant.
+ * Rewards repeat visits and good reviews, penalizes no-shows. Used to give
+ * high-value diners a head start when a table frees up.
+ */
+async function vipScore(ctx: MutationCtx, userId: Id<"users">): Promise<number> {
+  const [bookings, reviews] = await Promise.all([
+    ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+    ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+  ]);
+  const completed = bookings.filter((b) => b.status === "completed").length;
+  const noShows = bookings.filter((b) => b.status === "no_show").length;
+  const goodReviews = reviews.filter((r) => r.rating >= 4).length;
+  // repeat diners are gold; a no-show streak eats the score
+  return completed * 3 + goodReviews * 2 - noShows * 5;
+}
+
+/**
  * Called by bookings.ts right after a cancellation restores seats. Marks the
- * first matching waiting diner as notified (FIFO) and returns the SMS payload
- * for the caller to schedule — returns null when nobody is waiting.
+ * first matching waiting diner as notified and returns the SMS payload for
+ * the caller to schedule — returns null when nobody is waiting.
+ *
+ * Ordering (Idea #7): VIP diners get a head start — when a table frees up
+ * the highest-scoring waiting diner is picked first; ties break by who
+ * joined earlier (FIFO). Everyone else keeps strict FIFO.
  */
 export async function notifyWaitlistForFreedSeats(
   ctx: MutationCtx,
@@ -42,7 +63,14 @@ export async function notifyWaitlistForFreedSeats(
         (opts.sectionId == null || e.sectionId == null || e.sectionId === opts.sectionId),
     )
     .sort((a, b) => a.createdAt - b.createdAt);
-  const winner = candidates[0];
+
+  // VIP head start: sort by (score desc, joined asc) so repeat diners are
+  // alerted before casual waiters for the same freed table.
+  const scored = await Promise.all(
+    candidates.map(async (c) => ({ c, score: await vipScore(ctx, c.userId) })),
+  );
+  scored.sort((a, b) => b.score - a.score || a.c.createdAt - b.c.createdAt);
+  const winner = scored[0]?.c;
   if (!winner) return null;
 
   await ctx.db.patch(winner._id, { status: "notified", notifiedAt: Date.now() });

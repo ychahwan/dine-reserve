@@ -1,4 +1,5 @@
 import { CustomerShell } from "@/components/CustomerShell";
+import { BookingReceiptDialog } from "@/components/BookingReceipt";
 import { DiningDialog } from "@/components/DiningDialog";
 import { SocializeDialog } from "@/components/SocializeDialog";
 import {
@@ -38,6 +39,7 @@ import {
   MapPin,
   MessageCircle,
   PartyPopper,
+  QrCode,
   Send,
   ShieldCheck,
   Sparkles,
@@ -48,7 +50,7 @@ import {
   Utensils,
   type LucideIcon,
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { cn } from "@/lib/utils";
 import {
@@ -105,7 +107,51 @@ export default function MyBookings() {
   const reviewable = useQuery(api.reviews.myReviewable);
   const createReview = useMutation(api.reviews.create);
   const checkIn = useMutation(api.dining.checkIn);
+  const releaseBooking = useMutation(api.bookings.releaseBooking);
   const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Booking receipt (Idea #6) + release-to-pool (Idea #15)
+  const [receiptBookingId, setReceiptBookingId] = useState<string | null>(null);
+  const [releaseBookingId, setReleaseBookingId] = useState<string | null>(null);
+  const [releaseResult, setReleaseResult] = useState<string | null>(null);
+
+  // Offline cache (Idea #10): the last 5 confirmed bookings are kept in
+  // localStorage so codes are available at the door with no signal.
+  const [cachedBookings, setCachedBookings] = useState<Record<string, { code: string; restaurantName: string; date: string; time: string }>>({});
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem("kamix:offline-bookings");
+      setCachedBookings(raw ? JSON.parse(raw) : {});
+    } catch {
+      /* storage unavailable — fine, online-only */
+    }
+  }, []);
+  useEffect(() => {
+    if (!bookings) return;
+    const recent = (bookings as any[])
+      .filter((b) => b.status === "confirmed")
+      .slice(0, 5);
+    if (recent.length === 0) return;
+    const next = { ...cachedBookings };
+    for (const b of recent) {
+      next[b._id as string] = {
+        code: (b as any).code,
+        restaurantName: (b as any).restaurant?.name ?? "Restaurant",
+        date: (b as any).date,
+        time: (b as any).time,
+      };
+    }
+    // keep only the newest 10 to bound storage
+    const ordered = Object.entries(next).sort((a, b) => (b[1].date + b[1].time).localeCompare(a[1].date + a[1].time));
+    const trimmed = Object.fromEntries(ordered.slice(0, 10));
+    setCachedBookings(trimmed);
+    try {
+      localStorage.setItem("kamix:offline-bookings", JSON.stringify(trimmed));
+    } catch {
+      /* quota — ignore */
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookings]);
 
   // In-app confirmation (native window.confirm is blocked in the sandboxed
   // preview iframe and would silently do nothing).
@@ -154,6 +200,12 @@ export default function MyBookings() {
   const bookingToCancel = cancelBookingId
     ? (bookings ?? []).find((b) => b._id === cancelBookingId) ?? null
     : null;
+  const bookingToReceipt = receiptBookingId
+    ? (bookings ?? []).find((b) => b._id === receiptBookingId) ?? null
+    : null;
+  const bookingToRelease = releaseBookingId
+    ? (bookings ?? []).find((b) => b._id === releaseBookingId) ?? null
+    : null;
   const waitlistToLeave = cancelWaitlistId
     ? (waitlist ?? []).find((w) => w._id === cancelWaitlistId) ?? null
     : null;
@@ -195,6 +247,28 @@ export default function MyBookings() {
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not cancel the booking.";
       setCancelError(msg);
+      toast.error(msg);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const confirmReleaseBooking = async () => {
+    if (!releaseBookingId || busyId) return;
+    setBusyId(releaseBookingId);
+    setReleaseResult(null);
+    try {
+      const res = await releaseBooking({ bookingId: releaseBookingId as never });
+      setReleaseResult(
+        res.waitlistNotified
+          ? "Table released — the next diner on the waitlist has been alerted."
+          : "Table released back to the pool.",
+      );
+      toast.success("Table released.");
+      setReleaseBookingId(null);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "Could not release the table.";
+      setReleaseResult(msg);
       toast.error(msg);
     } finally {
       setBusyId(null);
@@ -556,6 +630,28 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
+                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              title="Print or save a receipt with QR code"
+                              onClick={() => setReceiptBookingId(b._id)}
+                            >
+                              <QrCode className="size-3.5" /> Receipt
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-amber-700 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400"
+                              title="Release the table back to other diners"
+                              disabled={busyId === b._id}
+                              onClick={() => {
+                                setReleaseResult(null);
+                                setReleaseBookingId(b._id);
+                              }}
+                            >
+                              {busyId === b._id ? <Spinner className="size-3.5" /> : "Release"}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
                               className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
                               disabled={busyId === b._id}
                               onClick={() => {
@@ -642,6 +738,76 @@ export default function MyBookings() {
           </p>
         ) : null}
       </div>
+
+      {/* Offline booking codes (Idea #10) */}
+      {bookings === undefined && Object.keys(cachedBookings).length > 0 && (
+        <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
+          <p className="flex items-center gap-1.5 font-medium">
+            <QrCode className="size-4" /> You're offline — showing saved confirmation codes
+          </p>
+          <p className="mt-1 text-xs">
+            {Object.values(cachedBookings)
+              .slice(0, 5)
+              .map((c) => `${c.restaurantName} · ${c.code}`)
+              .join(" · ")}
+          </p>
+        </div>
+      )}
+
+      {/* Booking receipt (Idea #6) */}
+      <BookingReceiptDialog
+        booking={bookingToReceipt}
+        onOpenChange={(open) => {
+          if (!open) setReceiptBookingId(null);
+        }}
+      />
+
+      {/* Release table to the pool (Idea #15) */}
+      <Dialog
+        open={!!releaseBookingId}
+        onOpenChange={(open) => {
+          if (!open && busyId === null) setReleaseBookingId(null);
+        }}
+      >
+        <DialogContent className="max-w-sm rounded-3xl">
+          <DialogHeader>
+            <DialogTitle className="tracking-tight">Release this table?</DialogTitle>
+            <DialogDescription>
+              {bookingToRelease
+                ? `${bookingToRelease.restaurant?.name ?? "This restaurant"} on ${dateLabel(
+                    bookingToRelease.date,
+                  )} at ${formatTime(bookingToRelease.time)} — your seats return to the pool and the next waitlist diner is alerted. You can't undo this.`
+                : "Your seats return to the pool."}
+            </DialogDescription>
+          </DialogHeader>
+          {releaseResult && (
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {releaseResult}
+            </p>
+          )}
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (busyId === null) setReleaseBookingId(null);
+              }}
+              disabled={busyId !== null}
+            >
+              Keep my table
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={busyId !== null}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmReleaseBooking();
+              }}
+            >
+              {busyId === releaseBookingId ? <Spinner className="size-4" /> : "Release table"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Dine-in experience (order / ask / menu ideas / bill) */}
       <DiningDialog

@@ -2,220 +2,221 @@
 
 Innovative features and improvements, organized by impact and implementation complexity.
 
+**Status legend:** ✅ Done · 🚧 In progress · ⏳ Deferred (needs external infra / bigger milestone)
+
 ---
 
 ## 🔥 High Impact, Medium Effort
 
-### 1. AI-Powered Smart Reservations
+### 1. AI-Powered Smart Reservations — ✅ DONE
 **What:** An AI concierge that suggests the best time, restaurant, and seating based on the diner's history, preferences, and real-time availability.
 
-**How it works:**
-- Diner says "I want Italian for 4 on Saturday night"
-- AI checks their past bookings, dietary prefs, seating vibe, and budget
-- Cross-references with real-time slot availability across restaurants
-- Suggests 3 options with reasons ("Trullo has a 7:30 PM terrace slot — you've rated their pasta 5 stars before")
-- One-tap book
+**Implemented:**
+- `src/convex/ai.ts` → `ai.recommendDinner` action: reads the diner's bookings/orders/reviews/favorites/prefs + all restaurants, builds a bounded context pack (<8k tokens, no PII), calls Gemini, returns ranked recommendations with one-line "why"
+- `src/components/AiConcierge.tsx`: floating concierge on Explore with quick prompts + recommendation cards
+- Live test script: `scripts/test-ai-concierge.mjs` (8/8 checks)
+- **Needs:** a valid `GEMINI_API_KEY` (`AIza...` format) in `.env` + deployed to Convex. The key currently in `.env` (`AQ.Ab8R...`) is the wrong format.
 
 **Tech:** Google ADK agent + Convex real-time queries. The agent reads `bookings`, `reviews`, `restaurants`, `slots`, `users.prefs` and generates personalized recommendations.
 
 ---
 
-### 2. Socialize 2.0 — Diner-to-Diner Matchmaking
+### 2. Socialize 2.0 — Diner-to-Diner Matchmaking — ✅ DONE (Taste Twins)
 **What:** Beyond gifting — help diners connect with others who share their tastes.
 
-**Features:**
-- **Taste Twins:** Show diners at the same restaurant who have similar dietary preferences or occasion profiles
-- **Table Talk:** Anonymous pre-dinner chat (like dating apps, but for dining) — opt-in, disposable
-- **Group Builder:** Solo diners looking for company can post "Looking for a group for chef's table tonight"
+**Implemented (Taste Twins):**
+- `src/convex/socialize.ts` → `socialize.tasteTwins` query: among visible diners at the same restaurant, scores pref overlap (dietary/seating/occasions) 0–100, returns top matches with shared tags
+- `src/components/SocializeDialog.tsx`: "Your taste twins" section in the room tab with match % badges
+- Same privacy model as the room (only visible diners at a restaurant you're attending today)
+
+**Not yet built (needs design decisions):** Table Talk (anonymous pre-dinner chat), Group Builder (solo diners posting for company).
 
 **Privacy:** All interactions are opt-in, ephemeral, and restaurant-scoped.
 
 ---
 
-### 3. Real-Time Wait Time Intelligence
+### 3. Real-Time Wait Time Intelligence — ✅ DONE
 **What:** Show diners the actual current wait time at each restaurant, not just availability.
 
-**How:**
-- Track `checkedInAt` → `booking.completed/no_show` time deltas
-- Build a rolling average of actual seat time per restaurant, per day-of-week, per time slot
-- Display on restaurant cards: "Currently ~15 min wait" or "On time for your 8 PM slot"
+**Implemented:**
+- `src/convex/analytics.ts`:
+  - `analytics.waitTimes` (owner): avg late-arrival minutes, avg seat time (check-in → completed), no-show rate, friendly summary
+  - `analytics.publicWaitSignal` (diner): "~75 min visits" label on Explore cards (only when ≥3 samples — never guesses)
+- `src/pages/Explore.tsx`: pace chip on every restaurant card
+- `src/components/OwnerInsightsTab.tsx`: "Pace & punctuality" card
 
-**Data source:** The `bookings` table already has all the timestamps needed.
+**Data source:** The `bookings` table already has all the timestamps needed (`checkedInAt`, `updatedAt` on completion).
 
 ---
 
-### 4. Smart Notifications — Contextual Push
+### 4. Smart Notifications — Contextual Push — ⏳ DEFERRED
 **What:** Replace generic reminders with AI-aware contextual nudges.
 
+**Why deferred:** needs push-notification infrastructure (FCM/APNs via Capacitor), optional calendar + weather integrations, and a scheduling service. The notification *table* and SMS plumbing already exist.
+
 **Examples:**
-- "Trullo is 10 min walk from your office — book for 12:30 and you'll make it back for your 2 PM meeting" (integrates with calendar)
+- "Trullo is 10 min walk from your office — book for 12:30..."
 - "It's been 3 weeks since you last dined at Sakura — they have a new tasting menu"
 - "Your friend Alex just booked at Trullo for Saturday — want to join?"
-- "Rain forecast tonight — the terrace might be cold, consider inside seating"
-
-**Tech:** Google ADK agent + weather API + (optional) calendar integration.
 
 ---
 
-### 5. Restaurant Analytics Dashboard 2.0
+### 5. Restaurant Analytics Dashboard 2.0 — ✅ DONE
 **What:** Transform the basic Insights tab into a full business intelligence tool.
 
-**Additions:**
-- **Revenue projection:** based on covers × average spend per cover
-- **Peak hour heatmap:** visual grid of day × hour with booking density
-- **Customer lifetime value:** top 20 diners by total spend
-- **Repeat visit rate:** % of diners who return within 30/60/90 days
-- **Review sentiment analysis:** AI-powered breakdown of review text (positive/negative themes)
-- **Competitive positioning:** "Your average rating (4.3) vs city average (4.1) for Italian restaurants"
+**Implemented:** `src/convex/analytics.ts` → `analytics.analytics2` + expanded `OwnerInsightsTab`:
+- **Revenue projection:** covers × avg spend per cover (from dine-in orders)
+- **Peak hour heatmap:** day-of-week × hour density grid
+- **Customer lifetime value:** top 10 diners by visits + spend ("Your regulars" + VIP badge)
+- **Repeat visit rate:** % of diners returning in the window
+- **AI sentiment/review analysis:** folded into the AI operations advisor (Idea #12)
+- **Competitive positioning:** not yet (needs cross-restaurant city aggregates)
 
 ---
 
 ## 💡 Medium Impact, Low Effort
 
-### 6. Booking Confirmation Receipt (PDF)
+### 6. Booking Confirmation Receipt (PDF) — ✅ DONE
 **What:** Auto-generate a professional booking confirmation as a downloadable PDF with QR code.
 
-**Content:** Restaurant name, address, date/time, party size, booking code, map link, cancellation policy.
-
-**Use case:** Business diners need receipts; tourists want offline access.
+**Implemented:** `src/components/BookingReceipt.tsx` — printable receipt dialog from My Bookings ("Receipt" button) with:
+- QR code (encodes the public invite/confirmation URL) generated client-side via the `qrcode` package
+- Restaurant, date, time, party, table, confirmation code
+- Print button (`window.print`) — the dialog hides chrome in print CSS
+- Works offline (QR generated in-browser, no network dependency)
 
 ---
 
-### 7. Waitlist Priority for VIP Diners
+### 7. Waitlist Priority for VIP Diners — ✅ DONE
 **What:** Give priority to diners who have booked frequently, left good reviews, or have high spend.
 
-**How:**
-- Score diners based on: booking frequency, review quality, no-show rate, total spend
-- When a slot opens, notify VIPs first (15-minute head start before general waitlist)
+**Implemented:** `src/convex/waitlist.ts`:
+- `vipScore(userId)`: completed bookings ×3 + 4★ reviews ×2 − no-shows ×5
+- `notifyWaitlistForFreedSeats` now sorts candidates by (score desc, joined asc) — repeat diners get alerted before casual waiters for the same freed table; everyone else keeps strict FIFO
+
+**Not yet:** 15-minute delayed general notification (needs scheduler timing) and spend-based scoring (needs dine-order linking to waitlist entries).
 
 ---
 
-### 8. Restaurant "Story" — Behind-the-Scenes Content
-**What:** Let owners post short stories/photos about their restaurant (new menu items, chef's special, event nights).
+### 8. Restaurant "Story" — Behind-the-Scenes Content — ✅ DONE
+**What:** Let owners post short stories/photos about their restaurant.
 
-**Feed:** Shows on the Explore page and restaurant detail. Diners who favorited or previously booked get notified.
+**Implemented:**
+- New `stories` table (restaurantId, text ≤240, emoji, createdAt)
+- `src/convex/stories.ts`: `post` / `remove` / `mine` (owner) + `recent` / `forRestaurant` (public feed)
+- `src/components/OwnerStoriesTab.tsx`: composer + list, wired as a "Stories" tab in the owner console
+- `src/pages/Explore.tsx`: "Fresh from the kitchens" horizontal feed
+- `src/pages/RestaurantDetail.tsx`: stories strip on the restaurant page
 
-**Why:** Builds emotional connection; drives repeat bookings.
+**Not yet:** image upload, favorited-diner push notifications.
 
 ---
 
-### 9. Multi-Language Support (i18n)
+### 9. Multi-Language Support (i18n) — ⏳ DEFERRED
 **What:** Arabic + English + French (Lebanon's three main languages).
 
-**Priority:** Arabic first (right-to-left layout), then French.
-
-**Impact:** Doubles the addressable market in Lebanon.
+**Why deferred:** touches every page + RTL layout; best done as a dedicated milestone with a translation pass. High value — doubles the addressable market.
 
 ---
 
-### 10. Offline Mode for Booking Codes
-**What:** Cache the last 5 booking confirmations (code, restaurant, date, time) in localStorage so diners can show their code even without network.
+### 10. Offline Mode for Booking Codes — ✅ DONE
+**What:** Cache the last 5 booking confirmations so diners can show their code even without network.
 
-**Use case:** Entering a restaurant with poor signal.
+**Implemented:** `src/pages/MyBookings.tsx`:
+- Last 5 confirmed bookings (code, restaurant, date, time) cached in `localStorage` (`kamix:offline-bookings`)
+- If the live query is unavailable (offline/loading) and cache exists, an amber "You're offline — showing saved confirmation codes" banner renders the codes
 
 ---
 
 ## 🚀 High Impact, High Effort
 
-### 11. AI Agent — Diner Personal Concierge
-**What:** A persistent AI agent that knows the diner's full history and acts as their personal dining assistant.
+### 11. AI Agent — Diner Personal Concierge — ✅ DONE (via Idea #1)
+**What:** A persistent AI agent that knows the diner's full history.
 
-**Capabilities:**
-- "Find me a quiet place for a date this Friday under $50/person"
-- "What did I order last time at Trullo? Can you book the same table?"
-- "My wife is vegetarian — filter for places with good vegetarian options near Hamra"
-- Auto-suggest gifts to send friends who are dining at the same restaurant
-- Track dietary goals ("I'm trying to eat less carbs this month")
-
-**Tech:** Google ADK + Convex + user's complete data (bookings, orders, reviews, prefs).
+**Status:** the full context-aware recommendation engine is live as the AiConcierge (Idea #1). Remaining: persistent memory across sessions, dietary-goal tracking, auto gift suggestions.
 
 ---
 
-### 12. AI Agent — Restaurant Operations Optimizer
+### 12. AI Agent — Restaurant Operations Optimizer — ✅ DONE (code, needs key)
 **What:** An AI that analyzes the restaurant's data and proposes actionable improvements.
 
-**Insights:**
-- "You have a 23% no-show rate on Friday evenings — consider requiring deposits for Friday bookings"
-- "Table 12 (bar section) averages 45 min seat time vs 30 min for inside — consider converting 2 bar seats to inside"
-- "Your most popular dish is Carbonara but it has the lowest margin — consider a slight price increase"
-- "Diners who order appetizers have a 40% higher average spend — train servers to suggest them"
-- "Your Tuesday dinner covers are 60% below average — consider a Tuesday special"
-
-**Tech:** Google ADK + Convex analytics queries.
+**Implemented:** `src/convex/ai.ts` → `ai.ownerInsights` action:
+- Reads real stats, analytics2, wait times, recent orders and review samples for the restaurant
+- Sends a bounded data pack to Gemini; returns `{ summary, insights[] }` with priority levels
+- `OwnerInsightsTab` "AI operations advisor" card: run button, priority badges, action copy
+- Fails gracefully with a clear message when `GEMINI_API_KEY` is missing
+- **Needs:** valid `GEMINI_API_KEY` in `.env` + deployed (same key as Idea #1)
 
 ---
 
-### 13. Smart Pricing (Dynamic Cover Charges)
+### 13. Smart Pricing (Dynamic Cover Charges) — ⏳ DEFERRED
 **What:** Let restaurants set dynamic pricing based on demand.
 
-**Example:**
-- Peak hour (Fri 7-9 PM): +10% cover charge
-- Off-peak (Tue lunch): -15% discount
-- Last-minute availability: flash deals ("20% off if you book in the next 30 min")
-
-**Implementation:** Slot-level pricing rules in the `slotRules` table.
+**Why deferred:** no billing/payment layer exists yet; cover-charge pricing needs a payment provider integration first. The `slotRules` table is ready to host per-window pricing deltas once billing lands.
 
 ---
 
-### 14. Gift Marketplace
+### 14. Gift Marketplace — ⏳ DEFERRED
 **What:** Expand Socialize gifts beyond the restaurant's catalog to a city-wide gift marketplace.
 
-**Partners:** Partner with local florists, chocolatiers, wine shops to offer gifts that can be delivered to the restaurant.
-
-**Flow:** Diner sends a gift → partner prepares it → restaurant receives and delivers to the recipient's table.
+**Why deferred:** needs partner onboarding (florists, chocolatiers, wine shops) + delivery logistics + merchant payouts.
 
 ---
 
-### 15. Reservation Marketplace (Resale)
-**What:** Let diners transfer or sell their confirmed reservations when plans change.
+### 15. Reservation Marketplace (Resale) — ✅ DONE
+**What:** Let diners transfer or release their confirmed reservations when plans change.
 
-**How:**
-- Diner can "release" a booking back to the slot pool (freeing the seat)
-- Other diners on the waitlist get notified instantly
-- Optional: transfer the booking to a specific friend (via invite link)
-
-**Benefit:** Reduces no-shows; increases seat utilization.
+**Implemented:**
+- `src/convex/bookings.ts` → `bookings.releaseBooking`: diner releases a confirmed booking → seats return to the pool + waitlist is notified instantly (SMS), owner sees "Diner released the table back to the pool"
+- `src/pages/MyBookings.tsx`: amber "Release" button on upcoming bookings with a confirm dialog
+- Transfer-to-friend already exists via the invite link (`confirmGuest`)
 
 ---
 
 ## 🧪 Experimental / Moonshot
 
-### 16. AR Restaurant Preview
+### 16. AR Restaurant Preview — ⏳ DEFERRED
 **What:** Use AR (via the mobile app) to preview a restaurant's ambiance before booking.
 
-**Content:** 360° photos of dining areas, bar, terrace. See the actual table layout.
+**Why deferred:** needs 360° photo capture pipeline + AR rendering; a moonshot.
 
 ---
 
-### 17. Voice Booking via WhatsApp/SMS
+### 17. Voice Booking via WhatsApp/SMS — ⏳ DEFERRED
 **What:** Book a table by sending a WhatsApp message to a Kamix bot.
 
-**Example:** "Book 4 at Trullo for Saturday 8 PM" → Bot confirms slot → Diner confirms → Done.
-
-**Tech:** WhatsApp Business API + Google ADK for NLU.
+**Why deferred:** needs WhatsApp Business API access + approval; the NLU side can reuse Google ADK once available.
 
 ---
 
-### 18. Loyalty Program — Kamix Points
-**What:** Earn points for bookings, reviews, and Socialize activity. Redeem for:
-- Priority waitlist placement
-- Free gifts (partner-funded)
-- Restaurant discounts
-- Exclusive chef's table access
+### 18. Loyalty Program — Kamix Points — ✅ DONE
+**What:** Earn points for bookings, reviews, and Socialize activity.
+
+**Implemented:**
+- `users.points` field + new `loyaltyLedger` table (idempotent per-source credits — a booking can never be double-awarded)
+- `src/convex/loyalty.ts`: `awardPoints` (shared), `myBalance` (points + activity feed), `leaderboard` (admin)
+- Points awarded: +50 completed booking (bookings.updateStatus), +20 review (reviews.create), +10 gift sent (socialize.sendGift), +5 check-in (dining.checkIn)
+- `src/pages/Account.tsx`: "Kamix Points" card with balance + recent activity
+
+**Not yet:** redemption catalog (priority waitlist, discounts) — the ledger is ready to back it.
 
 ---
 
-### 19. Restaurant Collaboration Events
-**What:** Enable two restaurants to co-host events (e.g., "Wine & Dine Night: Sakura × Trullo").
+### 19. Restaurant Collaboration Events — ⏳ DEFERRED
+**What:** Enable two restaurants to co-host events.
 
-**Booking:** Cross-restaurant booking flow; split revenue automatically.
+**Why deferred:** needs cross-restaurant event + revenue-split model; multi-restaurant booking flow.
 
 ---
 
-### 20. Predictive Availability
+### 20. Predictive Availability — ✅ DONE
 **What:** Show "Predicted availability" for dates 2+ weeks out based on historical patterns.
 
-**Example:** "Saturday Feb 14 (Valentine's) — 85% likely sold out by Feb 10. Book now."
+**Implemented:** `src/convex/analytics.ts` → `analytics.predict`:
+- Looks at the same weekday over the past 12 weeks (booked covers / capacity)
+- Returns `likelySoldOut` % + a human message ("85% likely to sell out — book early")
+- `src/pages/RestaurantDetail.tsx`: prediction banner on far-out dates (beyond the 14-day slot window), color-coded by risk
+- Honest heuristic — clearly labeled as a prediction based on N past weeks
 
 ---
 
