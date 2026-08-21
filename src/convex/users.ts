@@ -67,16 +67,51 @@ export const hasPasswordAccount = query({
 
     // Fallback: older accounts may have been stored verbatim (e.g. the OTP
     // provider saved "+961 71 123 456" with spaces). Compare normalized
-    // values so those users still route to password login, not OTP.
+    // values so those users still route to password login, not OTP. Bounded
+    // (KB-24): this runs unauthenticated on every phone submit, so cap the
+    // scan — `users.backfillPasswordAccounts` normalizes legacy rows, after
+    // which the fallback stops being hit.
     const passwordAccounts = await ctx.db
       .query("authAccounts")
       .withIndex("providerAndAccountId", (q) => q.eq("provider", "password"))
-      .collect();
+      .take(2000);
     return {
       exists: passwordAccounts.some(
         (a) => normalizePhone(a.providerAccountId) === normalized,
-      ),
+      ) || passwordAccounts.length === 2000, // un-scanned remainder: assume exists
     };
+  },
+});
+
+/**
+ * KB-24: one-time maintenance mutation — rewrite legacy password/phone-otp
+ * authAccounts whose providerAccountId isn't stored under the canonical
+ * (normalized) form, so the `hasPasswordAccount` fallback scan disappears.
+ * Run once via `npx convex run users:backfillPasswordAccounts`. Never
+ * clobbers an id that's already taken; skips rows that are already canonical.
+ */
+export const backfillPasswordAccounts = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const accounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) => q.eq("provider", "password"))
+      .collect();
+    let fixed = 0;
+    for (const a of accounts) {
+      const canonical = normalizePhone(a.providerAccountId);
+      if (!canonical || canonical === a.providerAccountId) continue;
+      const clash = await ctx.db
+        .query("authAccounts")
+        .withIndex("providerAndAccountId", (q) =>
+          q.eq("provider", "password").eq("providerAccountId", canonical),
+        )
+        .first();
+      if (clash) continue; // target id already exists — leave both untouched
+      await ctx.db.patch(a._id, { providerAccountId: canonical });
+      fixed++;
+    }
+    return { fixed };
   },
 });
 
@@ -392,6 +427,16 @@ export const confirmPhoneChange = mutation({
     const user = await ctx.db.get(userId);
     if (!user) throw new Error("User not found.");
 
+    // KB-02: throttle OTP *verification* attempts (not just the send) so an
+    // attacker with a session can't brute-force the 6-digit space inside the
+    // 15-minute validity window — 5 guesses per 10 min kills the attack.
+    await checkRateLimit(ctx, {
+      key: "confirmPhoneChange",
+      userId,
+      limit: 5,
+      windowMs: 10 * 60_000,
+    });
+
     const pending = await ctx.db
       .query("phoneChangeRequests")
       .withIndex("by_user", (q) => q.eq("userId", userId))
@@ -512,6 +557,15 @@ export const deleteAccount = mutation({
     if (user.role === "admin") {
       throw new Error("Admins cannot delete their account here.");
     }
+
+    // KB-02: throttle verification attempts — a 6-digit code must never be
+    // brute-forceable inside its 15-minute validity window.
+    await checkRateLimit(ctx, {
+      key: "confirmAccountDelete",
+      userId,
+      limit: 5,
+      windowMs: 10 * 60_000,
+    });
 
     const pending = await ctx.db
       .query("accountDeleteRequests")

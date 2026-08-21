@@ -28,6 +28,7 @@ import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { today } from "@/lib/format";
+import { DEMO_RESTAURANT_NAMES } from "@/lib/demo";
 import { toast } from "sonner";
 
 type FeatureKey = "inside" | "outside" | "bar" | "smoking" | "parking" | "liveMusic";
@@ -53,8 +54,9 @@ const EMPTY_FEATURES: Record<FeatureKey, boolean> = {
 };
 
 // Demo restaurants that ship with predefined service windows; owners can
-// restore them with one tap when they've been removed.
-const DEMO_RESTAURANT_NAMES = ["Trullo", "Sakura House", "Casa Oliva", "La Brasa"];
+// restore them with one tap when they've been removed. KB-14: imported from
+// the backend so the UI list can never drift from the actual demo definitions
+// (previously it listed a non-existent "Casa Oliva" and missed two real ones).
 
 export default function OwnerDashboard() {
   const restaurants = useQuery(api.restaurants.listMine);

@@ -44,6 +44,14 @@ export const enqueue = mutation({
     // junk never enters the queue.
     parseOrThrow(bookingArgsSchema, args);
 
+    // KB-19: reject past dates up front so the diner gets immediate feedback
+    // instead of joining the queue and failing when the drain runs.
+    const serverToday = (() => {
+      const n = new Date();
+      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+    })();
+    if (args.date < serverToday) throw new Error("You can't book a table in the past.");
+
     const name = args.name.trim().slice(0, 80);
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");

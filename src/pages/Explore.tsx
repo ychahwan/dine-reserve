@@ -31,8 +31,10 @@ import { dateFromNow, dateLabel, formatDate, today } from "@/lib/format";
 import { DIETARY_TAGS } from "@/lib/menu";
 import { toast } from "sonner";
 
-const CUISINES = ["Italian", "Japanese", "Mediterranean", "Steakhouse", "Mexican", "French", "American"];
-const CITIES = ["Milan", "Rome", "New York", "Paris", "London"];
+// KB-25: cuisine/city filter chips are now derived from the live data via
+// restaurants.facetValues (previously hardcoded to Milan/Italian lists that
+// never matched the seeded restaurants). DIET chips stay static (well-known
+// tags).
 const DIET_CHIPS = DIETARY_TAGS.slice(0, 4); // Vegetarian, Vegan, Gluten-free, Halal
 type SeatValue = "inside" | "outside" | "bar";
 const SEAT_KEYS: { value: SeatValue | null; key: string; icon: LucideIcon }[] = [
@@ -52,6 +54,9 @@ type AvailabilitySummary = {
 export default function Explore() {
   const { t } = useTranslation();
   const restaurants = useQuery(api.restaurants.search, {});
+  const facets = useQuery(api.restaurants.facetValues);
+  const cuisines = facets?.cuisines ?? [];
+  const cities = facets?.cities ?? [];
   const trending = useQuery(api.restaurants.trending);
   const forYou = useQuery(api.restaurants.forYou);
   const stories = useQuery(api.stories.recent, {});
@@ -253,9 +258,9 @@ export default function Explore() {
           />
         </div>
 
-        {/* Filters */}
+        {/* Filters — cuisine chips from real data */}
         <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
-          {CUISINES.slice(0, 6).map((c) => (
+          {cuisines.slice(0, 8).map((c) => (
             <button
               key={c}
               onClick={() => setCuisine(cuisine === c ? null : c)}
@@ -308,14 +313,21 @@ export default function Explore() {
           >
             <Users className="size-3.5" /> {t("explore.soloFriendly")}
           </button>
+          {/* City selector — cycles through the cities that actually exist */}
           <button
-            onClick={() => setCity(city ? null : "Milan")}
+            onClick={() => {
+              if (cities.length === 0) return;
+              const idx = city ? cities.indexOf(city) : -1;
+              const next = cities[(idx + 1) % cities.length] ?? null;
+              setCity(next === city ? null : next);
+            }}
             className={cn(
               "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
               city
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-card text-muted-foreground hover:text-foreground",
             )}
+            title={t("explore.anyCity")}
           >
             <MapPin className="size-3.5" /> {city ?? t("explore.anyCity")}
           </button>
@@ -522,7 +534,7 @@ export default function Explore() {
   );
 }
 
-/** Card loads its own data so search results re-render cheaply. */
+/** Card loads its own (lightweight) data so search results re-render cheaply. */
 function RestaurantCard({
   id,
   to,
@@ -539,16 +551,18 @@ function RestaurantCard({
   onToggleFavorite: (id: string, name: string) => void;
 }) {
   const { t } = useTranslation();
-  const data = useQuery(api.restaurants.get, { id: id as never });
+  // KB-31: use the light `card` query (no menus/items/storage resolution)
+  // instead of the full `get` — a screen of cards no longer runs dozens of
+  // heavy queries.
+  const data = useQuery(api.restaurants.card, { id: id as never });
   const wait = useQuery(api.analytics.publicWaitSignal, { restaurantId: id as never });
   if (!data) return null;
-  const { restaurant: r, sections, rating } = data;
+  const { restaurant: r, totalCapacity, rating } = data;
   const tags: string[] = [];
   if (r.features.outside) tags.push(t("common.outside"));
   if (r.features.bar) tags.push(t("common.bar"));
   if (r.features.smoking) tags.push(t("detail.smokingArea"));
   if (r.features.soloFriendly) tags.push(t("explore.soloFriendly"));
-  const totalCapacity = sections.reduce((sum, s) => sum + s.capacity, 0);
 
   const statusBadge = !summary
     ? null

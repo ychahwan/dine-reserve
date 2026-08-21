@@ -44,9 +44,15 @@ export function sortTimes(times: string[]): string[] {
  * tasting menus, jazz nights…).
  */
 export function timesForWindow(start: string, end: string, step: number): string[] {
-  const startM = minutesOf(start);
-  const endM = minutesOf(end);
+  let startM = minutesOf(start);
+  let endM = minutesOf(end);
   if (step <= 0) return [formatMinutes(startM)];
+  // KB-12: a window that crosses midnight (e.g. 22:00 → 01:00) must not
+  // produce zero times — treat the end as the next day (+1440) so the loop
+  // runs, and let formatMinutes wrap back to 00:xx for the post-midnight
+  // seatings. Strictly-less keeps a same-minute window (e.g. a chef's table
+  // at 00:00) from ballooning into a full day of slots.
+  if (endM < startM) endM += 1440;
   const out: string[] = [];
   const inc = Math.min(step, 1440);
   let cur = startM;
@@ -61,7 +67,10 @@ export function timesForWindow(start: string, end: string, step: number): string
 /** Legacy default: the 30-minute grid between open and close, end exclusive. */
 export function defaultGridTimes(open: string, close: string, step = 30): string[] {
   const startM = minutesOf(open);
-  const endM = minutesOf(close);
+  // KB-12: same wrap-around fix — a late-night venue open 22:00 → 01:00
+  // previously generated zero slots because `cur < endM` was false.
+  let endM = minutesOf(close);
+  if (endM < startM) endM += 1440;
   const out: string[] = [];
   let cur = startM;
   while (cur < endM && out.length < 96) {

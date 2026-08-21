@@ -71,8 +71,9 @@ export const sendForBooking = mutation({
     bookingId: v.id("bookings"),
     type: DINER_ALERT_TYPES,
     message: v.optional(v.string()),
+    clientDate: v.optional(v.string()),
   },
-  handler: async (ctx, { bookingId, type, message }) => {
+  handler: async (ctx, { bookingId, type, message, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to notify the restaurant.");
     parseOrThrow(optionalTextSchema(300), message);
@@ -82,11 +83,20 @@ export const sendForBooking = mutation({
     if (booking.status !== "confirmed") {
       throw new Error("Only confirmed bookings can send alerts.");
     }
-    // only for upcoming bookings
-    const now = new Date();
-    const localToday = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-      now.getDate(),
-    ).padStart(2, "0")}`;
+    // only for upcoming bookings — KB-04: compare against the diner's local
+    // date (client-supplied, bounded ±1 day) so a valid same-day alert near
+    // midnight isn't rejected by the UTC server clock.
+    const serverToday = (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+        now.getDate(),
+      ).padStart(2, "0")}`;
+    })();
+    const localToday =
+      clientDate && /^\d{4}-\d{2}-\d{2}$/.test(clientDate) &&
+      Math.abs(new Date(`${clientDate}T00:00:00Z`).getTime() - new Date(`${serverToday}T00:00:00Z`).getTime()) <= 24 * 60 * 60 * 1000
+        ? clientDate
+        : serverToday;
     if (booking.date < localToday) throw new Error("This booking is in the past.");
 
     const cleaned = message?.trim().slice(0, 300);

@@ -3,6 +3,7 @@ import { mutation, query, MutationCtx } from "./_generated/server";
 import { getAuthUserId } from "@convex-dev/auth/server";
 import type { Id } from "./_generated/dataModel";
 import { dateFromNow } from "../lib/format";
+import { DEMO_RESTAURANT_NAMES } from "../lib/demo";
 import { rebuildRestaurantSlots } from "./availability";
 
 /**
@@ -74,6 +75,15 @@ const DEMO_DEFS: DemoDef[] = [
     ],
   },
 ];
+
+// KB-14: the demo names come from src/lib/demo (client-safe), so the backend
+// defs and the owner-dashboard UI share one list and can never drift.
+DEMO_DEFS.forEach((d) => {
+  if (!DEMO_RESTAURANT_NAMES.includes(d.name)) {
+    // Defensive: keep the two sources honest at module load.
+    throw new Error(`Demo def "${d.name}" is missing from DEMO_RESTAURANT_NAMES`);
+  }
+});
 
 /**
  * Apply the demo service windows (and one-off slot) to the demo restaurants,
@@ -185,6 +195,23 @@ export const ensureDemoRules = mutation({
     if (args.force) {
       const userId = await getAuthUserId(ctx);
       if (userId === null) throw new Error("You must be signed in.");
+
+      // KB-10: `force` replaces windows — any signed-in user could otherwise
+      // destroy a restaurant's configured service windows by name. Require
+      // the caller to own every targeted restaurant (or be a platform admin).
+      const caller = await ctx.db.get(userId);
+      const isAdmin = caller?.role === "admin";
+      const targets = args.restaurant
+        ? DEMO_DEFS.filter((d) => d.name === args.restaurant)
+        : DEMO_DEFS;
+      const restaurants = await ctx.db.query("restaurants").collect();
+      for (const def of targets) {
+        const restaurant = restaurants.find((r) => r.name === def.name);
+        if (!restaurant) continue;
+        if (!isAdmin && restaurant.ownerId !== userId) {
+          throw new Error("You can only load example windows for a restaurant you own.");
+        }
+      }
     }
     const applied = await applyDemoRules(ctx, Date.now(), {
       restaurantName: args.restaurant,

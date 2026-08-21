@@ -64,11 +64,15 @@ export async function notifyDiner(
     dedupeKey: string;
   },
 ) {
+  // KB-32: by_user_dedupe index — check one row instead of re-collecting the
+  // user's entire notification history on every insert.
   const existing = await ctx.db
     .query("dinerNotifications")
-    .withIndex("by_user", (q) => q.eq("userId", opts.userId))
-    .collect();
-  if (existing.some((n) => n.dedupeKey === opts.dedupeKey)) return null;
+    .withIndex("by_user_dedupe", (q) =>
+      q.eq("userId", opts.userId).eq("dedupeKey", opts.dedupeKey.slice(0, 160)),
+    )
+    .first();
+  if (existing) return null;
 
   const id = await ctx.db.insert("dinerNotifications", {
     userId: opts.userId,
@@ -307,14 +311,19 @@ export const runReviewNudgePass = internalMutation({
     const now = Date.now();
     const recently = now - 3 * 24 * 3600_000; // completed in the last 3 days
 
-    const bookings = await ctx.db.query("bookings").collect();
+    // KB-32: by_status_updated index — only completed bookings updated in the
+    // window, instead of scanning every booking + every review each run.
+    const completedRecent = await ctx.db
+      .query("bookings")
+      .withIndex("by_status_updated", (q) =>
+        q.eq("status", "completed").gte("updatedAt", recently),
+      )
+      .collect();
     const reviews = await ctx.db.query("reviews").collect();
     const reviewedBookingIds = new Set(reviews.map((r) => r.bookingId));
 
     let notified = 0;
-    for (const b of bookings) {
-      if (b.status !== "completed") continue;
-      if (b.updatedAt < recently) continue;
+    for (const b of completedRecent) {
       if (reviewedBookingIds.has(b._id)) continue;
       if (!b.userId) continue;
       const user = await ctx.db.get(b.userId);

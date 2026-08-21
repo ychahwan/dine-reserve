@@ -16,7 +16,15 @@ export async function safeGet<T>(
 ): Promise<T | null> {
   try {
     return (await ctx.db.get(id as never)) as T | null;
-  } catch {
+  } catch (e) {
+    // KB-26: intended for ids that aren't real Convex doc ids (bare auth
+    // subjects, legacy seed rows) — but a genuine transient failure must not
+    // be silently treated as "no record". Log so real errors surface in the
+    // function logs instead of masquerading as missing data.
+    const reason = e instanceof Error ? e.message : String(e);
+    if (!/Invalid ID|invalid id|InvalidId|not a valid/i.test(reason)) {
+      console.warn(`[safeGet] non-id read failed for "${id}": ${reason}`);
+    }
     return null;
   }
 }

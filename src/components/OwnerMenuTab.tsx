@@ -1,3 +1,13 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -67,6 +77,33 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
     menuId: "",
     item: null,
   });
+  // KB-15: native window.confirm is blocked in the sandboxed preview iframe
+  // and would silently do nothing — confirm destructive deletes in-app.
+  const [deleteConfirm, setDeleteConfirm] = useState<
+    | { kind: "menu"; id: string; name: string }
+    | { kind: "item"; id: string; name: string }
+    | null
+  >(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm || deleting) return;
+    setDeleting(true);
+    try {
+      if (deleteConfirm.kind === "menu") {
+        await deleteMenu({ id: deleteConfirm.id as never });
+        toast.success("Menu deleted");
+      } else {
+        await deleteItem({ id: deleteConfirm.id as never });
+        toast.success("Item deleted");
+      }
+      setDeleteConfirm(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const handleAddMenu = async () => {
     if (!newMenuName.trim()) return;
@@ -82,25 +119,8 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
     }
   };
 
-  const handleDeleteMenu = async (id: string) => {
-    if (!window.confirm("Delete this menu and all its items?")) return;
-    try {
-      await deleteMenu({ id: id as never });
-      toast.success("Menu deleted");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete menu.");
-    }
-  };
-
-  const handleDeleteItem = async (it: OwnerMenuItem) => {
-    if (!window.confirm(`Delete “${it.name}”?`)) return;
-    try {
-      await deleteItem({ id: it._id as never });
-      toast.success("Item deleted");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete item.");
-    }
-  };
+  const handleDeleteMenu = (m: OwnerMenuDoc) => setDeleteConfirm({ kind: "menu", id: m._id, name: m.name });
+  const handleDeleteItem = (it: OwnerMenuItem) => setDeleteConfirm({ kind: "item", id: it._id, name: it.name });
 
   const openAdd = (menuId: string) => setDialog({ open: true, menuId, item: null });
   const openEdit = (menuId: string, item: OwnerMenuItem) => setDialog({ open: true, menuId, item });
@@ -124,7 +144,7 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
               <Button variant="ghost" size="sm" className="h-8" onClick={() => openAdd(m._id)}>
                 <Plus className="size-3.5" /> Item
               </Button>
-              <Button variant="ghost" size="icon-sm" aria-label="Delete menu" className="text-destructive" onClick={() => handleDeleteMenu(m._id)}>
+              <Button variant="ghost" size="icon-sm" aria-label="Delete menu" className="text-destructive" onClick={() => handleDeleteMenu(m)}>
                 <Trash2 className="size-4" />
               </Button>
             </div>
@@ -166,6 +186,43 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
         item={dialog.item}
         onClose={() => setDialog({ open: false, menuId: "", item: null })}
       />
+
+      {/* KB-15: in-app delete confirmation (window.confirm is blocked in the
+          sandboxed preview iframe) */}
+      <AlertDialog
+        open={!!deleteConfirm}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteConfirm(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">
+              {deleteConfirm?.kind === "menu"
+                ? `Delete “${deleteConfirm.name}” and all its items?`
+                : `Delete “${deleteConfirm?.name}”?`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteConfirm?.kind === "menu"
+                ? "This menu and every dish in it will be removed from the diner menu."
+                : "This dish will be removed from the diner menu."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{deleteConfirm ? "Keep it" : ""}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

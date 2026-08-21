@@ -17,13 +17,14 @@ import {
   Users,
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useParams } from "react-router";
+import { Link, useNavigate, useParams } from "react-router";
 import { formatDate, formatTime } from "@/lib/format";
 import { toast } from "sonner";
 
 export default function Invite() {
   const { code } = useParams<{ code: string }>();
   const { user } = useAuth();
+  const navigate = useNavigate();
   const data = useQuery(api.bookings.byCode, { code: code ?? "" });
   const confirmGuest = useMutation(api.bookings.confirmGuest);
   const [confirming, setConfirming] = useState(false);
@@ -32,6 +33,13 @@ export default function Invite() {
 
   const handleConfirm = async () => {
     if (!data || confirming) return;
+    // KB-20: an anonymous visitor who taps "Confirm my seat" shouldn't get a
+    // raw "please sign in" error — send them to sign in first and bring them
+    // back to this exact invite afterwards.
+    if (!user) {
+      navigate(`/auth?returnTo=${encodeURIComponent(`/invite/${code ?? ""}`)}`);
+      return;
+    }
     setConfirming(true);
     setError(null);
     try {

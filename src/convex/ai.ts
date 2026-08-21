@@ -61,11 +61,41 @@ export const recommendDinner = action({
 
     const prompt = buildPrompt(query, context, { date, partySize });
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    // KB-08: a provider hiccup must never surface a raw stack trace to the
+    // diner — return a friendly, structured error the UI can render.
+    let text: string;
+    try {
+      const result = await model.generateContent(prompt);
+      text = result.response.text();
+    } catch (e) {
+      return {
+        recommendations: [
+          {
+            error: "The concierge is having a moment — please try again.",
+            detail: e instanceof Error ? e.message.slice(0, 300) : "unknown",
+          },
+        ],
+        dinerName: user.name ?? "Diner",
+        query,
+      };
+    }
 
     // ── 4. Parse structured response ───────────────────────────────────
-    const recommendations = parseRecommendations(text);
+    const parsed = parseRecommendations(text);
+
+    // KB-09: never trust the model's ids — filter to restaurants that
+    // actually exist in the fetched list (which already excludes disabled
+    // venues). A hallucinated restaurant can never be shown to the diner.
+    const validIds = new Set(restaurants.map((r: any) => r._id));
+    const recommendations = parsed
+      .filter((r: any) => r && typeof r.restaurantId === "string" && validIds.has(r.restaurantId))
+      .slice(0, 5);
+    if (recommendations.length === 0 && !parsed.some((r: any) => r?.error)) {
+      recommendations.push({
+        error: "Could not find a good match right now — try another query.",
+        raw: text.slice(0, 300),
+      });
+    }
 
     return {
       recommendations,
@@ -158,7 +188,11 @@ export const ownerInsights = action({
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
-    const prompt = `You are Kamix Ops, a restaurant operations advisor for Lebanon.
+    // KB-08: wrap the network call too — ownerInsights previously only
+    // caught JSON-parse errors, so a provider failure escaped raw.
+    let text: string;
+    try {
+      const prompt = `You are Kamix Ops, a restaurant operations advisor for Lebanon.
 Analyze this restaurant's real operating data and propose concrete, prioritized improvements.
 
 DATA (all real):\n${JSON.stringify(dataPack, null, 2)}\n
@@ -166,8 +200,21 @@ DATA (all real):\n${JSON.stringify(dataPack, null, 2)}\n
 Return a JSON object:\n{"summary": "one-sentence takeaway", "insights": [{"title": "short headline", "detail": "what the data shows, with the actual numbers", "action": "the specific change to make", "priority": "high|medium|low"}]}\n
 Rules:\n1. ONLY use numbers present in the DATA — never invent metrics\n2. 3-6 insights, each with a different angle (no-shows, busy times, repeat diners, spend, menu, reviews, waitlist, promotions)\n3. Be specific and actionable for a restaurant owner in Lebanon\n4. Return ONLY the JSON object, no markdown`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+      const result = await model.generateContent(prompt);
+      text = result.response.text();
+    } catch (e) {
+      return {
+        insights: [
+          {
+            title: "Could not reach the AI advisor",
+            detail: e instanceof Error ? e.message.slice(0, 300) : "Please try again.",
+            action: "Try again",
+            priority: "low",
+          },
+        ],
+        summary: "",
+      };
+    }
     try {
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error("no json");
@@ -209,8 +256,13 @@ function buildContextPack(data: {
       occasion: b.occasion,
     }));
 
+  // KB-09: resolve order restaurant ids to real names (the ids are opaque to
+  // the model, so a raw id in the context pack was useless to it).
+  const restaurantNameById = new Map(
+    data.restaurants.map((r: any) => [r._id, r.name]),
+  );
   const topOrders = data.orders.slice(0, 20).map((o) => ({
-    restaurant: o.restaurantId, // we'll resolve names below
+    restaurant: restaurantNameById.get(o.restaurantId) ?? "Unknown",
     items: o.items.map((i: any) => i.name),
     totalCents: o.totalCents,
   }));

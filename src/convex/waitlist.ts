@@ -114,6 +114,13 @@ export const join = mutation({
     // Zod: real calendar date, HH:mm time, party size 1–20, non-empty name.
     parseOrThrow(waitlistJoinSchema, args);
 
+    // KB-19: no waitlist entries for past dates.
+    const serverToday = (() => {
+      const n = new Date();
+      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+    })();
+    if (args.date < serverToday) throw new Error("You can't join a waitlist for a past date.");
+
     const name = args.name.trim().slice(0, 80);
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
@@ -130,7 +137,10 @@ export const join = mutation({
       throw new Error("Tables are still available at this time — book directly instead.");
     }
 
-    // Idempotent: reuse an existing entry for the same slot.
+    // Idempotent per (user, slot): reuse an active entry (waiting/notified).
+    // KB-05: a previously-cancelled entry is NOT a duplicate — it's revived
+    // so the diner is genuinely back on the list (before, join returned the
+    // stale cancelled row and the UI showed success while nothing happened).
     const mine = await ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
     const dup = mine.find(
       (e) =>
@@ -139,7 +149,19 @@ export const join = mutation({
         e.time === args.time &&
         (e.sectionId ?? null) === (args.sectionId ?? null),
     );
-    if (dup) return dup;
+    if (dup) {
+      if (dup.status === "cancelled") {
+        await ctx.db.patch(dup._id, {
+          status: "waiting",
+          createdAt: Date.now(),
+          partySize: args.partySize,
+          name,
+          phone: args.phone?.trim().slice(0, 20) || undefined,
+        });
+        return await ctx.db.get(dup._id);
+      }
+      return dup;
+    }
 
     let sectionName: string | undefined;
     if (args.sectionId) {

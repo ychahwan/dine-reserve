@@ -4,6 +4,7 @@ import { mutation, MutationCtx, query, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { FEATURES, SEAT_KIND } from "./schema";
 import { safeGet } from "./helpers";
+import { cascadeDeleteRestaurant } from "./erasure";
 import {
   cancellationPolicySchema,
   hoursSchema,
@@ -247,6 +248,57 @@ export const get = query({
   },
 });
 
+/**
+ * KB-25: distinct cuisines + cities currently on the platform (disabled
+ * venues excluded) so Explore's filter chips are derived from real data
+ * instead of hardcoded lists that drift from what's actually seeded.
+ */
+export const facetValues = query({
+  args: {},
+  handler: async (ctx) => {
+    const restaurants = (await ctx.db.query("restaurants").collect()).filter((r) => !r.disabled);
+    const cuisines = [...new Set(restaurants.map((r) => r.cuisine).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, 12);
+    const cities = [...new Set(restaurants.map((r) => r.city).filter(Boolean))]
+      .sort((a, b) => a.localeCompare(b))
+      .slice(0, 12);
+    return { cuisines, cities };
+  },
+});
+
+/**
+ * KB-31: lightweight list-card data for Explore — name, image, cuisine, city,
+ * price, rating + total capacity. Deliberately does NOT load menus/items or
+ * resolve storage URLs (that's `get`'s job, reserved for the detail page), so
+ * a screen full of cards doesn't fan out N heavy queries.
+ */
+export const card = query({
+  args: { id: v.id("restaurants") },
+  handler: async (ctx, { id }) => {
+    const restaurant = await ctx.db.get(id);
+    if (!restaurant || restaurant.disabled) return null;
+    const [sections, rating] = await Promise.all([
+      ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
+      restaurantRating(ctx, id),
+    ]);
+    return {
+      restaurant: {
+        _id: restaurant._id,
+        name: restaurant.name,
+        cuisine: restaurant.cuisine,
+        city: restaurant.city,
+        neighborhood: restaurant.neighborhood,
+        priceRange: restaurant.priceRange,
+        imageUrl: restaurant.imageUrl,
+        features: restaurant.features,
+      },
+      totalCapacity: sections.reduce((s, x) => s + x.capacity, 0),
+      rating,
+    };
+  },
+});
+
 /** Restaurants owned by the current user. */
 export const listMine = query({
   args: {},
@@ -451,18 +503,11 @@ export const remove = mutation({
   args: { id: v.id("restaurants") },
   handler: async (ctx, { id }) => {
     await requireOwner(ctx, id);
-    await ctx.db.delete(id);
-    // cascade related data
-    const [sections, hours, menus, slots] = await Promise.all([
-      ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-      ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-      ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-      ctx.db.query("slots").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", id)).collect(),
-    ]);
-    for (const s of sections) await ctx.db.delete(s._id);
-    for (const h of hours) await ctx.db.delete(h._id);
-    for (const m of menus) await ctx.db.delete(m._id);
-    for (const s of slots) await ctx.db.delete(s._id);
+    // Full cascade — same shared erasure the admin console uses (KB-01):
+    // bookings + dine-in data, reviews, notifications, stories, waitlist,
+    // gifts, menus + items (releasing uploaded photos), and favorites.
+    await cascadeDeleteRestaurant(ctx, id);
+    return { deleted: true };
   },
 });
 

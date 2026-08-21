@@ -70,8 +70,12 @@ export const list = query({
 export const previewWeek = query({
   args: { restaurantId: v.id("restaurants") },
   handler: async (ctx, { restaurantId }) => {
+    // KB-22: match `list` — the weekly schedule is owner-only info; an
+    // arbitrary signed-in caller must not be able to read any restaurant's
+    // full service windows (info disclosure).
+    const userId = await getAuthUserId(ctx);
     const restaurant = await ctx.db.get(restaurantId);
-    if (!restaurant) return null;
+    if (userId === null || !restaurant || restaurant.ownerId !== userId) return null;
     const [hours, sections, rules, customSlots] = await Promise.all([
       ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
       ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),

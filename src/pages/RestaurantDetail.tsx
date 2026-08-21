@@ -248,6 +248,14 @@ export default function RestaurantDetail() {
 
   const handleConfirm = async () => {
     if (!selectedSlot || !id) return;
+    // KB-20: an anonymous visitor who fills the booking sheet shouldn't get a
+    // raw "please sign in" error — send them to sign in and bring them back
+    // to this exact restaurant/date/party selection afterwards.
+    if (!user) {
+      const current = `${location.pathname}${location.search}`;
+      navigate(`/auth?returnTo=${encodeURIComponent(current)}`);
+      return;
+    }
     setSubmitting(true);
     setBookingError(null);
     try {
@@ -281,6 +289,21 @@ export default function RestaurantDetail() {
     () => (queueEntryId ? (myQueueEntries ?? []).find((e) => e._id === queueEntryId) ?? null : null),
     [myQueueEntries, queueEntryId],
   );
+
+  // KB-28: if the scheduled queue drain never resolves the entry (a rare
+  // scheduler hiccup), the "Holding your table…" overlay would hang forever.
+  // After 45s, surface a friendly error with the option to try again.
+  useEffect(() => {
+    if (!queueEntryId) return;
+    const timer = setTimeout(() => {
+      setQueueEntryId(null);
+      setQueuePosition(null);
+      setBookingError(t("detail.errQueueTimeout"));
+      setSubmitting(false);
+      toast.error(t("detail.errQueueTimeout"));
+    }, 45_000);
+    return () => clearTimeout(timer);
+  }, [queueEntryId, t]);
 
   useEffect(() => {
     if (!trackedEntry) return;

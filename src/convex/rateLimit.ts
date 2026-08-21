@@ -34,12 +34,18 @@ export async function checkRateLimit(
   const windowStart = Math.floor(now / windowMs) * windowMs;
   const rateKey = `${key}:${userId}`;
 
+  // KB-07: `.first()` (not `.unique()`) — two concurrent first-hits for the
+  // same (key, window) can both insert before either sees the other, and a
+  // later `.unique()` would then throw and turn the limiter into a hard
+  // error for that user. `.first()` is order-agnostic and the count logic
+  // below stays correct: worst case a concurrent pair increments two rows,
+  // which only ever over-counts toward the limit (fail-safe), never under.
   const existing = await ctx.db
     .query("rateLimits")
     .withIndex("by_key_window", (q) =>
       q.eq("key", rateKey).eq("windowStart", windowStart),
     )
-    .unique();
+    .first();
 
   if (existing) {
     if (existing.count >= limit) {

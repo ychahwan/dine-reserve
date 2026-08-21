@@ -40,15 +40,16 @@ export const sendTomorrowReminders = internalAction({
 export const scheduleRemindersForDate = internalMutation({
   args: { date: v.string() },
   handler: async (ctx, { date }) => {
-    // No index spans "date" alone (by_restaurant_date is scoped per
-    // restaurant), so scan the table and filter in memory — acceptable at
-    // this scale; a dedicated by-date index can be added later if the
-    // bookings table grows large.
-    const bookings = await ctx.db.query("bookings").collect();
-
-    const candidates = bookings.filter(
-      (b) => b.date === date && b.status === "confirmed" && !b.reminderSent,
+    // KB-32: dedicated by_date index (schema) — no more full-table scan for
+    // the daily reminder cron.
+    const candidates = await ctx.db
+      .query("bookings")
+      .withIndex("by_date", (q) => q.eq("date", date))
+      .collect();
+    const confirmed = candidates.filter(
+      (b) => b.status === "confirmed" && !b.reminderSent,
     );
+    const bookings = confirmed;
 
     let scheduled = 0;
     for (const booking of candidates) {

@@ -26,6 +26,21 @@ function todayKey(): string {
   ).padStart(2, "0")}`;
 }
 
+/**
+ * KB-04: resolve "today" for a day-of-visit check, preferring the caller's
+ * own local date (the server clock is effectively UTC; booking dates are the
+ * diner's local date, so near midnight they disagree by a day). A
+ * client-supplied date is only trusted within ±1 day of the server's date.
+ */
+function resolveTodayKey(clientDate?: string): string {
+  const serverToday = todayKey();
+  if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate)) return serverToday;
+  const diffMs = Math.abs(
+    new Date(`${clientDate}T00:00:00Z`).getTime() - new Date(`${serverToday}T00:00:00Z`).getTime(),
+  );
+  return diffMs <= 24 * 60 * 60 * 1000 ? clientDate : serverToday;
+}
+
 async function requireOwnConfirmedBooking(
   ctx: MutationCtx | QueryCtx,
   userId: string,
@@ -92,15 +107,17 @@ const ASSIST_LABEL: Record<string, string> = {
 
 /** Diner confirms arrival — stamps checkedInAt and alerts the restaurant. */
 export const checkIn = mutation({
-  args: { bookingId: v.id("bookings") },
-  handler: async (ctx, { bookingId }) => {
+  args: { bookingId: v.id("bookings"), clientDate: v.optional(v.string()) },
+  handler: async (ctx, { bookingId, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
     const booking = await ctx.db.get(bookingId);
     if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
     if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
-    // arrival only makes sense on the day of the visit
-    if (booking.date !== todayKey()) {
+    // KB-04: arrival only makes sense on the day of the visit — judged on the
+    // diner's local date (client-supplied, bounded ±1 day) so a booking near
+    // midnight isn't wrongly rejected because the server clock is UTC.
+    if (booking.date !== resolveTodayKey(clientDate)) {
       throw new Error("You can check in on the day of your booking.");
     }
     if (booking.checkedInAt) return booking;

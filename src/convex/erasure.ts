@@ -97,3 +97,82 @@ export async function cascadeDeleteUser(ctx: MutationCtx, userId: Id<"users">) {
 
   await ctx.db.delete(userId);
 }
+
+/**
+ * Permanently delete a restaurant and everything attached to it: sections,
+ * hours, slots, rules, custom slots, menus + items (releasing uploaded photos
+ * from storage), bookings + all dine-in data, waitlist, notifications,
+ * reviews, stories, gifts, menu requests, presence. Also removes it from
+ * every diner's favorites.
+ *
+ * Shared by the owner-facing restaurants.remove AND the admin moderation
+ * console (admin.deleteRestaurant) so the two paths can never drift.
+ */
+export async function cascadeDeleteRestaurant(ctx: MutationCtx, restaurantId: Id<"restaurants">) {
+  const sections = await ctx.db
+    .query("sections")
+    .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+    .collect();
+
+  const [hours, slots, rules, customSlots, menus, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, bookings, orders, assists] =
+    await Promise.all([
+      ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("slots").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("slotRules").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("customSlots").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("waitlist").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("notifications").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("reviews").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("stories").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("giftTypes").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("menuRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("dinerPresence").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("assistRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+    ]);
+
+  for (const rows of [hours, slots, rules, customSlots, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, orders, assists]) {
+    for (const row of rows) await ctx.db.delete(row._id);
+  }
+  for (const b of bookings) {
+    const [bo, ba, bn, bp, bg] = await Promise.all([
+      ctx.db.query("dineOrders").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+      ctx.db.query("assistRequests").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+      ctx.db.query("notifications").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+      ctx.db.query("dinerPresence").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+      ctx.db.query("giftDeliveries").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+    ]);
+    for (const rows of [bo, ba, bn, bp, bg]) for (const row of rows) await ctx.db.delete(row._id);
+    await ctx.db.delete(b._id);
+  }
+  const [giftsDelivered, menuItems] = await Promise.all([
+    ctx.db.query("giftDeliveries").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+    ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+  ]);
+  for (const g of giftsDelivered) await ctx.db.delete(g._id);
+  for (const m of menuItems) {
+    // Release the uploaded photo from storage (best-effort, never blocks).
+    if (m.imageStorageId) {
+      try {
+        await ctx.storage.delete(m.imageStorageId);
+      } catch {
+        // storage cleanup is best-effort
+      }
+    }
+    await ctx.db.delete(m._id);
+  }
+  for (const m of menus) await ctx.db.delete(m._id);
+  for (const s of sections) await ctx.db.delete(s._id);
+
+  // Remove from every diner's favorites.
+  const users = await ctx.db.query("users").collect();
+  for (const u of users) {
+    if ((u.favorites ?? []).includes(restaurantId)) {
+      await ctx.db.patch(u._id, { favorites: (u.favorites ?? []).filter((id) => id !== restaurantId) });
+    }
+  }
+
+  await ctx.db.delete(restaurantId);
+}

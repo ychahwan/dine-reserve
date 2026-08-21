@@ -11,6 +11,16 @@ import {
 } from "@/components/OwnerDiningTabs";
 import { OwnerGiftsTab, OwnerGiftsTabCount } from "@/components/OwnerGiftsTab";
 import { OwnerStoriesTab } from "@/components/OwnerStoriesTab";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -499,6 +509,24 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
   const [form, setForm] = useState({ name: "", kind: "inside" as Kind, smoking: false, capacity: 24, description: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // KB-15: window.confirm is blocked in the sandboxed preview iframe —
+  // confirm destructive deletes with an in-app dialog instead.
+  const [sectionToDelete, setSectionToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [deletingSection, setDeletingSection] = useState(false);
+
+  const confirmDeleteSection = async () => {
+    if (!sectionToDelete || deletingSection) return;
+    setDeletingSection(true);
+    try {
+      await deleteSection({ id: sectionToDelete.id as never });
+      toast.success("Section deleted");
+      setSectionToDelete(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete section.");
+    } finally {
+      setDeletingSection(false);
+    }
+  };
 
   const resetForm = () => setForm({ name: "", kind: "inside", smoking: false, capacity: 24, description: "" });
 
@@ -535,15 +563,7 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
     }
   };
 
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("Delete this seating area? Its slot ledger will be removed.")) return;
-    try {
-      await deleteSection({ id: id as never });
-      toast.success("Section deleted");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete section.");
-    }
-  };
+  const handleDelete = (s: (typeof sections)[number]) => setSectionToDelete({ id: s._id, name: s.name });
 
   return (
     <div className="space-y-4 pb-6">
@@ -580,7 +600,7 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
                   <Button variant="ghost" size="icon-sm" aria-label="Edit" onClick={() => startEdit(s)}>
                     <Pencil className="size-4" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" aria-label="Delete" className="text-destructive" onClick={() => handleDelete(s._id)}>
+                  <Button variant="ghost" size="icon-sm" aria-label="Delete" className="text-destructive" onClick={() => handleDelete(s)}>
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
@@ -660,6 +680,38 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
           </form>
         </CardContent>
       </Card>
+
+      {/* KB-15: in-app delete confirmation */}
+      <AlertDialog
+        open={!!sectionToDelete}
+        onOpenChange={(open) => {
+          if (!open && !deletingSection) setSectionToDelete(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">
+              Delete “{sectionToDelete?.name}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This seating area and its slot ledger will be removed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingSection}>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deletingSection}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDeleteSection();
+              }}
+            >
+              {deletingSection ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -429,6 +429,7 @@
     "errBook": "Could not book that time.",
     "errQueue": "Could not join the booking queue.",
     "errNoTables": "No tables left at this time. Try a different time.",
+    "errQueueTimeout": "We couldn't confirm your table in time — please try again.",
     "errWaitlist": "Could not join the waitlist.",
     "joinedWaitlist": "You're on the list — we'll text you when a table frees up!",
     "bookedToast": "Table booked — confirmation sent!"

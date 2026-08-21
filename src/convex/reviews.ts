@@ -142,11 +142,15 @@ export const remove = mutation({
       .collect();
     const reviewLedger = ledger.find((l) => l.source === "review");
     if (reviewLedger) {
-      await ctx.db.patch(reviewLedger._id, { amount: 0 });
       const user = await ctx.db.get(review.userId);
       if (user && (user.points ?? 0) >= reviewLedger.amount) {
         await ctx.db.patch(review.userId, { points: (user.points ?? 0) - reviewLedger.amount });
       }
+      // KB-06: DELETE the ledger row instead of zeroing it. awardPoints is
+      // idempotent by (userId, sourceId) and early-returns when a row exists
+      // — a zeroed row would block re-awarding points when the diner
+      // re-reviews the same booking (the booking becomes reviewable again).
+      await ctx.db.delete(reviewLedger._id);
     }
 
     if (isAdmin && !isAuthor) {

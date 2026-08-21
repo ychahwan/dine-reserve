@@ -63,9 +63,22 @@ export async function attemptBooking(
   // Zod: real calendar date, HH:mm time, party size 1–20, non-empty name.
   parseOrThrow(bookingArgsSchema, args);
 
+  // KB-19: reject past dates server-side. The date is the diner's local date
+  // and the server clock is UTC, so allow today and guard only clear pasts
+  // (a past date would otherwise book silently if stale slots exist).
+  const serverToday = (() => {
+    const n = new Date();
+    return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+  })();
+  if (args.date < serverToday) throw new Error("You can't book a table in the past.");
+
   const name = args.name.trim().slice(0, 80);
   const restaurant = await ctx.db.get(args.restaurantId);
   if (!restaurant) throw new Error("Restaurant not found.");
+  // KB-03: the disabled-venue guard lives with the booking primitive, not
+  // just at the queue entry point — a restaurant disabled by an admin after
+  // requests were queued can never be booked when the FIFO drain runs.
+  if (restaurant.disabled) throw new Error("This restaurant is currently unavailable.");
 
   const sections = await ctx.db
     .query("sections")
@@ -96,8 +109,18 @@ export async function attemptBooking(
     }
   }
 
-  // 2) nearest available slot later in the day (helpful UX)
-  const laterTimes = [...new Set(slots.map((s) => s.time))].filter((t) => t > args.time).sort();
+  // 2) nearest available slot later in the day (helpful UX). KB-18: bounded
+  // to +2h so a diner asking for 19:00 is never silently booked at 21:30 —
+  // if nothing is available in a reasonable window, fail loudly and let the
+  // diner pick another time themselves.
+  const toMinutes = (t: string) => {
+    const [h, m] = t.split(":").map(Number);
+    return h * 60 + m;
+  };
+  const requestedMin = toMinutes(args.time);
+  const laterTimes = [...new Set(slots.map((s) => s.time))]
+    .filter((t) => t > args.time && toMinutes(t) - requestedMin <= 120)
+    .sort();
   for (const time of laterTimes) {
     for (const section of candidates) {
       const slot = await findBestSlot(slots, section._id, time);
@@ -152,7 +175,15 @@ async function commitBooking(
     shiftedTime?: string;
   },
 ) {
-  const code = generateCode();
+  // KB-17: retry until the 6-char code is actually unique (by_code index is
+  // the invite-link lookup), so a (rare) collision can never make an invite
+  // ambiguous or leak the wrong booking to a guest.
+  let code = generateCode();
+  while (true) {
+    const clash = await ctx.db.query("bookings").withIndex("by_code", (q) => q.eq("code", code)).first();
+    if (!clash) break;
+    code = generateCode();
+  }
   const now = Date.now();
   const bookingId = await ctx.db.insert("bookings", {
     restaurantId: opts.restaurantId,
@@ -404,6 +435,11 @@ export const cancelBooking = mutation({
       if (slot) {
         // restore seats with a ceiling at total capacity
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+      } else {
+        // KB-16: the slot ledger entry is missing (deleted / pruned) — the
+        // seats can't be restored. Log it so it can be reconciled instead of
+        // silently leaking seats.
+        console.warn(`[KB-16] cancelBooking: no slot found to restore seats for booking ${bookingId}`);
       }
     }
     await ctx.db.patch(bookingId, { status: "cancelled", updatedAt: Date.now() });
@@ -486,6 +522,9 @@ export const updateStatus = mutation({
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+      } else {
+        // KB-16: missing slot ledger entry — log instead of leaking seats.
+        console.warn(`[KB-16] updateStatus: no slot found to restore seats for booking ${bookingId}`);
       }
     }
     await ctx.db.patch(bookingId, { status, updatedAt: Date.now() });
@@ -541,6 +580,9 @@ export const releaseBooking = mutation({
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+      } else {
+        // KB-16: missing slot ledger entry — log instead of leaking seats.
+        console.warn(`[KB-16] releaseBooking: no slot found to restore seats for booking ${bookingId}`);
       }
     }
     await ctx.db.patch(bookingId, { status: "cancelled", updatedAt: Date.now() });
@@ -595,6 +637,9 @@ export const confirmGuest = mutation({
       throw new Error("This invitation link is not valid.");
     }
     if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
+    // KB-03: guests can't join a booking at a disabled restaurant.
+    const restaurant = await ctx.db.get(booking.restaurantId);
+    if (restaurant?.disabled) throw new Error("This restaurant is currently unavailable.");
 
     const today = new Date();
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;

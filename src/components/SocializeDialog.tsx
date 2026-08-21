@@ -108,13 +108,16 @@ export function SocializeDialog({
   const isToday = booking?.date === today();
 
   const presences = useQuery(api.socialize.myPresence);
+  // KB-04/11: pass the diner's local date so the room's "today" matches the
+  // day setVisibility stored (otherwise a diner near midnight turns visibility
+  // on but is filtered out of the room).
   const diners = useQuery(
     api.socialize.visibleDiners,
-    booking ? { restaurantId: booking.restaurantId as never } : "skip",
+    booking ? { restaurantId: booking.restaurantId as never, clientDate: today() } : "skip",
   );
   const twins = useQuery(
     api.socialize.tasteTwins,
-    booking ? { restaurantId: booking.restaurantId as never } : "skip",
+    booking ? { restaurantId: booking.restaurantId as never, clientDate: today() } : "skip",
   );
   const catalog = useQuery(
     api.socialize.giftCatalog,

@@ -191,7 +191,11 @@ export default function MyBookings() {
     ? (bookings ?? []).find((b) => b._id === socializeBookingId) ?? null
     : null;
 
-  const nowKey = `${today()}T00:00`;
+  // KB-27: "upcoming" must compare against the current TIME, not midnight —
+  // a confirmed booking whose time already passed today belongs in the past
+  // section (previously it lingered under "Upcoming" all day).
+  const now = new Date();
+  const nowKey = `${today()}T${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
   const upcoming = (bookings ?? []).filter(
     (b) => b.status === "confirmed" && `${b.date}T${b.time}` >= nowKey,
   );
@@ -222,10 +226,20 @@ export default function MyBookings() {
     ? (bookings ?? []).find((b) => b._id === inviteBookingId) ?? null
     : null;
 
-  const reviewedIds = useMemo(
-    () => new Set((bookings ?? []).filter((b) => b.status !== "confirmed").map((b) => b._id)),
-    [bookings],
-  );
+  // KB-27: "reviewed" must come from the ACTUAL reviews, not from "not
+  // confirmed" — previously any completed-but-unreviewed booking was labeled
+  // "Reviewed" whenever the reviewable query hadn't populated yet. A booking
+  // is reviewed when it's completed AND absent from the reviewable (still
+  // needing a rating) list.
+  const reviewedIds = useMemo(() => {
+    if (reviewable === undefined) return new Set<string>();
+    const reviewableIds = new Set(reviewable.map((b) => b._id));
+    return new Set(
+      (bookings ?? [])
+        .filter((b) => b.status === "completed" && !reviewableIds.has(b._id))
+        .map((b) => b._id),
+    );
+  }, [bookings, reviewable]);
 
   // latest diner alert sent per booking (for the "you notified" state on cards)
   const latestAlertByBooking = useMemo(() => {
@@ -299,7 +313,9 @@ export default function MyBookings() {
     if (busyId) return;
     setBusyId(bookingId);
     try {
-      await checkIn({ bookingId: bookingId as never });
+      // KB-04: pass the diner's local date so day-of-visit checks near
+      // midnight aren't rejected by the UTC server clock.
+      await checkIn({ bookingId: bookingId as never, clientDate: today() });
       toast.success(t("bookings.checkedIn"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not check in.");
@@ -317,6 +333,7 @@ export default function MyBookings() {
         bookingId: notifyBookingId as never,
         type: alertType,
         message: note.trim() || undefined,
+        clientDate: today(), // KB-04: diner-local "today" for the past-date check
       });
       toast.success(t("bookings.notifiedRestaurant"));
       setNotifyBookingId(null);

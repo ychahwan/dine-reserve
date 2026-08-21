@@ -354,6 +354,8 @@ const schema = defineSchema(
       .index("by_user", ["userId"])
       .index("by_restaurant", ["restaurantId"])
       .index("by_restaurant_date", ["restaurantId", "date"])
+      .index("by_date", ["date"]) // KB-32: day-before reminder cron (reminders.ts)
+      .index("by_status_updated", ["status", "updatedAt"]) // KB-32: review-nudge pass
       .index("by_code", ["code"]), // invite-link lookups
 
     // FIFO booking-request queue. Every diner booking request enqueues here
@@ -577,7 +579,8 @@ const schema = defineSchema(
       createdAt: v.number(),
     })
       .index("by_user", ["userId"])
-      .index("by_user_read", ["userId", "read"]),
+      .index("by_user_read", ["userId", "read"])
+      .index("by_user_dedupe", ["userId", "dedupeKey"]), // KB-32: dedupe lookup
 
     // ---------- Loyalty points ledger (Idea #18) ----------
 

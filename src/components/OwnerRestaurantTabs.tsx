@@ -1,3 +1,13 @@
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -90,6 +100,23 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
   const [error, setError] = useState<string | null>(null);
   const [custom, setCustom] = useState({ date: today(), time: "19:00", sectionId: "__all__", note: "" });
   const [previewIdx, setPreviewIdx] = useState(0);
+  // KB-15: window.confirm is blocked in the sandboxed preview iframe.
+  const [deleteRuleConfirm, setDeleteRuleConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  const confirmDeleteRule = async () => {
+    if (!deleteRuleConfirm || deleting) return;
+    setDeleting(true);
+    try {
+      await deleteRule({ id: deleteRuleConfirm.id as never });
+      toast.success("Window deleted");
+      setDeleteRuleConfirm(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete window.");
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   const rules = data?.rules ?? [];
   const customSlots = data?.customSlots ?? [];
@@ -154,15 +181,7 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
     }
   };
 
-  const handleDeleteRule = async (id: string) => {
-    if (!window.confirm("Delete this window? Upcoming unbooked slots will be rebuilt.")) return;
-    try {
-      await deleteRule({ id: id as never });
-      toast.success("Window deleted");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete window.");
-    }
-  };
+  const handleDeleteRule = (r: (typeof rules)[number]) => setDeleteRuleConfirm({ id: r._id, name: r.name });
 
   const handleAddCustom = async () => {
     setError(null);
@@ -252,7 +271,7 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
                   <Button variant="ghost" size="icon-sm" aria-label="Edit rule" onClick={() => startEdit(r)}>
                     <Pencil className="size-4" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" aria-label="Delete rule" className="text-destructive" onClick={() => handleDeleteRule(r._id)}>
+                  <Button variant="ghost" size="icon-sm" aria-label="Delete rule" className="text-destructive" onClick={() => handleDeleteRule(r)}>
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
@@ -555,6 +574,39 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
           </div>
         )}
       </div>
+
+      {/* KB-15: in-app delete confirmation (window.confirm is blocked in the
+          sandboxed preview iframe) */}
+      <AlertDialog
+        open={!!deleteRuleConfirm}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteRuleConfirm(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">
+              Delete “{deleteRuleConfirm?.name}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              This service window is removed and upcoming unbooked slots are rebuilt.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDeleteRule();
+              }}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

@@ -11,7 +11,7 @@ import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { CheckCircle2, MapPin, Printer, QrCode, Users } from "lucide-react";
 import { useEffect, useState } from "react";
-import { dateLabel, formatDate, formatTime } from "@/lib/format";
+import { dateLabel, formatDate, formatTime, publicAppUrl } from "@/lib/format";
 
 /**
  * Booking receipt (Idea #6) — a professional, printable confirmation with a
@@ -56,7 +56,11 @@ export function BookingReceiptDialog({
     setQr(null);
     setQrError(false);
     if (!booking) return;
-    const url = `${window.location.origin}/invite/${booking.code}`;
+    // KB-13: inside the Capacitor WebView window.location.origin is
+    // https://localhost, which would make the printed/scanned QR point at an
+    // unreachable URL. publicAppUrl() prefers the real web origin and falls
+    // back to VITE_PUBLIC_APP_URL exactly for this case.
+    const url = `${publicAppUrl()}/invite/${booking.code}`;
     let cancelled = false;
     qrDataUrl(url)
       .then((d) => {

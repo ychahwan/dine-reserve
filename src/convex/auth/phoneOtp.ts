@@ -15,78 +15,17 @@ export async function generateOtpToken(): Promise<string> {
   return generateRandomString(random, alphabet, 6);
 }
 
+import { sendTwilioMessage } from "../twilio";
+
 /**
  * Send an SMS OTP via Twilio. Graceful no-op when Twilio isn't configured.
  * Shared by the phone-otp sign-in provider and the password-reset flow.
+ * KB-30: routes through the shared twilio.ts sender so the OTP path and the
+ * notification actions share one credentials/behavior implementation.
  */
 export async function sendOtpSms(phone: string, token: string): Promise<void> {
-  // Respect the TWILIO_ENABLED kill-switch, matching src/convex/sms.ts.
-  const enabled = process.env.TWILIO_ENABLED;
-  if (enabled !== undefined && enabled.toLowerCase() === "false") {
-    console.warn("[phoneOtp] TWILIO_ENABLED=false — skipping SMS OTP");
-    return;
-  }
-
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const apiKeySid = process.env.TWILIO_API_KEY_SID;
-  const apiKeySecret = process.env.TWILIO_API_KEY_SECRET;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
-  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  const from = process.env.TWILIO_FROM_NUMBER;
-
-  if (!accountSid || (!messagingServiceSid && !from)) {
-    console.warn("[phoneOtp] Twilio not configured — skipping SMS OTP");
-    return;
-  }
-
-  const authUser = apiKeySid || accountSid;
-  const authPass = apiKeySid ? apiKeySecret : authToken;
-  if (!authUser || !authPass) {
-    console.warn("[phoneOtp] Twilio auth incomplete — skipping SMS OTP");
-    return;
-  }
-
   const body = `Your Kamix verification code is: ${token}. It expires in 15 minutes.`;
-
-  // Build URLSearchParams properly to satisfy TS
-  const params = new URLSearchParams();
-  params.set("To", phone);
-  params.set("Body", body.slice(0, 1600));
-  if (messagingServiceSid) {
-    params.set("MessagingServiceSid", messagingServiceSid);
-  } else {
-    params.set("From", from!);
-  }  try {
-    // 10-second timeout so a hung Twilio connection never blocks the auth action.
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 10_000);
-    const res = await fetch(
-      `https://api.twilio.com/2010-04-01/Accounts/${accountSid}/Messages.json`,
-      {
-        method: "POST",
-        headers: {
-          Authorization:
-            "Basic " + btoa(`${authUser}:${authPass}`),
-          "Content-Type": "application/x-www-form-urlencoded",
-        },
-        body: params,
-        signal: controller.signal,
-      },
-    );
-    clearTimeout(timer);
-    if (!res.ok) {
-      console.error(
-        "[phoneOtp] Twilio SMS failed:",
-        res.status,
-        await res.text(),
-      );
-    }
-  } catch (e) {
-    console.error(
-      "[phoneOtp] Twilio SMS error:",
-      e instanceof Error ? e.message : e,
-    );
-  }
+  await sendTwilioMessage(phone, body);
 }
 
 export const phoneOtp = Phone({

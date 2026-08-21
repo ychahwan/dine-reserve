@@ -133,10 +133,17 @@ export const myPresence = query({
  * they're here).
  */
 export const visibleDiners = query({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
+  args: { restaurantId: v.id("restaurants"), clientDate: v.optional(v.string()) },
+  handler: async (ctx, { restaurantId, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
+
+    // KB-04/11: the room's "today" must match the day the diner actually set
+    // visibility for (their local date). setVisibility uses
+    // resolveTodayKey(clientDate) — these queries must use the same key or a
+    // diner near midnight turns visibility on but is filtered out of the
+    // room, making it look empty for everyone.
+    const today = resolveTodayKey(clientDate);
 
     // Authorization (SEC-03): only a diner attending this restaurant today
     // (or its owner) may see the Socialize room. Prevents any signed-in user
@@ -148,7 +155,6 @@ export const visibleDiners = query({
         .query("bookings")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .collect();
-      const today = todayKey();
       const attending = myBookings.some(
         (b) =>
           b.restaurantId === restaurantId &&
@@ -162,7 +168,6 @@ export const visibleDiners = query({
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
       .collect();
-    const today = todayKey();
     const visible = presences.filter(
       (p) => p.visible && p.userId !== userId,
     );
@@ -204,10 +209,13 @@ export const visibleDiners = query({
  * caller is attending today are ever returned.
  */
 export const tasteTwins = query({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
+  args: { restaurantId: v.id("restaurants"), clientDate: v.optional(v.string()) },
+  handler: async (ctx, { restaurantId, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
+
+    // KB-04/11: same local-date key as visibleDiners / setVisibility.
+    const today = resolveTodayKey(clientDate);
 
     const restaurant = await ctx.db.get(restaurantId);
     const isOwner = !!restaurant && restaurant.ownerId === userId;
@@ -216,7 +224,6 @@ export const tasteTwins = query({
         .query("bookings")
         .withIndex("by_user", (q) => q.eq("userId", userId))
         .collect();
-      const today = todayKey();
       const attending = myBookings.some(
         (b) => b.restaurantId === restaurantId && b.status === "confirmed" && b.date === today,
       );
@@ -236,7 +243,6 @@ export const tasteTwins = query({
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
       .collect();
-    const today = todayKey();
     const visible = presences.filter((p) => p.visible && p.userId !== userId);
     const [users, bookings] = await Promise.all([
       Promise.all(visible.map((p) => safeGet<Doc<"users">>(ctx, p.userId))),
