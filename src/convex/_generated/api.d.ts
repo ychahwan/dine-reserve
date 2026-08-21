@@ -20,6 +20,7 @@ import type * as bookings from "../bookings.js";
 import type * as demoRules from "../demoRules.js";
 import type * as dinerNotify from "../dinerNotify.js";
 import type * as dining from "../dining.js";
+import type * as erasure from "../erasure.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
 import type * as loyalty from "../loyalty.js";
@@ -58,6 +59,7 @@ declare const fullApi: ApiFromModules<{
   demoRules: typeof demoRules;
   dinerNotify: typeof dinerNotify;
   dining: typeof dining;
+  erasure: typeof erasure;
   helpers: typeof helpers;
   http: typeof http;
   loyalty: typeof loyalty;

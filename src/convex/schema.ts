@@ -510,6 +510,18 @@ const schema = defineSchema(
       .index("by_booking", ["bookingId"])
       .index("by_user", ["userId"]),
 
+    // Pending self-service account deletion (GDPR erasure). The diner
+    // requests deletion; we SMS an OTP to their phone and store the pending
+    // request here. Only after the code is verified does the cascade run.
+    // Same shape as phoneChangeRequests so the confirmation UX is identical.
+    accountDeleteRequests: defineTable({
+      userId: v.id("users"),
+      codeHash: v.string(), // sha256 of the 6-digit OTP sent to the user's phone
+      expiresAt: v.number(), // ms epoch; code is only valid until then
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"]),
+
     // Pending phone-number change. A signed-in user requests a change to a
     // new number; we SMS an OTP to the NEW number and store the pending
     // change here. Only after the code is verified does the phone actually

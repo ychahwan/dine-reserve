@@ -14,6 +14,7 @@ import { ROLES, SEAT_KIND, DINING_PREFS } from "./schema";
 import { parseOrThrow } from "./validation";
 import { checkRateLimit } from "./rateLimit";
 import { generateOtpToken } from "./auth/phoneOtp";
+import { cascadeDeleteUser } from "./erasure";
 
 /**
  * Normalize a phone for comparison/lookup: strip spaces, dashes, parens.
@@ -430,6 +431,107 @@ export const confirmPhoneChange = mutation({
     await ctx.db.patch(userId, { phone: newPhone });
     await ctx.db.delete(pending._id);
     return await ctx.db.get(userId);
+  },
+});
+
+/**
+ * Self-service account deletion — step 1 (GDPR erasure).
+ *
+ * Sends an OTP to the user's OWN phone number (proving they still control
+ * the account's login identity) and records a pending deletion request.
+ * Nothing is deleted until deleteAccount verifies the code.
+ *
+ * Not available to platform admins (an admin must never be able to delete
+ * the platform admin account via this flow) or to owners who still own
+ * restaurants (delete/reassign those first — same policy as admin.deleteUser).
+ */
+export const startAccountDelete = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found.");
+    if (user.role === "admin") {
+      throw new Error("Admins cannot delete their account here.");
+    }
+    const owned = await ctx.db
+      .query("restaurants")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    if (owned.length > 0) {
+      throw new Error("You still own restaurants — delete those first (Owner dashboard).");
+    }
+    const phone = user.phone;
+    if (!phone) throw new Error("No phone number on this account.");
+
+    await checkRateLimit(ctx, {
+      key: "startAccountDelete",
+      userId,
+      limit: 5,
+      windowMs: 10 * 60_000, // 5 requests per 10 minutes
+    });
+
+    // Replace any prior pending request for this user.
+    const prior = await ctx.db
+      .query("accountDeleteRequests")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .first();
+    if (prior) await ctx.db.delete(prior._id);
+
+    const code = await generateOtpToken();
+    const codeHash = encodeHexLowerCase(await sha256(new TextEncoder().encode(code)));
+    await ctx.db.insert("accountDeleteRequests", {
+      userId,
+      codeHash,
+      expiresAt: Date.now() + 15 * 60_000, // 15 minutes
+      createdAt: Date.now(),
+    });
+
+    // Send the code to the user's own phone (scheduled like other SMS sends).
+    // Graceful no-op when Twilio is off.
+    await ctx.scheduler.runAfter(0, api.sms.sendOtpSms, { phone, code });
+    return { started: true };
+  },
+});
+
+/**
+ * Self-service account deletion — step 2. Verifies the OTP sent to the
+ * user's own phone, then runs the same GDPR cascade as the admin console
+ * (bookings, orders, reviews, loyalty, auth accounts + sessions, …). The
+ * user is signed out by the session invalidation and can never sign in
+ * again.
+ */
+export const deleteAccount = mutation({
+  args: { code: v.string() },
+  handler: async (ctx, { code }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found.");
+    if (user.role === "admin") {
+      throw new Error("Admins cannot delete their account here.");
+    }
+
+    const pending = await ctx.db
+      .query("accountDeleteRequests")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .first();
+    if (!pending) throw new Error("No pending deletion. Request a code first.");
+    if (pending.expiresAt < Date.now()) {
+      await ctx.db.delete(pending._id);
+      throw new Error("That code has expired. Request a new one.");
+    }
+
+    const codeHash = encodeHexLowerCase(await sha256(new TextEncoder().encode(code)));
+    if (codeHash !== pending.codeHash) {
+      throw new Error("Incorrect code. Try again.");
+    }
+
+    // Single use: delete the request, then wipe everything.
+    await ctx.db.delete(pending._id);
+    await cascadeDeleteUser(ctx, userId);
+    return { deleted: true };
   },
 });
 

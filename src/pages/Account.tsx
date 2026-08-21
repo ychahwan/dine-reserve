@@ -26,6 +26,7 @@ import {
   Sofa,
   Sparkles,
   Store,
+  Trash2,
   UserRound,
   Wind,
   Users,
@@ -84,6 +85,14 @@ export default function Account() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwBusy, setPwBusy] = useState(false);
   const [pwError, setPwError] = useState<string | null>(null);
+
+  // ── Delete my account (OTP to own phone, GDPR erasure) ──
+  const startAccountDelete = useMutation(api.users.startAccountDelete);
+  const deleteAccount = useMutation(api.users.deleteAccount);
+  const [delStep, setDelStep] = useState<"idle" | "code-sent" | "verifying">("idle");
+  const [delCode, setDelCode] = useState("");
+  const [delBusy, setDelBusy] = useState(false);
+  const [delError, setDelError] = useState<string | null>(null);
 
   useEffect(() => {
     if (user?.name !== undefined) setName(user.name ?? "");
@@ -196,6 +205,43 @@ export default function Account() {
   const handleSignOut = async () => {
     await signOut();
     navigate("/");
+  };
+
+  // Send an OTP to the user's OWN phone — nothing is deleted until the code
+  // is verified. This proves control of the login identity before erasure.
+  const handleStartAccountDelete = async () => {
+    setDelBusy(true);
+    setDelError(null);
+    try {
+      await startAccountDelete();
+      setDelStep("code-sent");
+      setDelCode("");
+      toast.success(t("account.delCodeSent"));
+    } catch (err) {
+      setDelError(err instanceof Error ? err.message : t("account.delErrSend"));
+    } finally {
+      setDelBusy(false);
+    }
+  };
+
+  // Verify the OTP → cascade-delete the account → sign out and go home.
+  const handleConfirmAccountDelete = async () => {
+    if (delCode.length !== 6) return;
+    setDelBusy(true);
+    setDelError(null);
+    try {
+      await deleteAccount({ code: delCode });
+      toast.success(t("account.delDone"));
+      setDelStep("idle");
+      setDelCode("");
+      await signOut();
+      navigate("/");
+    } catch (err) {
+      setDelError(err instanceof Error ? err.message : t("account.delErrConfirm"));
+      setDelCode("");
+    } finally {
+      setDelBusy(false);
+    }
   };
 
   const isOwner = user?.role === "owner";
@@ -684,6 +730,104 @@ export default function Account() {
         <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
           <ShieldCheck className="size-3.5 text-primary" /> {t("account.footerNote")}
         </p>
+
+        {/* Danger zone — self-service account deletion (GDPR erasure).
+            Owners can't use it: they must delete their restaurants first,
+            and that's a platform-admin action. */}
+        {!isOwner && (
+        <Card className="mt-4 rounded-2xl border-destructive/30 p-0 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base text-destructive">
+              <Trash2 className="size-4" /> {t("account.delTitle")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <p className="text-sm text-muted-foreground">{t("account.delHint")}</p>
+            {delStep === "idle" ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full border-destructive/40 text-destructive hover:bg-destructive/10"
+                onClick={handleStartAccountDelete}
+                disabled={delBusy}
+              >
+                {delBusy ? (
+                  <Loader2 className="mr-2 size-4 animate-spin" />
+                ) : (
+                  <Trash2 className="mr-2 size-4" />
+                )}
+                {t("account.delButton")}
+              </Button>
+            ) : (
+              <div className="space-y-3">
+                <p className="text-xs text-muted-foreground">
+                  <Trans
+                    i18nKey="account.delEnterCode"
+                    values={{ phone: user?.phone ?? "" }}
+                    components={{ strong: <strong /> }}
+                  />
+                </p>
+                <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+                  <InputOTP
+                    value={delCode}
+                    onChange={setDelCode}
+                    maxLength={6}
+                    disabled={delBusy}
+                  >
+                    <InputOTPGroup>
+                      {Array.from({ length: 6 }).map((_, index) => (
+                        <InputOTPSlot key={index} index={index} />
+                      ))}
+                    </InputOTPGroup>
+                  </InputOTP>
+                  <div className="flex gap-2">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setDelStep("idle");
+                        setDelError(null);
+                        setDelCode("");
+                      }}
+                      disabled={delBusy}
+                    >
+                      {t("common.back")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={handleConfirmAccountDelete}
+                      disabled={delBusy || delCode.length !== 6}
+                    >
+                      {delBusy && <Loader2 className="mr-2 size-4 animate-spin" />}
+                      {t("account.delConfirm")}
+                    </Button>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {t("auth.didntGet")}{" "}
+                  <Button
+                    type="button"
+                    variant="link"
+                    className="h-auto p-0 text-xs"
+                    onClick={handleStartAccountDelete}
+                    disabled={delBusy}
+                  >
+                    {t("account.resendCode")}
+                  </Button>
+                </p>
+              </div>
+            )}
+            {delError && (
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {delError}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+        )}
 
         {isLoading && (
           <div className="flex justify-center pt-4">

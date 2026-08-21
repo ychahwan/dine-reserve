@@ -262,6 +262,15 @@
     "errPhoneConfirm": "Incorrect code. Try again.",
     "phoneUpdated": "Phone updated to {{phone}}",
     "codeSent": "Code sent to the new number",
+    "delTitle": "Delete my account",
+    "delHint": "Permanently erase your account, bookings, reviews and all personal data (GDPR). We text a one-time code to your phone to confirm it's really you.",
+    "delButton": "Delete my account",
+    "delEnterCode": "We texted a code to <1>{{phone}}</1>. Enter it to permanently delete your account and all your data. This cannot be undone.",
+    "delConfirm": "Delete forever",
+    "delCodeSent": "Code sent to your phone",
+    "delDone": "Your account has been deleted.",
+    "delErrSend": "Could not send the code.",
+    "delErrConfirm": "Incorrect code. Try again.",
     "errFav": "Could not update favorites."
   },
   "bookings": {

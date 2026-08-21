@@ -262,6 +262,15 @@
     "errPhoneConfirm": "Code incorrect. Réessayez.",
     "phoneUpdated": "Téléphone mis à jour : {{phone}}",
     "codeSent": "Code envoyé au nouveau numéro",
+    "delTitle": "Supprimer mon compte",
+    "delHint": "Effacez définitivement votre compte, vos réservations, vos avis et toutes vos données personnelles (RGPD). Nous envoyons un code à usage unique sur votre téléphone pour confirmer qu'il s'agit bien de vous.",
+    "delButton": "Supprimer mon compte",
+    "delEnterCode": "Nous avons envoyé un code au <1>{{phone}}</1>. Saisissez-le pour supprimer définitivement votre compte et toutes vos données. Cette action est irréversible.",
+    "delConfirm": "Supprimer pour toujours",
+    "delCodeSent": "Code envoyé sur votre téléphone",
+    "delDone": "Votre compte a été supprimé.",
+    "delErrSend": "Impossible d'envoyer le code.",
+    "delErrConfirm": "Code incorrect. Réessayez.",
     "errFav": "Impossible de mettre à jour les favoris."
   },
   "bookings": {
