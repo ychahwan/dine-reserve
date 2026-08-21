@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { api } from "./_generated/api";
+import { api, internal } from "./_generated/api";
 import { internalMutation, mutation, query, MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { SEAT_KIND } from "./schema";
@@ -470,6 +470,8 @@ export const updateStatus = mutation({
         source: "booking_completed",
         sourceId: `booking:${booking._id}`,
       });
+      // Idea #4: nudge the diner to review the visit (fire-and-forget)
+      await ctx.scheduler.runAfter(0, internal.dinerNotify.onBookingCompleted, { bookingId });
     }
 
     // cancelling returns seats to availability
@@ -622,6 +624,11 @@ export const confirmGuest = mutation({
     await ctx.db.patch(bookingId, {
       guests: [...guests, { name: cleanName, userId, confirmedAt: Date.now() }],
       updatedAt: Date.now(),
+    });
+    // Idea #4: tell the host their friend confirmed (fire-and-forget)
+    await ctx.scheduler.runAfter(0, internal.dinerNotify.onGuestConfirmed, {
+      bookingId,
+      guestName: cleanName,
     });
     return await ctx.db.get(bookingId);
   },

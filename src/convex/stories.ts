@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
 
@@ -45,6 +46,8 @@ export const post = mutation({
       emoji: emoji?.trim().slice(0, 4) || undefined,
       createdAt: Date.now(),
     });
+    // Idea #4: notify diners who saved this restaurant (fire-and-forget)
+    await ctx.scheduler.runAfter(0, internal.dinerNotify.onStoryPosted, { storyId: id });
     return await ctx.db.get(id);
   },
 });

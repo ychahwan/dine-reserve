@@ -49,10 +49,12 @@ Innovative features and improvements, organized by impact and implementation com
 
 ---
 
-### 4. Smart Notifications — Contextual Push — ⏳ DEFERRED
-**What:** Replace generic reminders with AI-aware contextual nudges.
+### 4. Smart Notifications — Contextual Push — ✅ DONE (in-app inbox)
+**What:** Contextual, personalized nudges built from real Kamix activity, delivered to an in-app inbox (bell + unread badge) with an optional SMS mirror for time-sensitive types (waitlist freed, booking reminder).
 
-**Why deferred:** needs push-notification infrastructure (FCM/APNs via Capacitor), optional calendar + weather integrations, and a scheduling service. The notification *table* and SMS plumbing already exist.
+**Built:** `dinerNotifications` table + `dinerNotify` module with 6 nudge types (`favorite_story`, `reengage`, `guest_joined`, `review_nudge`, `waitlist_freed`, `booking_reminder`), deduped by stable key. Hooks fire from `stories.post`, `confirmGuest`, booking completion, `releaseBooking`, plus a daily cron (`dailyNudges`) for lapsed-diner re-engagement and review nudges. UI: `/notifications` feed page + bell with unread badge in the customer shell.
+
+**Remaining for real push:** device push (FCM/APNs via Capacitor) — the inbox engine is the data layer it would hook into.
 
 **Examples:**
 - "Trullo is 10 min walk from your office — book for 12:30..."

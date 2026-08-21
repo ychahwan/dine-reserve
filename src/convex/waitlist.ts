@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, MutationCtx, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { parseOrThrow, waitlistJoinSchema } from "./validation";
 
@@ -75,6 +76,13 @@ export async function notifyWaitlistForFreedSeats(
 
   await ctx.db.patch(winner._id, { status: "notified", notifiedAt: Date.now() });
   const restaurant = await ctx.db.get(opts.restaurantId);
+  // Idea #4: mirror the freed table into the diner's inbox (fire-and-forget)
+  await ctx.scheduler.runAfter(0, internal.dinerNotify.mirrorWaitlistFreed, {
+    waitlistId: winner._id,
+    restaurantId: opts.restaurantId,
+    date: opts.date,
+    time: opts.time,
+  });
   return {
     to: winner.phone ?? "",
     restaurantName: restaurant?.name ?? "",

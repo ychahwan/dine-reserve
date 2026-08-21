@@ -18,6 +18,7 @@ import type * as auth_phoneOtp from "../auth/phoneOtp.js";
 import type * as availability from "../availability.js";
 import type * as bookings from "../bookings.js";
 import type * as demoRules from "../demoRules.js";
+import type * as dinerNotify from "../dinerNotify.js";
 import type * as dining from "../dining.js";
 import type * as helpers from "../helpers.js";
 import type * as http from "../http.js";
@@ -55,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   availability: typeof availability;
   bookings: typeof bookings;
   demoRules: typeof demoRules;
+  dinerNotify: typeof dinerNotify;
   dining: typeof dining;
   helpers: typeof helpers;
   http: typeof http;

@@ -1,6 +1,9 @@
 import { Button } from "@/components/ui/button";
 import { useAuth } from "@/hooks/use-auth";
+import { api } from "@/convex/_generated/api";
+import { useQuery } from "convex/react";
 import {
+  Bell,
   CalendarCheck,
   Compass,
   LogOut,
@@ -20,6 +23,7 @@ const TABS = [
 export function CustomerShell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
+  const unread = useQuery(api.dinerNotify.unreadCount);
 
   const handleSignOut = async () => {
     await signOut();
@@ -42,6 +46,16 @@ export function CustomerShell({ children }: { children: ReactNode }) {
           <span className="font-semibold tracking-tight">Kamix</span>
         </Link>
         <div className="flex items-center gap-1">
+          <Link to="/notifications" aria-label="Notifications" className="relative">
+            <span className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground">
+              <Bell className="size-4.5" />
+            </span>
+            {unread !== undefined && unread > 0 && (
+              <span className="absolute right-0.5 top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold leading-4 text-primary-foreground">
+                {unread > 9 ? "9+" : unread}
+              </span>
+            )}
+          </Link>
           <Button
             variant="ghost"
             size="icon-sm"

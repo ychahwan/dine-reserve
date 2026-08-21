@@ -530,6 +530,35 @@ const schema = defineSchema(
       .index("by_restaurant", ["restaurantId", "createdAt"])
       .index("by_created", ["createdAt"]),
 
+    // ---------- Diner notification inbox (Idea #4) ----------
+
+    // Contextual, personalized nudges for the diner: a favorite restaurant
+    // posted a story, it's been a while since their last visit, a friend
+    // confirmed a seat on their booking, a table on their waitlist freed up,
+    // or a visit is ready to be reviewed. Shown in the app's bell feed;
+    // high-value types can also be SMS-mirrored (see notifyDiner).
+    dinerNotifications: defineTable({
+      userId: v.id("users"),
+      type: v.union(
+        v.literal("favorite_story"),
+        v.literal("reengage"),
+        v.literal("guest_joined"),
+        v.literal("review_nudge"),
+        v.literal("waitlist_freed"),
+        v.literal("booking_reminder"),
+      ),
+      title: v.string(),
+      body: v.string(),
+      link: v.optional(v.string()), // app route, e.g. /restaurant/:id
+      // dedupe key: the same story / booking / waitlist must never produce
+      // two identical rows for the same diner.
+      dedupeKey: v.string(),
+      read: v.boolean(),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_user_read", ["userId", "read"]),
+
     // ---------- Loyalty points ledger (Idea #18) ----------
 
     // Idempotent credit ledger — one row per (user, sourceId) so a booking

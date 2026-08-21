@@ -29,4 +29,13 @@ app.crons.cron(
   "reminders:sendTomorrowReminders",
 );
 
+// Smart contextual nudges (Idea #4): every morning at 09:00 UTC, re-engage
+// diners who haven't visited in a while when their favorite restaurants have
+// fresh stories, and gently nudge them to review completed visits.
+app.crons.cron(
+  "diner-contextual-nudges",
+  { hourUTC: 9, minuteUTC: 0 },
+  "dinerNotify:dailyNudges",
+);
+
 export default app;

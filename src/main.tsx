@@ -26,6 +26,7 @@ const AdminTag = lazy(() => import("./pages/admin/AdminTag.tsx"));
 const Explore = lazy(() => import("./pages/Explore.tsx"));
 const RestaurantDetail = lazy(() => import("./pages/RestaurantDetail.tsx"));
 const MyBookings = lazy(() => import("./pages/MyBookings.tsx"));
+const Notifications = lazy(() => import("./pages/Notifications.tsx"));
 const Account = lazy(() => import("./pages/Account.tsx"));
 const OwnerDashboard = lazy(() => import("./pages/OwnerDashboard.tsx"));
 const OwnerRestaurant = lazy(() => import("./pages/OwnerRestaurant.tsx"));
@@ -176,6 +177,14 @@ createRoot(document.getElementById("root")!).render(
                 element={
                   <RequireAuth>
                     <MyBookings />
+                  </RequireAuth>
+                }
+              />
+              <Route
+                path="/notifications"
+                element={
+                  <RequireAuth>
+                    <Notifications />
                   </RequireAuth>
                 }
               />
