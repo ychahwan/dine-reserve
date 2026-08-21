@@ -57,7 +57,7 @@ export const recommendDinner = action({
 
     // ── 3. Call Gemini ─────────────────────────────────────────────────
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
     const prompt = buildPrompt(query, context, { date, partySize });
 
@@ -157,7 +157,7 @@ export const ownerInsights = action({
     };
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-2.0-flash" });
+    const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
     const prompt = `You are Kamix Ops, a restaurant operations advisor for Lebanon.
 Analyze this restaurant's real operating data and propose concrete, prioritized improvements.
 

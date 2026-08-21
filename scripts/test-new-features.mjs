@@ -134,11 +134,11 @@ async function main() {
     ok("predict returns", !!pred, pred?.message ?? "no message");
     ok("predict has likelihood", pred === null || typeof pred.likelySoldOut === "number");
 
-    // ── AI actions: graceful without key ─────────────────────────────────
+    // ── AI actions (needs GEMINI_API_KEY on the deployment) ─────────────
     console.log("\n── AI actions (ownerInsights / recommendDinner) ──");
     try {
       const ai = ownerAny("ai:ownerInsights", { restaurantId: restaurant._id, days: 30 }, "action");
-      ok("ownerInsights returns", !!ai, ai?.summary?.slice(0, 60) ?? "no summary");
+      ok("ownerInsights returns", !!ai && Array.isArray(ai.insights), ai?.summary?.slice(0, 60) ?? "no summary");
     } catch (e) {
       ok("ownerInsights fails gracefully without key", /GEMINI|configured/i.test(e.message), e.message.slice(0, 90));
     }
