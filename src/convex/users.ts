@@ -15,8 +15,13 @@ import { parseOrThrow } from "./validation";
 import { checkRateLimit } from "./rateLimit";
 import { generateOtpToken } from "./auth/phoneOtp";
 
-/** Normalize a phone for comparison/lookup: strip spaces, dashes, parens. */
-function normalizePhone(raw: string): string {
+/**
+ * Normalize a phone for comparison/lookup: strip spaces, dashes, parens.
+ * Used on BOTH sides of lookups (input and stored value) so that
+ * `+961 76 683 661`, `+961-76-683-661` and `+96176683661` all resolve to the
+ * same identity.
+ */
+export function normalizePhone(raw: string): string {
   return raw.trim().replace(/[\s\-()]/g, "");
 }
 
@@ -46,17 +51,31 @@ const profilePhoneSchema = z.string().trim().max(20, "Phone number is too long."
 export const hasPasswordAccount = query({
   args: { phone: v.string() },
   handler: async (ctx, { phone }) => {
-    // Normalize: trim, strip spaces/hyphens/parens, collapse to a canonical
-    // form so equivalent phone formats resolve to the same account lookup.
-    const normalized = phone.trim().replace(/[\s\-()]/g, "");
+    const normalized = normalizePhone(phone);
     if (!normalized) return { exists: false };
+
+    // Fast path: exact indexed lookup on the canonical form. New accounts
+    // are always stored canonical, so this hits for them.
     const account = await ctx.db
       .query("authAccounts")
       .withIndex("providerAndAccountId", (q) =>
         q.eq("provider", "password").eq("providerAccountId", normalized),
       )
       .first();
-    return { exists: account !== null };
+    if (account) return { exists: true };
+
+    // Fallback: older accounts may have been stored verbatim (e.g. the OTP
+    // provider saved "+961 71 123 456" with spaces). Compare normalized
+    // values so those users still route to password login, not OTP.
+    const passwordAccounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("providerAndAccountId", (q) => q.eq("provider", "password"))
+      .collect();
+    return {
+      exists: passwordAccounts.some(
+        (a) => normalizePhone(a.providerAccountId) === normalized,
+      ),
+    };
   },
 });
 
@@ -216,8 +235,11 @@ export const setPassword = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
     const user = await ctx.db.get(userId);
-    const phone = user?.phone;
-    if (!phone) throw new Error("No phone on this account.");
+    if (!user?.phone) throw new Error("No phone on this account.");
+    // Always store the password account under the CANONICAL phone so the
+    // verbatim auth-library lookup (signIn + retrieveAccount) matches
+    // regardless of how the user formats their number.
+    const phone = normalizePhone(user.phone);
 
     const newPassword = args.newPassword;
     if (newPassword.length < 8) {

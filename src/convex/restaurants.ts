@@ -105,6 +105,24 @@ async function restaurantRating(ctx: QueryCtx, restaurantId: Id<"restaurants">) 
  * `dietary` filters restaurants that serve at least one available menu item
  * tagged with that label (e.g. "Vegetarian", "Halal", "Gluten-free").
  */
+/**
+ * Lightweight public platform stats for the landing page: how many
+ * restaurants are actually on the platform (not a hard-coded claim) and a
+ * few optional crowd-pleasers. Public (no auth) on purpose — it's the
+ * marketing homepage.
+ */
+export const stats = query({
+  args: {},
+  handler: async (ctx) => {
+    const restaurants = await ctx.db.query("restaurants").collect();
+    const cities = new Set(restaurants.map((r) => r.city).filter(Boolean));
+    return {
+      restaurantCount: restaurants.length,
+      cityCount: cities.size,
+    };
+  },
+});
+
 export const search = query({
   args: {
     q: v.optional(v.string()),

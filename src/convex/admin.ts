@@ -5,6 +5,7 @@ import { mutation, MutationCtx, query } from "./_generated/server";
 import { FEATURES } from "./schema";
 import { parseOrThrow, restaurantArgsSchema } from "./validation";
 import { checkRateLimit } from "./rateLimit";
+import { normalizePhone } from "./users";
 
 /**
  * Platform administrator.
@@ -145,15 +146,18 @@ export const registerRestaurant = mutation({
     }
     if (!args.ownerPhone.trim()) throw new Error("Owner phone is required.");
     if (!args.ownerName.trim()) throw new Error("Owner name is required.");
+    // Store the owner under the canonical phone so login (verbatim auth-library
+    // lookup) and hasPasswordAccount routing agree regardless of formatting.
+    const ownerPhone = normalizePhone(args.ownerPhone);
 
     // Create (or link) the owner's password account. shouldLinkViaPhone links
     // to an existing phone-verified user when one exists.
     const { user } = await createAccount(ctx as never, {
       provider: "password",
-      account: { id: args.ownerPhone.trim(), secret: args.tempPassword },
+      account: { id: ownerPhone, secret: args.tempPassword },
       profile: {
-        email: args.ownerPhone.trim(),
-        phone: args.ownerPhone.trim(),
+        email: ownerPhone,
+        phone: ownerPhone,
         ...(args.ownerName.trim() ? { name: args.ownerName.trim().slice(0, 80) } : {}),
       },
       shouldLinkViaEmail: false,
@@ -165,7 +169,7 @@ export const registerRestaurant = mutation({
       onboarded: true,
       mustChangePassword: true,
       name: args.ownerName.trim().slice(0, 80),
-      phone: args.ownerPhone.trim(),
+      phone: ownerPhone,
     });
 
     const restaurantId = await ctx.db.insert("restaurants", {

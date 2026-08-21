@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "web:hosted": "bash scripts/web-hosted.sh",
+    "web:admin": "bash scripts/web-admin.sh",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "format": "prettier --write .",

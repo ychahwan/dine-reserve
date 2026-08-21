@@ -16,7 +16,7 @@ import {
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
@@ -43,6 +43,11 @@ function resolveRedirectAfterAuth(
   return fallback;
 }
 
+/** Canonical phone form: strip spaces, dashes, parens (matches backend). */
+function normalizePhone(raw: string): string {
+  return raw.trim().replace(/[\s\-()]/g, "");
+}
+
 type AuthStep =
   | "enter-phone"
   | { phone: string; mode: "password" }
@@ -56,7 +61,14 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
 
-  const [step, setStep] = useState<AuthStep>("enter-phone");
+  // The landing page's hero phone box links here as /auth?phone=… — start
+  // straight at the OTP/password step instead of making the user re-type it.
+  // Normalize so signIn and the backend lookup use the same canonical form.
+  const rawPrefill = searchParams.get("phone")?.trim();
+  const prefillPhone = rawPrefill ? normalizePhone(rawPrefill) : undefined;
+  const [step, setStep] = useState<AuthStep>(
+    prefillPhone ? { phone: prefillPhone, mode: "otp" } : "enter-phone",
+  );
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -113,7 +125,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     otpSentRef.current = false;
     const formData = new FormData(event.currentTarget);
-    const phoneValue = formData.get("phone") as string;
+    const phoneValue = normalizePhone(formData.get("phone") as string);
     phoneRef.current = phoneValue;
 
     // Set step to trigger the hasPassword query
@@ -205,14 +217,19 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
-  // Step 3: Set password after first OTP login
+  // Step 3: Set password after first OTP login.
+  // The user is ALREADY signed in via OTP at this point, so we add the
+  // password to the SAME account with users.setPassword (which links via
+  // shouldLinkViaPhone). Calling signIn("password", flow=signUp) here would
+  // create a SECOND, separate user — and signing in with the password later
+  // would land on that empty user instead of the onboarded profile.
+  const setPasswordMutation = useMutation(api.users.setPassword);
   const handleSetPassword = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     setIsLoading(true);
     setError(null);
     try {
-      const formData = new FormData(event.currentTarget);
-      await signIn("password", formData);
+      await setPasswordMutation({ newPassword: password });
       navigate(resolveTarget());
     } catch (err) {
       console.error("Set password error:", err);

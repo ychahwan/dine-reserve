@@ -15,6 +15,7 @@ const BASE = "http://localhost:5173";
 const DEPLOY = "https://canny-leopard-341.convex.cloud";
 
 const ADMIN_PHONE = "+96176683661";
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD ?? "BeityAdmin2026!";
 const OWNER_PHONE = "+96178882222";
 const OWNER_PASSWORD = "OmarNewPass456!";
 
@@ -69,7 +70,7 @@ async function run() {
   const browser = await chromium.launch({ headless: true });
 
   // ════════════════════════════════════════════════════════════════
-  // PROFILE 1: Landing page (public)
+  // PROFILE 1: Landing page (public) — lean hero, phone-first signup
   // ════════════════════════════════════════════════════════════════
   console.log("\n── Profile 1: Landing page ──");
   {
@@ -82,17 +83,42 @@ async function run() {
     text.includes("Kamix") ? ok("Brand renders") : fail("Brand", "Kamix not found");
     text.includes("Sign in") ? ok("Nav has 'Sign in' for existing users") : fail("Sign in", "not found");
     text.includes("Get started") ? ok("Nav has 'Get started'") : fail("Get started", "not found");
-    text.includes("Sign in to your account") ? ok("Hero has 'Sign in to your account' CTA") : fail("Sign in CTA", "not found");
+    text.includes("Book your table") ? ok("Hero headline renders") : fail("Hero headline", "not found");
     text.includes("How it works") ? ok("'How it works' section renders") : fail("How it works", "not found");
+    text.includes("Already have an account") ? ok("Hero offers 'Sign in' for existing users") : fail("Sign in offer", "not found");
 
-    const signInLink = page.getByRole("link", { name: /Sign in to your account/ }).first();
-    if (await signInLink.count()) {
-      await signInLink.click();
-      await page.waitForURL("**/auth", { timeout: 8000 });
-      page.url().includes("/auth") ? ok("Sign-in CTA navigates to /auth") : fail("Sign-in CTA nav", page.url());
-    } else {
-      fail("Sign-in CTA", "link not clickable");
-    }
+    // Real partner count must come from the backend, not a hard-coded number.
+    const partnerMatch = text.match(/(\d+)\s+partner restaurant/);
+    const count = partnerMatch ? parseInt(partnerMatch[1], 10) : NaN;
+    Number.isInteger(count) && count > 0
+      ? ok(`Real partner count rendered: ${count}`)
+      : fail("Partner count", `no live number found in ${text.slice(0, 300)}`);
+    // Socialize section
+    text.includes("Socialize") ? ok("'Socialize' section renders") : fail("Socialize", "not found");
+    text.includes("Dining alone doesn't mean dining solo")
+      ? ok("Socialize headline renders")
+      : fail("Socialize headline", "not found");
+    text.includes("Who's dining")
+      ? ok("Socialize 'Who's dining' mock renders")
+      : fail("Socialize mock", "not found");
+
+    // Hero phone entry → signup (fresh number drops straight into OTP step)
+    const phoneInput = page.locator('input[aria-label="Phone number"]');
+    (await phoneInput.count()) > 0
+      ? ok("Hero phone entry box renders")
+      : fail("Hero phone entry", "missing");
+    const freshPhone = `+9617883${String(Date.now()).slice(-5)}`;
+    await phoneInput.fill(freshPhone);
+    await page.getByRole("button", { name: /Get started/ }).first().click();
+    await page.waitForURL("**/auth**", { timeout: 8000 });
+    const authUrl = page.url();
+    authUrl.includes("/auth") ? ok("Hero Get started → /auth") : fail("Hero nav", authUrl);
+    authUrl.includes(encodeURIComponent(freshPhone))
+      ? ok("Phone passed to /auth?phone=…")
+      : fail("Phone prefill", `missing ${freshPhone} in ${authUrl}`);
+    const otpStep = await waitForText(page, "Enter the code sent to", 15000);
+    otpStep ? ok("Signup: OTP step shown (prefilled phone)") : fail("Signup OTP step", "not shown");
+
     await page.screenshot({ path: "/tmp/ss-landing.png", fullPage: true });
     await ctx.close();
   }
@@ -115,9 +141,9 @@ async function run() {
   }
 
   // ════════════════════════════════════════════════════════════════
-  // PROFILE 3: Admin (+96176683661) — OTP login → /admin, then /explore
+  // PROFILE 3: Admin (+96176683661) — password login (NO OTP) → /admin
   // ════════════════════════════════════════════════════════════════
-  console.log("\n── Profile 3: Admin OTP flow ──");
+  console.log("\n── Profile 3: Admin password flow ──");
   {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
@@ -128,29 +154,19 @@ async function run() {
     await page.locator('input[name="phone"]').press("Enter");
     ok("Submitted admin phone");
 
-    const gotVerify = await waitForText(page, "Verify your phone", 15000);
-    gotVerify ? ok("OTP screen appeared (no password account)") : fail("OTP screen", "never appeared");
+    // Existing user WITH password → password screen, NEVER the OTP screen
+    const gotPassword = await waitForText(page, "Password login", 15000);
+    gotPassword
+      ? ok("Password screen shown (no OTP for existing user)")
+      : fail("Password screen", "never appeared — did the admin get routed to OTP?");
 
-    await waitForText(page, "Enter the code sent to", 15000);
-    const hash = readOtpHash(ADMIN_PHONE);
-    const otp = crackOtp(hash);
-    otp ? ok(`Cracked admin OTP: ${otp}`) : fail("Crack OTP", "no hash found");
-
-    if (otp) {
-      await page.locator('input[data-input-otp]').fill(otp);
-      await sleep(300);
-      await page.locator('input[data-input-otp]').press("Enter");
-      ok("Submitted OTP (Enter)");
-
-      const setPw = await waitForText(page, "Set a password", 10000);
-      if (setPw) {
-        ok("Post-login 'Set a password' screen shown");
-        await page.getByRole("button", { name: /Skip for now/ }).click();
-        await sleep(2000);
-      }
-      await page.screenshot({ path: "/tmp/ss-admin.png" });
-      const url = page.url();
-      url.includes("/admin") ? ok("Redirected to /admin") : fail("Admin redirect", `got ${url}`);
+    await page.locator('input[name="password"]').fill(ADMIN_PASSWORD);
+    await page.getByRole("button", { name: "Sign in" }).click();
+    ok("Submitted admin password");
+    await sleep(3000);
+    await page.screenshot({ path: "/tmp/ss-admin.png" });
+    const url = page.url();
+    url.includes("/admin") ? ok("Redirected to /admin") : fail("Admin redirect", `got ${url}`);
 
       // Walk the new admin console
       const adminRoutes = [
@@ -191,7 +207,6 @@ async function run() {
       (exploreText.includes("Trullo") || exploreText.includes("Sakura") || exploreText.includes("Restaurant") || exploreText.includes("restaurant"))
         ? ok("Explore renders listings for authenticated user")
         : fail("Explore listings", "no restaurant content");
-    }
     await ctx.close();
   }
 
@@ -238,12 +253,13 @@ async function run() {
   {
     const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
-    await page.goto(`${BASE}/explore`, { waitUntil: "networkidle" });
-    await sleep(2000);
-    const url = page.url();
-    url.includes("/auth")
-      ? ok("Unauthenticated /explore redirects to /auth (RequireAuth gate)")
-      : fail("Explore auth gate", `expected /auth, got ${url}`);
+    await page.goto(`${BASE}/explore`, { waitUntil: "domcontentloaded" });
+    try {
+      await page.waitForURL("**/auth**", { timeout: 15000 });
+      ok("Unauthenticated /explore redirects to /auth (RequireAuth gate)");
+    } catch {
+      fail("Explore auth gate", `expected /auth, got ${page.url()}`);
+    }
     await ctx.close();
   }
 
@@ -304,6 +320,120 @@ async function run() {
       await page.screenshot({ path: "/tmp/ss-account-security.png" });
     }
     await ctx.close();
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // PROFILE 7: Signup (phone → OTP → set password → onboard),
+  //            then sign back in with the password (existing user),
+  //            then verify an existing user goes to password (NO OTP)
+  //            even when the phone is entered in a different format.
+  // ════════════════════════════════════════════════════════════════
+  console.log("\n── Profile 7: Signup then sign-in with password ──");
+  {
+    const phone = `+9617882${String(Date.now()).slice(-5)}`;
+    const password = "DinerPass123!";
+
+    // Existing user (has password) must be routed to PASSWORD login, never OTP,
+    // even if they type the number with spaces/dashes. After Profile 7's signup
+    // below, we exercise this in a THIRD context.
+    let existingUserPhone = null;
+
+    // ── SIGNUP via the landing page hero ──
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+    const uiErrors = [];
+    page.on("pageerror", (e) => uiErrors.push(`pageerror: ${String(e).slice(0, 150)}`));
+    page.on("console", (m) => {
+      if (/error|fail|invalid|unauthor/i.test(m.text())) uiErrors.push(`console: ${m.text().slice(0, 150)}`);
+    });
+    page.on("requestfailed", (r) => uiErrors.push(`reqfail: ${r.url().slice(0, 100)} ${r.failure()?.errorText ?? ""}`));
+    await page.goto(BASE, { waitUntil: "networkidle" });
+    await sleep(800);
+    await page.locator('input[aria-label="Phone number"]').fill(phone);
+    await page.getByRole("button", { name: /Get started/ }).first().click();
+    await page.waitForURL("**/auth**", { timeout: 8000 });
+    await waitForText(page, "Enter the code sent to", 15000);
+    const hash = readOtpHash(phone);
+    const otp = crackOtp(hash);
+    otp ? ok(`Signup OTP cracked: ${otp}`) : fail("Signup OTP", "no hash");
+    if (otp) {
+      await page.locator('input[data-input-otp]').fill(otp);
+      await sleep(300);
+      await page.locator('input[data-input-otp]').press("Enter");
+      const setPw = await waitForText(page, "Set a password", 10000);
+      setPw ? ok("Signup: set-password step shown") : fail("Set password step", "not shown");
+      await page.locator('input[name="password"]').fill(password);
+      await page.getByRole("button", { name: /Save password/ }).click();
+
+      // Capture any auth error shown after saving the password
+      await sleep(1500);
+      const errText = await page.textContent("body");
+      const hasErr = /failed|incorrect|error/i.test(errText);
+      if (hasErr) console.log(`  [debug] after save: ${page.url()} | err? ${errText.match(/[^.]*(failed|incorrect|error)[^.]*/i)?.[0]?.trim().slice(0, 120)}`);
+      if (uiErrors.length) console.log(`  [debug] ui errors: ${uiErrors.join(" || ")}`);
+
+      // Fresh users land on /dashboard onboarding (or /explore if already done)
+      try {
+        await page.waitForURL("**/dashboard**", { timeout: 15000 });
+      } catch {
+        // fall through — some runs redirect straight to /explore
+      }
+      const onboard = await waitForText(page, "Welcome to Kamix", 15000);
+      onboard ? ok("Signup: onboarding shown") : fail("Onboarding", `not shown (${page.url()})`);
+      if (onboard) {
+        await page.locator("#name").fill("Signup Tester");
+        await page.getByRole("button", { name: /Start exploring/ }).click();
+        try {
+          await page.waitForURL("**/explore**", { timeout: 15000 });
+          ok("Signup complete → redirected to /explore");
+        } catch {
+          fail("Signup redirect", `expected /explore, got ${page.url()}`);
+        }
+        await page.screenshot({ path: "/tmp/ss-signup-done.png" });
+      }
+    }
+    await ctx.close();
+
+    // ── SIGN-IN with the password just set (existing user, no SMS) ──
+    const ctx2 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page2 = await ctx2.newPage();
+    await page2.goto(`${BASE}/auth`, { waitUntil: "networkidle" });
+    await sleep(800);
+    await page2.locator('input[name="phone"]').fill(phone);
+    await page2.locator('input[name="phone"]').press("Enter");
+    const pwScreen = await waitForText(page2, "Password login", 10000);
+    pwScreen
+      ? ok("Sign-in: password screen shown for existing user (hasPasswordAccount)")
+      : fail("Password screen", "not shown");
+    await page2.locator('input[name="password"]').fill(password);
+    await page2.locator('input[name="password"]').press("Enter");
+    try {
+      await page2.waitForURL("**/explore**", { timeout: 15000 });
+      ok("Sign-in: password login → /explore");
+    } catch {
+      fail("Sign-in redirect", `expected /explore, got ${page2.url()}`);
+    }
+    await page2.screenshot({ path: "/tmp/ss-signin-done.png" });
+    await ctx2.close();
+    existingUserPhone = phone;
+
+    // ── EXISTING USER: re-login must go straight to PASSWORD (no OTP), even
+    //    with a reformatted phone (spaces). No new OTP may be sent — if the
+    //    app wrongly falls back to OTP we'd see the OTP screen instead.
+    const ctx3 = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page3 = await ctx3.newPage();
+    await page3.goto(`${BASE}/auth`, { waitUntil: "networkidle" });
+    await sleep(800);
+    // Same canonical number, but typed with spaces — routing must still be password.
+    const spaced = phone.replace(/^\+(\d{3})(\d{3})(\d{3})(\d+)$/, "+$1 $2 $3 $4");
+    await page3.locator('input[name="phone"]').fill(spaced);
+    await page3.locator('input[name="phone"]').press("Enter");
+    const pwScreen3 = await waitForText(page3, "Password login", 10000);
+    pwScreen3
+      ? ok("Existing user (reformatted phone) → password login, NO OTP")
+      : fail("Existing user routing", `expected password screen, got ${page3.url()}`);
+    await page3.close();
+    await ctx3.close();
   }
 
   await browser.close();
