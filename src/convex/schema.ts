@@ -162,6 +162,10 @@ const schema = defineSchema(
       // Set on restaurant accounts created/tagged by the platform admin: the
       // owner must set a new password on their next sign-in before proceeding.
       mustChangePassword: v.optional(v.boolean()),
+      // Platform admin can disable an account. Disabled users cannot sign in
+      // (enforced in the auth afterUserCreatedOrUpdated callback) and their
+      // existing sessions are invalidated when the flag is set.
+      disabled: v.optional(v.boolean()),
       prefs: v.optional(DINING_PREFS), // dining preferences (dietary, seating, occasions)
       favorites: v.optional(v.array(v.id("restaurants"))), // saved restaurants
       // Loyalty points (Idea #18): earned for completed bookings, reviews
@@ -212,6 +216,10 @@ const schema = defineSchema(
       // no-show protection: diners can cancel free until this many hours
       // before the booking; 0 / undefined = no policy
       cancellationPolicyHours: v.optional(v.number()),
+      // Platform admin can disable or delete a restaurant. Disabled venues
+      // are hidden from search/explore, treated as closed for availability,
+      // and refuse new bookings — the owner can still see them.
+      disabled: v.optional(v.boolean()),
       createdAt: v.number(),
     })
       .index("by_owner", ["ownerId"])

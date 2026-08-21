@@ -10,6 +10,16 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   ArrowLeft,
   BellRing,
   CalendarDays,
@@ -25,6 +35,7 @@ import {
   Sparkles,
   Star,
   Store,
+  Trash2,
   Users,
   Wind,
   type LucideIcon,
@@ -95,7 +106,10 @@ export default function RestaurantDetail() {
   const stories = useQuery(api.stories.forRestaurant, { restaurantId: id as never });
   const ensureForDate = useMutation(api.availability.ensureForDate);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
+  const deleteReview = useMutation(api.reviews.remove);
   const [favoriteBusy, setFavoriteBusy] = useState(false);
+  const [reviewToDelete, setReviewToDelete] = useState<string | null>(null);
+  const [deletingReview, setDeletingReview] = useState(false);
 
   // The date + party size + seating preference chosen on Explore carry over
   // via ?date=&party=&seat=&nonSmoking=, so the diner never has to re-pick
@@ -327,6 +341,22 @@ export default function RestaurantDetail() {
       toast.error(err instanceof Error ? err.message : "Could not update favorites.");
     } finally {
       setFavoriteBusy(false);
+    }
+  };
+
+  // Delete a review — the author (customer) or a platform admin. Confirmed
+  // via dialog, then the review (and its loyalty points) are removed.
+  const handleDeleteReview = async () => {
+    if (!reviewToDelete || deletingReview) return;
+    setDeletingReview(true);
+    try {
+      const res = await deleteReview({ reviewId: reviewToDelete as never });
+      if (res.deleted) toast.success("Review deleted.");
+      setReviewToDelete(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete the review.");
+    } finally {
+      setDeletingReview(false);
     }
   };
 
@@ -847,9 +877,20 @@ export default function RestaurantDetail() {
                         />
                       ))}
                     </span>
-                    <span className="text-xs font-medium text-muted-foreground">
+                    <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
                       {rev.author} ·{" "}
                       {new Date(rev.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                      {/* Diner can delete their own review; admins can delete any */}
+                      {(rev.userId === user?._id || user?.role === "admin") && (
+                        <button
+                          onClick={() => setReviewToDelete(rev._id)}
+                          className="flex size-6 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                          aria-label="Delete review"
+                          title="Delete review"
+                        >
+                          <Trash2 className="size-3.5" />
+                        </button>
+                      )}
                     </span>
                   </div>
                   {rev.text && <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{rev.text}</p>}
@@ -859,6 +900,32 @@ export default function RestaurantDetail() {
           )}
         </div>
       </div>
+
+      {/* Delete-review confirmation */}
+      <AlertDialog open={!!reviewToDelete} onOpenChange={(open) => !open && !deletingReview && setReviewToDelete(null)}>
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">Delete this review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your rating and feedback will be removed from this restaurant permanently. This
+              also reverses the loyalty points earned for it.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingReview}>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deletingReview}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteReview();
+              }}
+            >
+              {deletingReview ? <Spinner className="size-4" /> : "Delete review"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Queueing state — the table is being confirmed in FIFO order */}
       {queueEntryId && !bookingResult && (

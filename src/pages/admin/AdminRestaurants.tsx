@@ -11,6 +11,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
+import { Ban } from "lucide-react";
 import { Stars, EmptyNote } from "./AdminUI";
 import { formatPrice } from "@/lib/format";
 
@@ -54,7 +55,14 @@ export default function AdminRestaurants() {
                 <TableRow key={r._id}>
                   <TableCell>
                     <Link to={`/admin/restaurants/${r._id}`} className="group block">
-                      <p className="font-medium group-hover:text-primary">{r.name}</p>
+                      <p className="flex items-center gap-2 font-medium group-hover:text-primary">
+                        {r.name}
+                        {r.disabled && (
+                          <Badge className="gap-1 bg-destructive/10 text-destructive">
+                            <Ban className="size-3" /> Disabled
+                          </Badge>
+                        )}
+                      </p>
                       <p className="text-xs text-muted-foreground">
                         {r.cuisine} · {r.city}
                       </p>

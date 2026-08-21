@@ -1,4 +1,4 @@
-import { MutationCtx } from "./_generated/server";
+import { internalMutation, MutationCtx } from "./_generated/server";
 import { Id } from "./_generated/dataModel";
 
 /**
@@ -54,3 +54,18 @@ export async function checkRateLimit(
     });
   }
 }
+
+/**
+ * Garbage-collect stale rate-limit rows (N-7 / P-6). Every window older than
+ * `maxAgeMs` is dead weight — the limiter only ever queries the current
+ * window, so old rows can be dropped safely. Runs daily via cron.
+ */
+export const pruneOldLimits = internalMutation({
+  args: {},
+  handler: async (ctx) => {
+    const cutoff = Date.now() - 48 * 60 * 60_000; // 48 hours
+    const rows = await ctx.db.query("rateLimits").withIndex("by_window", (q) => q.lt("windowStart", cutoff)).collect();
+    for (const row of rows) await ctx.db.delete(row._id);
+    return { pruned: rows.length };
+  },
+});

@@ -34,7 +34,7 @@ this review are marked **Done**; everything else is a recommendation.
 | A-1 | **Self-serve owner role was an authorization hole.** Any signed-in user could onboard as `owner` and create restaurants. The role model now has a platform admin who is the **only** party allowed to register restaurants and tag accounts as restaurants. | High | Shipped: `admin.registerRestaurant` / `admin.tagAsRestaurant` (admin-only), diner-only onboarding, `claimDemo` promotes to owner. | **Done** |
 | A-2 | **No forced password change after admin-issued temporary passwords.** An admin-created owner could keep the temp password forever. | Medium | Shipped: `users.mustChangePassword` flag + `/set-password` flow enforced in `resolveTarget`, `Dashboard` and `SetPassword` page. | **Done** |
 | A-3 | Convex actions with `use node` must live alone; helpers like `safeGet` return `null` on invalid ids. Fine as-is, but a stricter `DataModel` would catch more at compile time. | Low | Keep; consider enabling `schemaValidation` incrementally (currently `false` for auth-table flexibility). | Todo |
-| A-4 | `bookings.byCode` returns the booking + restaurant to **any** signed-in caller (invite flow). Acceptable for invites, but PII (guest names) is exposed via a guessable 6-char code. | Medium | Rate-limit `byCode` lookups and/or require the inviter's session; consider showing names only after the guest confirms. | Todo |
+| A-4 | `bookings.byCode` returns the booking + restaurant to **any** signed-in caller (invite flow). Acceptable for invites, but PII (guest names) is exposed via a guessable 6-char code. | Medium | Guest names are now only revealed to the host or a confirmed guest; anonymous invite visitors see just the party count. | **Done** |
 | A-5 | Restaurant search does a full `collect()` + in-memory filter for cuisine/city/seat/dietary. With the 50-restaurant cap this is fine today, but it won't scale to thousands of venues. | Low | Move filtering into the search index (filterFields already exist) and paginate with `paginate` instead of `collect`. | Planned |
 | A-6 | `stats` (insights) scans all bookings for a restaurant then filters by window; fine for demo scale. | Low | Add a `date` range index + `paginate` when datasets grow. | Planned |
 | A-7 | Invite codes use a 31-char alphabet (no `0/O/1/I`); 6 chars ⇒ ~887M combos — good. `generateCode` uses `crypto.getRandomValues`. No change needed. | — | None. | — |
@@ -63,7 +63,7 @@ this review are marked **Done**; everything else is a recommendation.
 | S-1 | RBAC: every mutation verifies caller identity; restaurant writes verify `ownerId === caller`; bookings readable only by owner or diner; notifications by owner. | ✅ **Good** | Verified in code (`requireOwner`, `isRestaurantOwner`, `by_user` indexes) and by the test suite (E-2, C-9, H-8). |
 | S-2 | Input validation on every public mutation. | ✅ **Good** | Zod + Convex validators. |
 | S-3 | No secrets in client bundle. | ✅ **Good** | `VITE_CONVEX_URL` only; Twilio reads server-side env. |
-| S-4 | SMS delivery actually works in production. | ❌ **Broken** | API key belongs to a different Twilio account. `TWILIO_ENABLED=false` (kill-switch). When correct credentials are provided, set `TWILIO_ENABLED=true` and deploy. OTP flow works without SMS (codes stored in DB). |
+| S-4 | SMS delivery actually works in production. | ⚠️ | Credentials updated in `.env` and `TWILIO_ENABLED=true`; OTP codes are also stored in the DB so the flow never dead-ends. Re-verify live delivery with a real handset before launch. |
 | S-5 | OTP brute-force window. | ⚠️ **Partial** | Auth-library rate limiting exists, but verify the effective limit; 6 digits is brute-forceable offline only if the DB leaks — hashing prevents that. |
 | S-6 | Kill-switch honored. | ✅ **Done** | `phoneOtp.ts` now respects `TWILIO_ENABLED` kill-switch, matching `sms.ts`. |
 | S-7 | Admin account protection. | ✅ **Done** | Re-claim blocked when already admin. Audit log (`adminAuditLog` table) records all admin mutations. |
@@ -99,7 +99,7 @@ this review are marked **Done**; everything else is a recommendation.
 | M-1 | Single validation source. | ✅ | `validation.ts`. |
 | M-2 | Type safety across the stack. | ✅ | `tsc -b` clean; `_generated` bindings. |
 | M-3 | Test coverage. | ✅ | Backend suite P1–P4 (77 tests) + UI-flow suite (31). A-1…A-5 remain manual (browser). |
-| M-4 | Documentation. | ⚠️ | README + docs/ good; new admin role needs a short ops doc (add to README). | Todo |
+| M-4 | Documentation. | ✅ | README + docs/ good; added a Platform Administration & Moderation ops section to the README. | **Done** |
 | M-5 | Auth conventions doc. | ✅ | README "Using Authentication" section; do-not-modify list for auth files. |
 
 ### Usability & accessibility (NFR-U)
@@ -114,8 +114,8 @@ this review are marked **Done**; everything else is a recommendation.
 
 | ID | Requirement | Status | Notes |
 |----|-------------|--------|-------|
-| Pv-1 | PII minimization. | ⚠️ | Bookings store name/phone/email — needed for SMS. Guest names exposed via invite codes (A-4). Add data-retention policy + export/delete endpoint (`users:deleteAccount`). | Todo |
-| Pv-2 | GDPR-style erasure. | ⚠️ | No account-deletion endpoint. Add `users:deleteAccount` (cascade bookings/orders, keep restaurant data for owner accounts). | Planned |
+| Pv-1 | PII minimization. | ⚠️ | Bookings store name/phone/email — needed for SMS. Guest names on invite links now shown only to the host/confirmed guests (A-4). | ⚠️ |
+| Pv-2 | GDPR-style erasure. | ✅ **Done (admin)** | `admin.deleteUser` cascade-erases a user (bookings, orders, reviews, gifts, loyalty, auth accounts + sessions); blocked for owners until their restaurants are deleted. | **Done** |
 | Pv-3 | Logging of auth events. | ✅ **Done** | `adminAuditLog` table with `by_admin` index. Every admin mutation writes an audit entry. |
 
 ## 4. Role model & auth flow (current state)
@@ -200,8 +200,12 @@ fresh (no role)   → Diner onboarding (name + phone)
 | N-4 | **`onboard` accepts OWNER role.** Convex validator allows `role: "owner"` in the `onboard` mutation, so a malicious client could self-promote to owner. | Medium | Restrict to `v.literal(ROLES.CUSTOMER)` only. | Todo |
 | N-5 | **Temp password in plaintext.** Admin.tsx shows temp password in `type="text"` input. | Low | Change to `type="password"` with show/hide toggle. | Todo |
 | N-6 | **SetPassword always shows "Current password".** Confusing for OTP-only users who have no password account. | Low | Conditionally hide field when no password account exists. | Todo |
-| N-7 | **Rate limits table grows unbounded.** Old rows never cleaned up. | Low | Add Convex cron to delete rows older than 24h. | Planned |
-| N-8 | **Unused AuthStep variant.** `\| { phone: string; mode: "otp"; verified: true }` is defined but never set anywhere. | Low | Remove dead type variant. | Todo |
+| N-7 | **Rate limits table grows unbounded.** Old rows never cleaned up. | Low | `rateLimit:pruneOldLimits` cron deletes rows older than 48h daily at 03:00 UTC. | **Done** |
+| N-8 | **Unused AuthStep variant.** `\| { phone: string; mode: "otp"; verified: true }` is defined but never set anywhere. | Low | Removed the dead type variant from `Auth.tsx`. | **Done** |
+| N-9 | **Disabled users could still sign in.** No server-side account lock. | High | `users.disabled` flag; the auth `afterUserCreatedOrUpdated` callback rejects disabled accounts before any session/token is issued (even OTP requests fail), and `admin.setUserDisabled` invalidates existing sessions. `RequireAuth` signs out stale sessions client-side too. | **Done** |
+| N-10 | **No review moderation.** Reviews could only be created, never removed. | Medium | `reviews.remove` — the author (customer) or an admin can delete; admin deletions are audited; loyalty points for the review are reversed. UI in RestaurantDetail + admin console. | **Done** |
+| N-11 | **No restaurant lifecycle control.** Admin couldn't disable/delete a venue. | Medium | `admin.setRestaurantDisabled` (hidden from search/detail, bookings refused, availability closed) + `admin.deleteRestaurant` (full cascade incl. menus, bookings, reviews, stories, gifts). | **Done** |
+| N-12 | **No audit-log clearing.** Append-only meant it grew forever with no admin control. | Low | `admin.clearAuditLog` wipes the table and keeps a single traceable "clearAuditLog" entry (with the cleared count). | **Done** |
 
 ---
 
@@ -242,10 +246,10 @@ Status legend: **Todo** (not started) · **In progress** (being built) · **Done
 | ID | Feature | Description | Status |
 |----|---------|-------------|--------|
 | I-30 | QR menu at the table | Menu at the table via QR, live updates (specials, sold-out items). | Planned |
-| I-31 | Loyalty program | Points per visit, rewards, and repeat-diner perks. | Planned |
+| I-31 | Loyalty program | Points per visit, rewards, and repeat-diner perks. | **Done** (Idea #18: idempotent ledger + balance card in Account) |
 | I-32 | Private dining & events | Large-party and private-room booking requests. | Planned |
 | I-33 | Table floor plans | Visual table map with per-table booking. | Planned |
-| I-34 | Multi-language (i18n) | UI + booking flows in multiple languages. | Planned |
+| I-34 | Multi-language (i18n) | UI + booking flows in multiple languages. | **Done (v1)** (EN/AR/FR diner app + RTL flip; owner/admin console pending) |
 | I-35 | POS integration | Two-way sync with restaurant POS systems. | Planned |
 
 ## Production readiness — realtime & scale

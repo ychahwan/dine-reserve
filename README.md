@@ -359,6 +359,35 @@ await ctx.runMutation(internal.users.update, {
 ```
 
 
+## Platform Administration & Moderation (ops)
+
+The platform admin (`+96176683661`, password `BeityAdmin2026!` — change it after
+first use) is the only account that can register restaurants, tag accounts as
+restaurants, and moderate the platform. Everything an admin does is written to
+the `adminAuditLog` table and visible in the admin console under **Audit log**.
+
+### Roles
+| Role | How it's assigned | What it can do |
+|------|-------------------|----------------|
+| **Admin** | Only the admin phone can claim it (`admin.claimPlatformAdmin`) | Register/tag restaurants, disable/delete users & restaurants, delete any review, clear the audit log |
+| **Owner** | Admin creates via *Register restaurant* or *Tag owner* | Manage their restaurant, bookings, menu, orders, insights |
+| **Customer** | Self-registers via `/auth` (OTP) | Browse, book, order, socialize, review |
+
+### Moderation actions (admin console → detail pages)
+- **Users** (`/admin/users/:id` → *Moderation*): **Disable** locks the account
+  immediately — existing sessions are revoked and every future sign-in attempt
+  (even an OTP request) is rejected server-side. **Delete** cascade-erases the
+  account and all its data (GDPR-style); owners must have their restaurants
+  deleted first.
+- **Restaurants** (`/admin/restaurants/:id` → *Moderation*): **Disable** hides
+  the venue from Explore/search/stats, refuses new bookings, and treats it as
+  closed — the owner still sees it. **Delete** permanently removes the venue and
+  everything attached to it (sections, menus, bookings, reviews, stories, gifts).
+- **Reviews** (`/admin/reviews`): any review can be deleted (audited).
+  Customers can also delete their own reviews from the restaurant page.
+- **Audit log** (`/admin/audit`): **Clear log** wipes the table; the clearing
+  itself is kept as a single auditable entry.
+
 ## Common Convex Mistakes To Avoid
 
 When using convex, make sure:

@@ -226,6 +226,13 @@ export const byCode = query({
       userId !== null &&
       (booking.userId === userId || guests.some((g) => g.userId === userId));
 
+    // PII guard (A-4): full guest names are only revealed to the host or a
+    // confirmed guest. Anonymous invite-link visitors just see how many
+    // people are already going — enough to decide whether to join.
+    const guestsPublic = alreadyConfirmed
+      ? guests.map((g) => ({ name: g.name }))
+      : guests.map(() => ({ name: "" }));
+
     return {
       booking: {
         _id: booking._id,
@@ -234,7 +241,7 @@ export const byCode = query({
         time: booking.time,
         partySize: booking.partySize,
         sectionName: booking.sectionName,
-        guests: guests.map((g) => ({ name: g.name })),
+        guests: guestsPublic,
       },
       restaurant: restaurant
         ? { _id: restaurant._id, name: restaurant.name, address: restaurant.address, city: restaurant.city, imageUrl: restaurant.imageUrl }

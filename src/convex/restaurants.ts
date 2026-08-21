@@ -114,7 +114,9 @@ async function restaurantRating(ctx: QueryCtx, restaurantId: Id<"restaurants">) 
 export const stats = query({
   args: {},
   handler: async (ctx) => {
-    const restaurants = await ctx.db.query("restaurants").collect();
+    // Disabled restaurants are not "partner restaurants" — they don't count
+    // toward the Landing stats or the city list.
+    const restaurants = (await ctx.db.query("restaurants").collect()).filter((r) => !r.disabled);
     const cities = new Set(restaurants.map((r) => r.city).filter(Boolean));
     return {
       restaurantCount: restaurants.length,
@@ -144,7 +146,8 @@ export const search = query({
       restaurants = await ctx.db.query("restaurants").collect();
     }
 
-    let filtered = restaurants;
+    // Disabled restaurants never surface in Explore/search.
+    let filtered = restaurants.filter((r) => !r.disabled);
     if (args.cuisine) filtered = filtered.filter((r) => r.cuisine === args.cuisine);
     if (args.city) filtered = filtered.filter((r) => r.city === args.city);
     if (args.solo) filtered = filtered.filter((r) => r.features.soloFriendly === true);
@@ -192,6 +195,13 @@ export const get = query({
   handler: async (ctx, { id }) => {
     const restaurant = await ctx.db.get(id);
     if (!restaurant) return null;
+    // A disabled restaurant is only reachable by its owner or an admin
+    // (so moderation keeps working); everyone else sees "not found".
+    if (restaurant.disabled) {
+      const userId = await getAuthUserId(ctx);
+      const caller = userId !== null ? await ctx.db.get(userId) : null;
+      if (!(restaurant.ownerId === userId || caller?.role === "admin")) return null;
+    }
     const [sections, hours, menus, rawItems, rating] = await Promise.all([
       ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
@@ -265,7 +275,12 @@ export const trending = query({
         covers.set(b.restaurantId, (covers.get(b.restaurantId) ?? 0) + b.partySize);
       }
     }
+    // Exclude disabled venues from the trending rail.
+    const disabled = new Set(
+      (await ctx.db.query("restaurants").collect()).filter((r) => r.disabled).map((r) => r._id),
+    );
     return [...covers.entries()]
+      .filter(([id]) => !disabled.has(id as never))
       .sort((a, b) => b[1] - a[1])
       .slice(0, 6)
       .map(([id]) => id as Id<"restaurants">);
@@ -303,6 +318,7 @@ export const forYou = query({
 
     const scored: { id: Id<"restaurants">; score: number }[] = [];
     for (const r of restaurants) {
+      if (r.disabled) continue; // never recommend a disabled venue
       let score = 0;
       if (favs.has(r._id)) score += 3;
       if (pastCuisines.has(r.cuisine.toLowerCase())) score += 2;

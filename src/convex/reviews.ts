@@ -86,12 +86,15 @@ export const listForRestaurant = query({
     // safeGet: tolerate review rows whose author is a bare auth subject
     // (legacy/test identities) — never crash the restaurant detail page.
     const users = await Promise.all(reviews.map((r) => safeGet<Doc<"users">>(ctx, r.userId)));
+    // Expose the author id so the diner UI can offer "delete my review" and
+    // the admin console can identify the author of any review.
     const sorted = reviews
       .map((r, i) => ({
         _id: r._id,
         rating: r.rating,
         text: r.text,
         createdAt: r.createdAt,
+        userId: r.userId,
         author: users[i]?.name ?? "Diner",
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
@@ -103,6 +106,60 @@ export const listForRestaurant = query({
         : 0;
 
     return { count, avg, reviews: sorted };
+  },
+});
+
+/**
+ * Delete a review. The review's author (a customer removing their own
+ * rating) or a platform admin (moderation) may delete it. Audits admin
+ * deletions so review removal is traceable.
+ */
+export const remove = mutation({
+  args: { reviewId: v.id("reviews") },
+  handler: async (ctx, { reviewId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const review = await ctx.db.get(reviewId);
+    if (!review) return { deleted: false, reason: "not_found" };
+
+    const caller = await ctx.db.get(userId);
+    const isAdmin = caller?.role === "admin";
+    const isAuthor = review.userId === userId;
+    if (!isAuthor && !isAdmin) {
+      throw new Error("You can only delete your own reviews.");
+    }
+
+    await ctx.db.delete(reviewId);
+
+    // Reverse the loyalty points earned for this review (idempotent — the
+    // ledger row is removed too so a re-award is possible if the diner
+    // re-reviews, which they can: the booking is no longer reviewed).
+    const ledger = await ctx.db
+      .query("loyaltyLedger")
+      .withIndex("by_user_source", (q) =>
+        q.eq("userId", review.userId).eq("sourceId", `booking:${review.bookingId ?? ""}`),
+      )
+      .collect();
+    const reviewLedger = ledger.find((l) => l.source === "review");
+    if (reviewLedger) {
+      await ctx.db.patch(reviewLedger._id, { amount: 0 });
+      const user = await ctx.db.get(review.userId);
+      if (user && (user.points ?? 0) >= reviewLedger.amount) {
+        await ctx.db.patch(review.userId, { points: (user.points ?? 0) - reviewLedger.amount });
+      }
+    }
+
+    if (isAdmin && !isAuthor) {
+      await ctx.db.insert("adminAuditLog", {
+        adminUserId: userId,
+        action: "deleteReview",
+        targetUserId: review.userId,
+        details: JSON.stringify({ reviewId, restaurantId: review.restaurantId, rating: review.rating }),
+        createdAt: Date.now(),
+      });
+    }
+
+    return { deleted: true };
   },
 });
 

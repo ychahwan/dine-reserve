@@ -54,7 +54,6 @@ type AuthStep =
   | "enter-phone"
   | { phone: string; mode: "password" }
   | { phone: string; mode: "otp" }
-  | { phone: string; mode: "otp"; verified: true }
   | { phone: string; mode: "set-password" }
   | { phone: string; mode: "reset-otp" };
 

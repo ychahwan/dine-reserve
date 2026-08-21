@@ -6,6 +6,16 @@ import { useMutation, useQuery } from "convex/react";
 import { useParams, Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -15,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Eye, EyeOff, Gift, KeyRound, Loader2, Mail, Phone } from "lucide-react";
+import { ArrowLeft, Ban, Eye, EyeOff, Gift, KeyRound, Loader2, Mail, Phone, ShieldCheck, Trash2, UserRoundCheck } from "lucide-react";
 import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote } from "./AdminUI";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
 import { useState } from "react";
@@ -25,11 +35,48 @@ export default function AdminUserDetail() {
   const { id } = useParams();
   const data = useQuery(api.adminView.userDetail, { id: id as never });
   const setUserPassword = useMutation(api.admin.setUserPassword);
+  const setUserDisabled = useMutation(api.admin.setUserDisabled);
+  const deleteUser = useMutation(api.admin.deleteUser);
 
   const [newPassword, setNewPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [modBusy, setModBusy] = useState(false);
+  const [modError, setModError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleSetDisabled = async (disabled: boolean) => {
+    if (!id || modBusy) return;
+    setModBusy(true);
+    setModError(null);
+    try {
+      await setUserDisabled({ userId: id as never, disabled });
+      toast.success(disabled ? "User disabled — they can no longer sign in." : "User re-enabled.");
+    } catch (err) {
+      setModError(err instanceof Error ? err.message : "Could not update the user.");
+    } finally {
+      setModBusy(false);
+    }
+  };
+
+  const handleDeleteUser = async () => {
+    if (!id || modBusy) return;
+    setModBusy(true);
+    setModError(null);
+    try {
+      const res = await deleteUser({ userId: id as never });
+      if (res.deleted) {
+        toast.success("User and all their data deleted.");
+        setConfirmDelete(false);
+      }
+    } catch (err) {
+      setModError(err instanceof Error ? err.message : "Could not delete the user.");
+      setConfirmDelete(false);
+    } finally {
+      setModBusy(false);
+    }
+  };
 
   const handleSetPassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,6 +119,11 @@ export default function AdminUserDetail() {
               <div className="flex items-center gap-2.5">
                 <h1 className="text-2xl font-bold tracking-tight">{user.name ?? "Unnamed user"}</h1>
                 {roleBadge(user.role)}
+                {user.disabled && (
+                  <Badge className="gap-1 bg-destructive/10 text-destructive">
+                    <Ban className="size-3" /> Disabled
+                  </Badge>
+                )}
               </div>
               <div className="mt-2 space-y-0.5 text-sm text-muted-foreground">
                 {user.phone && <p className="flex items-center gap-1.5"><Phone className="size-3.5" /> {user.phone}</p>}
@@ -91,6 +143,41 @@ export default function AdminUserDetail() {
               <div><p className="text-xl font-bold">{data.reviews.length}</p><p className="text-[11px] text-muted-foreground">Reviews</p></div>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      {/* Moderation: disable / delete */}
+      <Card className="rounded-2xl border-border/70">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="size-4 text-primary" /> Moderation
+          </CardTitle>
+          <CardDescription>
+            Disabling locks the account immediately — existing sessions are revoked and the
+            user cannot sign in again. Deleting permanently erases the account and all their
+            data (bookings, orders, reviews, loyalty points).
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Button
+            variant={user.disabled ? "outline" : "destructive"}
+            disabled={modBusy}
+            onClick={() => handleSetDisabled(!user.disabled)}
+          >
+            {modBusy ? <Loader2 className="size-4 animate-spin" /> : user.disabled ? <UserRoundCheck className="size-4" /> : <Ban className="size-4" />}
+            {user.disabled ? "Re-enable account" : "Disable account"}
+          </Button>
+          <Button
+            variant="outline"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={modBusy}
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2 className="size-4" /> Delete user permanently
+          </Button>
+          {modError && (
+            <p className="w-full rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{modError}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -267,6 +354,31 @@ export default function AdminUserDetail() {
           </div>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && !modBusy && setConfirmDelete(false)}>
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">Delete this user permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This erases {user.name ?? "this user"}'s account, bookings, orders, reviews,
+              Socialize gifts and loyalty points. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={modBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={modBusy}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDeleteUser();
+              }}
+            >
+              {modBusy ? <Loader2 className="size-4 animate-spin" /> : "Delete user"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

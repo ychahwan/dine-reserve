@@ -333,6 +333,283 @@ export const ensureOwnerPassword = mutation({
   },
 });
 
+// ---------------------------------------------------------------------------
+// Account & restaurant moderation
+// ---------------------------------------------------------------------------
+
+/**
+ * Delete every auth session + refresh token for a user (equivalent to the
+ * auth library's `invalidateSessions`, implemented inline so it runs inside
+ * a single mutation transaction — a disabled user is kicked out immediately).
+ */
+async function invalidateUserSessions(ctx: MutationCtx, userId: Id<"users">) {
+  const sessions = await ctx.db
+    .query("authSessions")
+    .withIndex("userId", (q) => q.eq("userId", userId))
+    .collect();
+  for (const s of sessions) {
+    const tokens = await ctx.db
+      .query("authRefreshTokens")
+      .withIndex("sessionIdAndParentRefreshTokenId", (q) => q.eq("sessionId", s._id))
+      .collect();
+    for (const t of tokens) await ctx.db.delete(t._id);
+    await ctx.db.delete(s._id);
+  }
+}
+
+/**
+ * Admin-only: disable or re-enable a user account. A disabled user cannot
+ * sign in (the auth `afterUserCreatedOrUpdated` callback rejects them before
+ * any session is issued) and their existing sessions are invalidated now, so
+ * the lock is immediate. You cannot disable yourself or another admin.
+ */
+export const setUserDisabled = mutation({
+  args: { userId: v.id("users"), disabled: v.boolean() },
+  handler: async (ctx, { userId, disabled }) => {
+    const { userId: adminUserId, user: adminUser } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "setUserDisabled",
+      userId: adminUserId,
+      limit: 120,
+      windowMs: 60 * 60_000, // 120 per hour
+    });
+    if (userId === adminUserId) throw new Error("You cannot disable your own account.");
+    const target = await ctx.db.get(userId);
+    if (!target) throw new Error("User not found.");
+    if (target.role === "admin") throw new Error("You cannot disable another admin account.");
+
+    await ctx.db.patch(userId, { disabled: disabled || undefined });
+    if (disabled) await invalidateUserSessions(ctx, userId);
+
+    await logAdminAction(ctx, adminUserId, disabled ? "disableUser" : "enableUser", {
+      targetUserId: userId as unknown as string,
+      details: JSON.stringify({ phone: target.phone ?? null, name: target.name ?? null }),
+    });
+    return await ctx.db.get(userId);
+  },
+});
+
+/**
+ * Admin-only: permanently delete a user and all their data (GDPR-style
+ * erasure). Cascades: reviews, bookings (+ their dine orders, assist
+ * requests, notifications, presence, gifts), waitlist, dine-in history,
+ * messages, loyalty ledger, auth accounts and sessions. Blocked while the
+ * user owns restaurants — delete (or reassign) those first.
+ */
+export const deleteUser = mutation({
+  args: { userId: v.id("users") },
+  handler: async (ctx, { userId }) => {
+    const { userId: adminUserId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "deleteUser",
+      userId: adminUserId,
+      limit: 30,
+      windowMs: 60 * 60_000, // 30 per hour
+    });
+    if (userId === adminUserId) throw new Error("You cannot delete your own account.");
+    const target = await ctx.db.get(userId);
+    if (!target) throw new Error("User not found.");
+    if (target.role === "admin") throw new Error("You cannot delete another admin account.");
+
+    // Owners own restaurants — force the admin to handle those first so a
+    // restaurant is never left with a dangling ownerId.
+    const owned = await ctx.db
+      .query("restaurants")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    if (owned.length > 0) {
+      throw new Error("This user owns restaurants — delete those first (Restaurants → Delete).");
+    }
+
+    // Bookings → their dependents first.
+    const bookings = await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
+    for (const b of bookings) {
+      const [orders, assists, notifs, presence, gifts, wait] = await Promise.all([
+        ctx.db.query("dineOrders").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("assistRequests").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("notifications").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("dinerPresence").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("giftDeliveries").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ]);
+      for (const rows of [orders, assists, notifs, presence, gifts, wait]) {
+        for (const row of rows) await ctx.db.delete(row._id);
+      }
+      await ctx.db.delete(b._id);
+    }
+
+    // Remaining user-scoped rows (outside bookings).
+    const [reviews, waitlistAll, dineOrders, assists, menuReqs, presence, notifs, dn, ledger, phoneReqs] = await Promise.all([
+      ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("dineOrders").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("assistRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("menuRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("dinerPresence").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("notifications").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("dinerNotifications").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("loyaltyLedger").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("phoneChangeRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+    ]);
+    for (const rows of [reviews, waitlistAll, dineOrders, assists, menuReqs, presence, notifs, dn, ledger, phoneReqs]) {
+      for (const row of rows) await ctx.db.delete(row._id);
+    }
+    const [sentGifts, receivedGifts] = await Promise.all([
+      ctx.db.query("giftDeliveries").withIndex("by_sender", (q) => q.eq("senderUserId", userId)).collect(),
+      ctx.db.query("giftDeliveries").withIndex("by_receiver", (q) => q.eq("receiverUserId", userId)).collect(),
+    ]);
+    for (const g of [...sentGifts, ...receivedGifts]) await ctx.db.delete(g._id);
+
+    // Auth identity + sessions.
+    const accounts = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", userId))
+      .collect();
+    for (const a of accounts) await ctx.db.delete(a._id);
+    await invalidateUserSessions(ctx, userId);
+
+    await ctx.db.delete(userId);
+
+    await logAdminAction(ctx, adminUserId, "deleteUser", {
+      targetUserId: userId as unknown as string,
+      details: JSON.stringify({ phone: target.phone ?? null, name: target.name ?? null }),
+    });
+    return { deleted: true };
+  },
+});
+
+/**
+ * Admin-only: disable or re-enable a restaurant. Disabled venues disappear
+ * from Explore/search/stats, are treated as closed for availability, and
+ * refuse new bookings (see restaurants.ts / bookings.ts / availability.ts).
+ */
+export const setRestaurantDisabled = mutation({
+  args: { restaurantId: v.id("restaurants"), disabled: v.boolean() },
+  handler: async (ctx, { restaurantId, disabled }) => {
+    const { userId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "setRestaurantDisabled",
+      userId,
+      limit: 120,
+      windowMs: 60 * 60_000,
+    });
+    const restaurant = await ctx.db.get(restaurantId);
+    if (!restaurant) throw new Error("Restaurant not found.");
+    await ctx.db.patch(restaurantId, { disabled: disabled || undefined });
+    await logAdminAction(ctx, userId, disabled ? "disableRestaurant" : "enableRestaurant", {
+      details: JSON.stringify({ restaurantName: restaurant.name }),
+    });
+    return await ctx.db.get(restaurantId);
+  },
+});
+
+/**
+ * Admin-only: permanently delete a restaurant and everything attached to it
+ * (sections, hours, slots, rules, menus + items, bookings + dine-in data,
+ * waitlist, notifications, reviews, stories, gifts). Also removes it from
+ * every diner's favorites.
+ */
+export const deleteRestaurant = mutation({
+  args: { restaurantId: v.id("restaurants") },
+  handler: async (ctx, { restaurantId }) => {
+    const { userId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "deleteRestaurant",
+      userId,
+      limit: 30,
+      windowMs: 60 * 60_000,
+    });
+    const restaurant = await ctx.db.get(restaurantId);
+    if (!restaurant) throw new Error("Restaurant not found.");
+
+    const sections = await ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect();
+    const sectionIds = new Set(sections.map((s) => s._id));
+
+    const [hours, slots, rules, customSlots, menus, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, bookings, orders, assists] = await Promise.all([
+      ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("slots").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("slotRules").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("customSlots").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("waitlist").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("notifications").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("reviews").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("stories").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("giftTypes").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("menuRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("dinerPresence").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("assistRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+    ]);
+
+    for (const rows of [hours, slots, rules, customSlots, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, orders, assists]) {
+      for (const row of rows) await ctx.db.delete(row._id);
+    }
+    for (const b of bookings) {
+      const [bo, ba, bn, bp, bg] = await Promise.all([
+        ctx.db.query("dineOrders").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("assistRequests").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("notifications").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("dinerPresence").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+        ctx.db.query("giftDeliveries").withIndex("by_booking", (q) => q.eq("bookingId", b._id)).collect(),
+      ]);
+      for (const rows of [bo, ba, bn, bp, bg]) for (const row of rows) await ctx.db.delete(row._id);
+      await ctx.db.delete(b._id);
+    }
+    const [giftsDelivered, menuItems] = await Promise.all([
+      ctx.db.query("giftDeliveries").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+    ]);
+    for (const g of giftsDelivered) await ctx.db.delete(g._id);
+    for (const m of menuItems) await ctx.db.delete(m._id);
+    for (const m of menus) await ctx.db.delete(m._id);
+    for (const s of sections) await ctx.db.delete(s._id);
+
+    // Remove from every diner's favorites.
+    const users = await ctx.db.query("users").collect();
+    for (const u of users) {
+      if ((u.favorites ?? []).includes(restaurantId)) {
+        await ctx.db.patch(u._id, { favorites: (u.favorites ?? []).filter((id) => id !== restaurantId) });
+      }
+    }
+
+    await ctx.db.delete(restaurantId);
+    void sectionIds; // sections deleted above
+
+    await logAdminAction(ctx, userId, "deleteRestaurant", {
+      details: JSON.stringify({ restaurantName: restaurant.name }),
+    });
+    return { deleted: true };
+  },
+});
+
+/**
+ * Admin-only: wipe the audit log. Records a single "clearAuditLog" entry
+ * (with the number of cleared rows) so the clearing itself stays traceable.
+ */
+export const clearAuditLog = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { userId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "clearAuditLog",
+      userId,
+      limit: 10,
+      windowMs: 60 * 60_000, // 10 per hour
+    });
+    const all = await ctx.db.query("adminAuditLog").collect();
+    for (const row of all) await ctx.db.delete(row._id);
+    await ctx.db.insert("adminAuditLog", {
+      adminUserId: userId,
+      action: "clearAuditLog",
+      details: JSON.stringify({ clearedRows: all.length }),
+      createdAt: Date.now(),
+    });
+    return { cleared: all.length };
+  },
+});
+
 /**
  * Admin-only: set or reset ANY user's password (diner, owner or admin).
  * Creates the password account if the user only had OTP, or replaces the

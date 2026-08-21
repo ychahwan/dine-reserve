@@ -38,4 +38,14 @@ app.crons.cron(
   "dinerNotify:dailyNudges",
 );
 
+// Rate-limit table hygiene (N-7 / P-6): the `rateLimits` table grows
+// unbounded as every window creates a row. Daily at 03:00 UTC, delete rows
+// whose window started more than 48h ago — the limiter only reads the
+// current window, so old rows are pure garbage.
+app.crons.cron(
+  "rate-limits-prune",
+  { hourUTC: 3, minuteUTC: 0 },
+  "rateLimit:pruneOldLimits",
+);
+
 export default app;

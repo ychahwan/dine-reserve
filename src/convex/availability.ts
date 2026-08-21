@@ -166,6 +166,14 @@ export const ensureForDate = mutation({
     if (userId === null) throw new Error("You must be signed in.");
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
+    // A disabled restaurant only materializes slots for its owner/admin
+    // (moderation preview); everyone else is rejected.
+    if (restaurant.disabled) {
+      const caller = await ctx.db.get(userId);
+      if (restaurant.ownerId !== userId && caller?.role !== "admin") {
+        throw new Error("This restaurant is currently unavailable.");
+      }
+    }
     return ensureSlotsForDate(ctx, restaurantId, date);
   },
 });
@@ -183,7 +191,7 @@ export const forDate = query({
   args: { restaurantId: v.id("restaurants"), date: v.string() },
   handler: async (ctx: QueryCtx, { restaurantId, date }) => {
     const restaurant = await ctx.db.get(restaurantId);
-    if (!restaurant) return null;
+    if (!restaurant || restaurant.disabled) return null;
     const [sections, hours, slots] = await Promise.all([
       ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
       ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
@@ -229,6 +237,7 @@ export const summary = query({
       estimated: boolean;
     }[] = [];
     for (const r of restaurants) {
+      if (r.disabled) continue; // disabled venues never show availability
       const [hours, sections, slots] = await Promise.all([
         ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
         ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),

@@ -1,6 +1,17 @@
 import { Spinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { api } from "@/convex/_generated/api";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import {
   Table,
   TableBody,
@@ -9,11 +20,31 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Trash2, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { Stars, EmptyNote } from "./AdminUI";
 import { formatDate } from "@/lib/format";
+import { toast } from "sonner";
 
 export default function AdminReviews() {
   const reviews = useQuery(api.adminView.listReviews);
+  const removeReview = useMutation(api.reviews.remove);
+  const [reviewToDelete, setReviewToDelete] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const handleDelete = async () => {
+    if (!reviewToDelete || busy) return;
+    setBusy(true);
+    try {
+      const res = await removeReview({ reviewId: reviewToDelete as never });
+      if (res.deleted) toast.success("Review deleted.");
+      setReviewToDelete(null);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete the review.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   if (reviews === undefined) {
     return (
@@ -44,6 +75,7 @@ export default function AdminReviews() {
                 <TableHead>Rating</TableHead>
                 <TableHead className="hidden sm:table-cell">Date</TableHead>
                 <TableHead className="w-full">Feedback</TableHead>
+                <TableHead className="w-24"></TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -60,12 +92,46 @@ export default function AdminReviews() {
                   <TableCell className="max-w-xs text-sm text-muted-foreground">
                     {r.text ?? <span className="italic opacity-60">No comment</span>}
                   </TableCell>
+                  <TableCell className="text-right">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setReviewToDelete(r._id)}
+                    >
+                      <Trash2 className="size-3.5" /> Delete
+                    </Button>
+                  </TableCell>
                 </TableRow>
               ))}
             </TableBody>
           </Table>
         </div>
       )}
+
+      <AlertDialog open={!!reviewToDelete} onOpenChange={(open) => !open && !busy && setReviewToDelete(null)}>
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">Delete this review?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The rating and feedback are removed permanently from the platform. This is audited.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={busy}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDelete();
+              }}
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : "Delete review"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

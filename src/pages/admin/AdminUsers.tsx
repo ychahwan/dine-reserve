@@ -2,6 +2,8 @@ import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { Link } from "react-router";
+import { Badge } from "@/components/ui/badge";
+import { Ban } from "lucide-react";
 import {
   Table,
   TableBody,
@@ -54,7 +56,14 @@ export default function AdminUsers() {
                 <TableRow key={u._id}>
                   <TableCell>
                     <Link to={`/admin/users/${u._id}`} className="group block">
-                      <p className="font-medium group-hover:text-primary">{u.name ?? "Unnamed"}</p>
+                      <p className="flex items-center gap-2 font-medium group-hover:text-primary">
+                        {u.name ?? "Unnamed"}
+                        {u.disabled && (
+                          <Badge className="gap-1 bg-destructive/10 text-destructive">
+                            <Ban className="size-3" /> Disabled
+                          </Badge>
+                        )}
+                      </p>
                       {u.ownedRestaurants.length > 0 && (
                         <p className="text-xs text-muted-foreground">
                           owns {u.ownedRestaurants.map((r) => r.name).join(", ")}

@@ -47,6 +47,8 @@ export const enqueue = mutation({
     const name = args.name.trim().slice(0, 80);
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
+    // Disabled restaurants refuse new bookings (moderation hold).
+    if (restaurant.disabled) throw new Error("This restaurant is currently unavailable.");
 
     const fireProcessor = () =>
       ctx.scheduler.runAfter(0, internal.queue.processSlot, {

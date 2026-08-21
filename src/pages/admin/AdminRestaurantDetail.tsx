@@ -1,9 +1,20 @@
 import { Spinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
 import { api } from "@/convex/_generated/api";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useParams, Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -13,13 +24,52 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, MapPin, Phone, Star } from "lucide-react";
+import { ArrowLeft, Ban, Loader2, MapPin, Phone, ShieldCheck, Star, Store, Trash2 } from "lucide-react";
+import { useState } from "react";
 import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote } from "./AdminUI";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
+import { toast } from "sonner";
 
 export default function AdminRestaurantDetail() {
   const { id } = useParams();
   const data = useQuery(api.adminView.restaurantDetail, { id: id as never });
+  const setRestaurantDisabled = useMutation(api.admin.setRestaurantDisabled);
+  const deleteRestaurant = useMutation(api.admin.deleteRestaurant);
+  const [modBusy, setModBusy] = useState(false);
+  const [modError, setModError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+
+  const handleSetDisabled = async (disabled: boolean) => {
+    if (!id || modBusy) return;
+    setModBusy(true);
+    setModError(null);
+    try {
+      await setRestaurantDisabled({ restaurantId: id as never, disabled });
+      toast.success(disabled ? "Restaurant disabled — hidden from diners." : "Restaurant re-enabled.");
+    } catch (err) {
+      setModError(err instanceof Error ? err.message : "Could not update the restaurant.");
+    } finally {
+      setModBusy(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!id || modBusy) return;
+    setModBusy(true);
+    setModError(null);
+    try {
+      const res = await deleteRestaurant({ restaurantId: id as never });
+      if (res.deleted) {
+        toast.success("Restaurant and all its data deleted.");
+        setConfirmDelete(false);
+      }
+    } catch (err) {
+      setModError(err instanceof Error ? err.message : "Could not delete the restaurant.");
+      setConfirmDelete(false);
+    } finally {
+      setModBusy(false);
+    }
+  };
 
   if (data === undefined) {
     return (
@@ -43,7 +93,14 @@ export default function AdminRestaurantDetail() {
         <CardContent className="p-5">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold tracking-tight">{restaurant.name}</h1>
+              <div className="flex items-center gap-2.5">
+                <h1 className="text-2xl font-bold tracking-tight">{restaurant.name}</h1>
+                {restaurant.disabled && (
+                  <Badge className="gap-1 bg-destructive/10 text-destructive">
+                    <Ban className="size-3" /> Disabled
+                  </Badge>
+                )}
+              </div>
               <p className="mt-1 text-sm text-muted-foreground">
                 {restaurant.cuisine} · {restaurant.city} · {restaurant.priceRange ?? "—"}
               </p>
@@ -63,6 +120,41 @@ export default function AdminRestaurantDetail() {
             </div>
           </div>
           {restaurant.description && <p className="mt-3 text-sm text-muted-foreground">{restaurant.description}</p>}
+        </CardContent>
+      </Card>
+
+      {/* Moderation: disable / delete */}
+      <Card className="rounded-2xl border-border/70">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <ShieldCheck className="size-4 text-primary" /> Moderation
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="flex flex-wrap items-center gap-3">
+          <Button
+            variant={restaurant.disabled ? "outline" : "destructive"}
+            disabled={modBusy}
+            onClick={() => handleSetDisabled(!restaurant.disabled)}
+          >
+            {modBusy ? <Loader2 className="size-4 animate-spin" /> : restaurant.disabled ? <Store className="size-4" /> : <Ban className="size-4" />}
+            {restaurant.disabled ? "Re-enable restaurant" : "Disable restaurant"}
+          </Button>
+          <Button
+            variant="outline"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={modBusy}
+            onClick={() => setConfirmDelete(true)}
+          >
+            <Trash2 className="size-4" /> Delete restaurant permanently
+          </Button>
+          {restaurant.disabled && (
+            <p className="text-xs text-muted-foreground">
+              Hidden from Explore and new bookings until re-enabled. The owner can still see it.
+            </p>
+          )}
+          {modError && (
+            <p className="w-full rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{modError}</p>
+          )}
         </CardContent>
       </Card>
 
@@ -254,6 +346,31 @@ export default function AdminRestaurantDetail() {
           </Card>
         </TabsContent>
       </Tabs>
+
+      <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && !modBusy && setConfirmDelete(false)}>
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">Delete this restaurant permanently?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently erases {restaurant.name} and everything attached to it — sections,
+              hours, menus, bookings, reviews, stories, gifts and waitlists. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={modBusy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={modBusy}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleDelete();
+              }}
+            >
+              {modBusy ? <Loader2 className="size-4 animate-spin" /> : "Delete restaurant"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
