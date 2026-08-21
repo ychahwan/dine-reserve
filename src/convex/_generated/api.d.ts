@@ -9,6 +9,7 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as adminView from "../adminView.js";
 import type * as auth from "../auth.js";
 import type * as auth_passwordAuth from "../auth/passwordAuth.js";
 import type * as auth_phoneOtp from "../auth/phoneOtp.js";
@@ -41,6 +42,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  adminView: typeof adminView;
   auth: typeof auth;
   "auth/passwordAuth": typeof auth_passwordAuth;
   "auth/phoneOtp": typeof auth_phoneOtp;

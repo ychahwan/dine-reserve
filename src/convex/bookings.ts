@@ -1,7 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
-import { mutation, query, MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, query, MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { SEAT_KIND } from "./schema";
 import { notifyRestaurant } from "./notifications";
@@ -126,8 +126,10 @@ const BOOKING_ARGS_VALIDATOR = {
   occasion: v.optional(v.string()), // birthday, anniversary, proposal, business…
 };
 
-/** Direct (non-queued) booking path — delegates to the shared atomic logic. */
-export const createBooking = mutation({
+/** Direct (non-queued) booking path — delegates to the shared atomic logic.
+ * Internal only: diners must go through `queue.enqueue` so the FIFO queue is
+ * the single public booking entry point (see ARCH-01). */
+export const createBooking = internalMutation({
   args: BOOKING_ARGS_VALIDATOR,
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -198,22 +200,11 @@ async function commitBooking(
 // queries
 // ---------------------------------------------------------------------------
 
-export const getBookingWithRestaurant = query({
-  args: { id: v.id("bookings") },
-  handler: async (ctx, { id }) => {
-    const booking = await ctx.db.get(id);
-    if (!booking) return null;
-    const restaurant = await ctx.db.get(booking.restaurantId);
-    return {
-      booking,
-      restaurant: restaurant
-        ? { _id: restaurant._id, name: restaurant.name, address: restaurant.address, city: restaurant.city }
-        : null,
-    };
-  },
-});
-
-/** Public invite lookup: find a confirmed booking by its 6-char code. */
+/**
+ * Public invite lookup: find a confirmed booking by its 6-char code.
+ * Returns a minimized, display-safe DTO — never the full booking record — so
+ * an invite link can't leak the owner's email/phone/notes or guest user ids.
+ */
 export const byCode = query({
   args: { code: v.string() },
   handler: async (ctx, { code }) => {
@@ -225,11 +216,29 @@ export const byCode = query({
     const booking = hits.find((b) => b.status === "confirmed");
     if (!booking) return null;
     const restaurant = await ctx.db.get(booking.restaurantId);
+
+    // Whether the caller is already on the list (host or a confirmed guest).
+    // The invite link is public, but the caller may be signed in.
+    const userId = await getAuthUserId(ctx);
+    const guests = booking.guests ?? [];
+    const alreadyConfirmed =
+      userId !== null &&
+      (booking.userId === userId || guests.some((g) => g.userId === userId));
+
     return {
-      booking,
+      booking: {
+        _id: booking._id,
+        name: booking.name,
+        date: booking.date,
+        time: booking.time,
+        partySize: booking.partySize,
+        sectionName: booking.sectionName,
+        guests: guests.map((g) => ({ name: g.name })),
+      },
       restaurant: restaurant
         ? { _id: restaurant._id, name: restaurant.name, address: restaurant.address, city: restaurant.city, imageUrl: restaurant.imageUrl }
         : null,
+      alreadyConfirmed,
     };
   },
 });
@@ -493,15 +502,22 @@ export const updateStatus = mutation({
 export const confirmGuest = mutation({
   args: {
     bookingId: v.id("bookings"),
+    code: v.string(),
     name: v.string(),
   },
-  handler: async (ctx, { bookingId, name }) => {
+  handler: async (ctx, { bookingId, code, name }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
     const cleanName = parseOrThrow(guestNameSchema, name);
 
     const booking = await ctx.db.get(bookingId);
     if (!booking) throw new Error("Booking not found.");
+    // Verify the invite capability: the caller must present the booking's
+    // confirmation code, not just a guessable booking id.
+    const parsedCode = bookingCodeSchema.safeParse(code);
+    if (!parsedCode.success || booking.code !== parsedCode.data.toUpperCase()) {
+      throw new Error("This invitation link is not valid.");
+    }
     if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
 
     const today = new Date();

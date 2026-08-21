@@ -37,6 +37,7 @@ export default function Invite() {
     try {
       await confirmGuest({
         bookingId: data.booking._id as never,
+        code: code ?? "",
         name: user?.name ?? "Guest",
       });
       setConfirmed(true);
@@ -78,10 +79,8 @@ export default function Invite() {
     );
   }
 
-  const { booking, restaurant } = data;
+  const { booking, restaurant, alreadyConfirmed } = data;
   const guests = booking.guests ?? [];
-  const alreadyConfirmed =
-    user && (guests.some((g) => g.userId === user._id) || booking.name === user.name);
 
   return (
     <CustomerShell>
@@ -150,8 +149,8 @@ export default function Invite() {
                       Already confirmed
                     </p>
                     <div className="flex flex-wrap gap-1.5">
-                      {guests.map((g) => (
-                        <Badge key={g.confirmedAt} variant="secondary" className="gap-1">
+                      {guests.map((g, i) => (
+                        <Badge key={`${g.name}-${i}`} variant="secondary" className="gap-1">
                           <CheckCircle2 className="size-3" /> {g.name}
                         </Badge>
                       ))}

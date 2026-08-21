@@ -153,6 +153,7 @@ const schema = defineSchema(
       image: v.optional(v.string()), // image of the user. do not remove
       email: v.optional(v.string()), // email of the user. do not remove
       emailVerificationTime: v.optional(v.number()), // email verification time. do not remove
+      phoneVerificationTime: v.optional(v.number()), // phone verification time (auth library writes this). do not remove
       isAnonymous: v.optional(v.boolean()), // is the user anonymous. do not remove
 
       role: v.optional(roleValidator), // customer | owner | admin
@@ -497,13 +498,27 @@ const schema = defineSchema(
       .index("by_booking", ["bookingId"])
       .index("by_user", ["userId"]),
 
+    // Pending phone-number change. A signed-in user requests a change to a
+    // new number; we SMS an OTP to the NEW number and store the pending
+    // change here. Only after the code is verified does the phone actually
+    // move (users.phone + the phone-otp/password authAccounts providerAccountId).
+    phoneChangeRequests: defineTable({
+      userId: v.id("users"),
+      newPhone: v.string(), // the verified new number
+      codeHash: v.string(), // sha256 of the 6-digit OTP sent to newPhone
+      expiresAt: v.number(), // ms epoch; code is only valid until then
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_new_phone", ["newPhone"]),
+
     // A gift one diner sends to another at the same restaurant. The price is
     // snapped at send time and charged to the sender's bill. `reveal` decides
     // whether the receiver sees it immediately ("now") or only once the
     // restaurant marks it delivered ("on_delivery" — a surprise).
     giftDeliveries: defineTable({
       restaurantId: v.id("restaurants"),
-      bookingId: v.id("bookings"), // receiver's booking
+      bookingId: v.id("bookings"), // sender's booking (the bill this gift lands on)
       senderUserId: v.id("users"),
       receiverUserId: v.id("users"),
       giftId: v.optional(v.id("giftTypes")),
@@ -523,7 +538,7 @@ const schema = defineSchema(
       .index("by_receiver", ["receiverUserId"]),
   },
   {
-    schemaValidation: false,
+    schemaValidation: true,
   },
 );
 

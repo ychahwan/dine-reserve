@@ -229,6 +229,85 @@ export const listMine = query({
   },
 });
 
+/**
+ * "Trending now": restaurants ranked by confirmed covers over the last 7
+ * days. Returns restaurant ids for the Explore discovery rail.
+ */
+export const trending = query({
+  args: {},
+  handler: async (ctx) => {
+    const bookings = await ctx.db.query("bookings").collect();
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 7);
+    const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+
+    const covers = new Map<string, number>();
+    for (const b of bookings) {
+      if (b.status === "confirmed" && b.date >= cutoffKey) {
+        covers.set(b.restaurantId, (covers.get(b.restaurantId) ?? 0) + b.partySize);
+      }
+    }
+    return [...covers.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 6)
+      .map(([id]) => id as Id<"restaurants">);
+  },
+});
+
+/**
+ * "For you": deterministic, personalized recommendations built from the
+ * diner's favorites, cuisines they've actually booked, and dietary tags.
+ * This is the rule-based fallback for the AI concierge (see docs/AI_PLAN.md).
+ */
+export const forYou = query({
+  args: {},
+  handler: async (ctx) => {
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) return [];
+    const user = await ctx.db.get(userId);
+    if (!user) return [];
+
+    const [restaurants, pastBookings] = await Promise.all([
+      ctx.db.query("restaurants").collect(),
+      ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+    ]);
+
+    const favs = new Set(user.favorites ?? []);
+    const dietary = (user.prefs?.dietary ?? []).map((d) => d.toLowerCase());
+
+    const pastCuisines = new Set<string>();
+    await Promise.all(
+      pastBookings.map(async (b) => {
+        const r = await ctx.db.get(b.restaurantId);
+        if (r) pastCuisines.add(r.cuisine.toLowerCase());
+      }),
+    );
+
+    const scored: { id: Id<"restaurants">; score: number }[] = [];
+    for (const r of restaurants) {
+      let score = 0;
+      if (favs.has(r._id)) score += 3;
+      if (pastCuisines.has(r.cuisine.toLowerCase())) score += 2;
+      if (dietary.length > 0) {
+        const items = await ctx.db
+          .query("menuItems")
+          .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+          .collect();
+        const matches = dietary.some((d) =>
+          items.some((it) => it.available && (it.tags ?? []).some((t) => t.toLowerCase() === d)),
+        );
+        if (matches) score += 1;
+      }
+      if (score > 0) scored.push({ id: r._id, score });
+    }
+
+    return scored
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 6)
+      .map((s) => s.id);
+  },
+});
+
 // ---------------------------------------------------------------------------
 // restaurant CRUD
 // ---------------------------------------------------------------------------

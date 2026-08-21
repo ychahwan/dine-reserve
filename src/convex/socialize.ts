@@ -136,6 +136,27 @@ export const visibleDiners = query({
   handler: async (ctx, { restaurantId }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
+
+    // Authorization (SEC-03): only a diner attending this restaurant today
+    // (or its owner) may see the Socialize room. Prevents any signed-in user
+    // from enumerating diner identities at an arbitrary restaurant.
+    const restaurant = await ctx.db.get(restaurantId);
+    const isOwner = !!restaurant && restaurant.ownerId === userId;
+    if (!isOwner) {
+      const myBookings = await ctx.db
+        .query("bookings")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .collect();
+      const today = todayKey();
+      const attending = myBookings.some(
+        (b) =>
+          b.restaurantId === restaurantId &&
+          b.status === "confirmed" &&
+          b.date === today,
+      );
+      if (!attending) return [];
+    }
+
     const presences = await ctx.db
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
@@ -163,8 +184,6 @@ export const visibleDiners = query({
           booking: {
             time: booking.time,
             sectionName: booking.sectionName,
-            partySize: booking.partySize,
-            code: booking.code,
           },
         };
       })

@@ -13,7 +13,16 @@ const Landing = lazy(() => import("./pages/Landing.tsx"));
 const AuthPage = lazy(() => import("./pages/Auth.tsx"));
 const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const SetPassword = lazy(() => import("./pages/SetPassword.tsx"));
-const Admin = lazy(() => import("./pages/Admin.tsx"));
+const AdminShell = lazy(() => import("./components/AdminShell.tsx"));
+const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
+const AdminRestaurants = lazy(() => import("./pages/admin/AdminRestaurants.tsx"));
+const AdminRestaurantDetail = lazy(() => import("./pages/admin/AdminRestaurantDetail.tsx"));
+const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
+const AdminUserDetail = lazy(() => import("./pages/admin/AdminUserDetail.tsx"));
+const AdminReviews = lazy(() => import("./pages/admin/AdminReviews.tsx"));
+const AdminAudit = lazy(() => import("./pages/admin/AdminAudit.tsx"));
+const AdminRegister = lazy(() => import("./pages/admin/AdminRegister.tsx"));
+const AdminTag = lazy(() => import("./pages/admin/AdminTag.tsx"));
 const Explore = lazy(() => import("./pages/Explore.tsx"));
 const RestaurantDetail = lazy(() => import("./pages/RestaurantDetail.tsx"));
 const MyBookings = lazy(() => import("./pages/MyBookings.tsx"));
@@ -126,15 +135,25 @@ createRoot(document.getElementById("root")!).render(
                   </RequireAuth>
                 }
               />
-              {/* Platform admin console (role-gated inside the page) */}
+              {/* Platform admin console (role-gated in AdminShell) */}
               <Route
                 path="/admin"
                 element={
                   <RequireAuth>
-                    <Admin />
+                    <AdminShell />
                   </RequireAuth>
                 }
-              />
+              >
+                <Route index element={<AdminDashboard />} />
+                <Route path="restaurants" element={<AdminRestaurants />} />
+                <Route path="restaurants/:id" element={<AdminRestaurantDetail />} />
+                <Route path="users" element={<AdminUsers />} />
+                <Route path="users/:id" element={<AdminUserDetail />} />
+                <Route path="reviews" element={<AdminReviews />} />
+                <Route path="audit" element={<AdminAudit />} />
+                <Route path="register" element={<AdminRegister />} />
+                <Route path="tag" element={<AdminTag />} />
+              </Route>
               {/* Customer app */}
               <Route
                 path="/explore"

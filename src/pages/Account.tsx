@@ -3,6 +3,11 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import {
+  InputOTP,
+  InputOTPGroup,
+  InputOTPSlot,
+} from "@/components/ui/input-otp";
 import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "@/hooks/use-auth";
@@ -12,8 +17,11 @@ import {
   CalendarCheck2,
   Compass,
   Heart,
+  KeyRound,
   Loader2,
   LogOut,
+  MessageSquare,
+  Phone,
   ShieldCheck,
   Sofa,
   Sparkles,
@@ -41,18 +49,41 @@ export default function Account() {
   const updateProfile = useMutation(api.users.updateProfile);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
   const favorites = useQuery(api.users.myFavorites);
+  const setPassword = useMutation(api.users.setPassword);
+  const startPhoneChange = useMutation(api.users.startPhoneChange);
+  const confirmPhoneChange = useMutation(api.users.confirmPhoneChange);
+
+  // OTP-only diners have no password yet — setting one for the first time
+  // doesn't require a "current" password.
+  const hasPassword = useQuery(
+    api.users.hasPasswordAccount,
+    user?.phone ? { phone: user.phone } : "skip",
+  );
+  const needsCurrentPassword = hasPassword?.exists === true;
 
   const [name, setName] = useState("");
-  const [phone, setPhone] = useState("");
   const [dietary, setDietary] = useState<string[]>([]);
   const [seating, setSeating] = useState<string[]>([]);
   const [occasions, setOccasions] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // ── Change phone (OTP to the NEW number) ──
+  const [newPhone, setNewPhone] = useState("");
+  const [phoneCode, setPhoneCode] = useState("");
+  const [phoneStep, setPhoneStep] = useState<"idle" | "code-sent" | "verifying">("idle");
+  const [phoneBusy, setPhoneBusy] = useState(false);
+  const [phoneError, setPhoneError] = useState<string | null>(null);
+
+  // ── Change password (with current password) ──
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwBusy, setPwBusy] = useState(false);
+  const [pwError, setPwError] = useState<string | null>(null);
+
   useEffect(() => {
     if (user?.name !== undefined) setName(user.name ?? "");
-    if (user?.phone !== undefined) setPhone(user.phone ?? "");
     if (user?.prefs) {
       setDietary(user.prefs.dietary ?? []);
       setSeating(user.prefs.seating ?? []);
@@ -62,7 +93,7 @@ export default function Account() {
       setSeating([]);
       setOccasions([]);
     }
-  }, [user?.name, user?.phone, user?.prefs]);
+  }, [user?.name, user?.prefs]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -71,7 +102,6 @@ export default function Account() {
     try {
       await updateProfile({
         name,
-        phone: phone || undefined,
         prefs: { dietary, seating: seating as ("inside" | "outside" | "bar")[], occasions },
       });
       toast.success("Profile updated");
@@ -79,6 +109,72 @@ export default function Account() {
       setError(err instanceof Error ? err.message : "Could not save changes.");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Send an OTP to the NEW number — nothing moves until the code is verified.
+  const handleStartPhoneChange = async () => {
+    if (!newPhone.trim()) {
+      setPhoneError("Enter the new phone number.");
+      return;
+    }
+    setPhoneBusy(true);
+    setPhoneError(null);
+    try {
+      await startPhoneChange({ newPhone: newPhone.trim() });
+      setPhoneStep("code-sent");
+      setPhoneCode("");
+      toast.success("Code sent to the new number");
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : "Could not send the code.");
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  const handleConfirmPhoneChange = async () => {
+    if (phoneCode.length !== 6) return;
+    setPhoneBusy(true);
+    setPhoneError(null);
+    try {
+      const updated = await confirmPhoneChange({ code: phoneCode });
+      setPhoneStep("idle");
+      setNewPhone("");
+      setPhoneCode("");
+      toast.success(`Phone updated to ${updated?.phone ?? "the new number"}`);
+    } catch (err) {
+      setPhoneError(err instanceof Error ? err.message : "Incorrect code. Try again.");
+      setPhoneCode("");
+    } finally {
+      setPhoneBusy(false);
+    }
+  };
+
+  const handleChangePassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(null);
+    if (newPassword.length < 8) {
+      setPwError("New password must be at least 8 characters.");
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      setPwError("New passwords don't match.");
+      return;
+    }
+    setPwBusy(true);
+    try {
+      await setPassword({
+        newPassword,
+        ...(needsCurrentPassword ? { currentPassword } : {}),
+      });
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      toast.success(needsCurrentPassword ? "Password updated" : "Password set");
+    } catch (err) {
+      setPwError(err instanceof Error ? err.message : "Could not update your password.");
+    } finally {
+      setPwBusy(false);
     }
   };
 
@@ -163,17 +259,29 @@ export default function Account() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="acc-phone">Phone (for SMS confirmations)</Label>
-                <Input
-                  id="acc-phone"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 555 010 2030"
-                  type="tel"
-                  disabled={saving}
-                />
+                <Label>Phone (for SMS confirmations)</Label>
+                <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm">
+                  <Phone className="size-4 shrink-0 text-muted-foreground" />
+                  <span className="flex-1 truncate">
+                    {user?.phone ?? "Not set"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs text-primary"
+                    onClick={() => {
+                      setPhoneStep("idle");
+                      document
+                        .getElementById("change-phone-card")
+                        ?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }}
+                  >
+                    Change
+                  </Button>
+                </div>
                 <p className="text-xs text-muted-foreground">
-                  Booking confirmations and day-before reminders are sent here by SMS.
+                  Changing your number sends a verification code to the new number first.
                 </p>
               </div>
               {error && (
@@ -191,6 +299,184 @@ export default function Account() {
                 )}
               </Button>
             </form>
+          </CardContent>
+        </Card>
+
+        {/* Security — change phone (OTP on new number) + change password */}
+        <Card
+          id="change-phone-card"
+          className="mt-4 rounded-2xl border-border/70 p-0 shadow-sm"
+        >
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <ShieldCheck className="size-4 text-primary" /> Security
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-5">
+            {/* Change phone number */}
+            <div className="rounded-xl border border-border/70 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <Phone className="size-4 text-primary" /> Change phone number
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                We text a code to the <strong>new</strong> number. Your login and SMS
+                confirmations move only after you verify it.
+              </p>
+              {phoneStep === "idle" ? (
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <Input
+                    type="tel"
+                    placeholder="+961 71 123 456"
+                    value={newPhone}
+                    onChange={(e) => setNewPhone(e.target.value)}
+                    disabled={phoneBusy}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={handleStartPhoneChange}
+                    disabled={phoneBusy || !newPhone.trim()}
+                    className="shrink-0"
+                  >
+                    {phoneBusy ? (
+                      <Loader2 className="mr-2 size-4 animate-spin" />
+                    ) : (
+                      <MessageSquare className="mr-2 size-4" />
+                    )}
+                    Send code
+                  </Button>
+                </div>
+              ) : (
+                <div className="mt-3 space-y-3">
+                  <p className="text-xs text-muted-foreground">
+                    Enter the 6-digit code sent to <strong>{newPhone}</strong>
+                  </p>
+                  <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
+                    <InputOTP
+                      value={phoneCode}
+                      onChange={setPhoneCode}
+                      maxLength={6}
+                      disabled={phoneBusy}
+                    >
+                      <InputOTPGroup>
+                        {Array.from({ length: 6 }).map((_, index) => (
+                          <InputOTPSlot key={index} index={index} />
+                        ))}
+                      </InputOTPGroup>
+                    </InputOTP>
+                    <div className="flex gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setPhoneStep("idle");
+                          setPhoneError(null);
+                          setPhoneCode("");
+                        }}
+                        disabled={phoneBusy}
+                      >
+                        Back
+                      </Button>
+                      <Button
+                        type="button"
+                        size="sm"
+                        onClick={handleConfirmPhoneChange}
+                        disabled={phoneBusy || phoneCode.length !== 6}
+                      >
+                        {phoneBusy && <Loader2 className="mr-2 size-4 animate-spin" />}
+                        Confirm
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Didn&apos;t get it?{" "}
+                    <Button
+                      type="button"
+                      variant="link"
+                      className="h-auto p-0 text-xs"
+                      onClick={handleStartPhoneChange}
+                      disabled={phoneBusy}
+                    >
+                      Resend code
+                    </Button>
+                  </p>
+                </div>
+              )}
+              {phoneError && (
+                <p className="mt-2 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {phoneError}
+                </p>
+              )}
+            </div>
+
+            {/* Change password */}
+            <div className="rounded-xl border border-border/70 p-4">
+              <p className="flex items-center gap-2 text-sm font-semibold">
+                <KeyRound className="size-4 text-primary" /> Change password
+              </p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {needsCurrentPassword
+                  ? "Use your current password. If you forgot it, sign out and use “Forgot password?” on the login screen — a temporary code is texted to your phone."
+                  : "You don't have a password yet — set one here so you can log in without SMS."}
+              </p>
+              <form onSubmit={handleChangePassword} className="mt-3 space-y-3">
+                {needsCurrentPassword && (
+                  <div className="space-y-2">
+                    <Label htmlFor="acc-current-password">Current password</Label>
+                    <Input
+                      id="acc-current-password"
+                      type="password"
+                      placeholder="Your current password"
+                      value={currentPassword}
+                      onChange={(e) => setCurrentPassword(e.target.value)}
+                      disabled={pwBusy}
+                      required
+                    />
+                  </div>
+                )}
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="acc-new-password">New password</Label>
+                    <Input
+                      id="acc-new-password"
+                      type="password"
+                      placeholder="At least 8 characters"
+                      value={newPassword}
+                      onChange={(e) => setNewPassword(e.target.value)}
+                      disabled={pwBusy}
+                      required
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="acc-confirm-password">Confirm new password</Label>
+                    <Input
+                      id="acc-confirm-password"
+                      type="password"
+                      placeholder="Repeat new password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      disabled={pwBusy}
+                      required
+                    />
+                  </div>
+                </div>
+                {pwError && (
+                  <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                    {pwError}
+                  </p>
+                )}
+                <Button
+                  type="submit"
+                  variant="outline"
+                  disabled={pwBusy || newPassword.length < 8 || newPassword !== confirmPassword}
+                  className="w-full sm:w-auto"
+                >
+                  {pwBusy && <Loader2 className="mr-2 size-4 animate-spin" />}
+                  Update password
+                </Button>
+              </form>
+            </div>
           </CardContent>
         </Card>
 

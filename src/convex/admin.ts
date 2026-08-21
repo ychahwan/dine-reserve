@@ -58,12 +58,25 @@ export const claimPlatformAdmin = mutation({
     if (userId === null) throw new Error("You must be signed in.");
     const user = await ctx.db.get(userId);
     if (!user) throw new Error("User not found.");
-    if (user.phone !== PLATFORM_ADMIN_PHONE) {
-      throw new Error("This phone number is not the platform admin.");
-    }
     if (user.role === "admin") {
       throw new Error("This account already has admin access.");
     }
+
+    // Prove ownership of the platform-admin phone via the VERIFIED auth
+    // account (phone-otp provider), never via the mutable users.phone profile
+    // field. An attacker who edits their profile phone cannot satisfy this
+    // check: providerAccountId is fixed at account creation by the auth
+    // provider and is not reachable through updateProfile.
+    const phoneAccount = await ctx.db
+      .query("authAccounts")
+      .withIndex("userIdAndProvider", (q) =>
+        q.eq("userId", userId).eq("provider", "phone-otp"),
+      )
+      .first();
+    if (phoneAccount?.providerAccountId !== PLATFORM_ADMIN_PHONE) {
+      throw new Error("This phone number is not the platform admin.");
+    }
+
     await ctx.db.patch(userId, { role: "admin", onboarded: true });
     await logAdminAction(ctx, userId, "claimPlatformAdmin");
     return await ctx.db.get(userId);

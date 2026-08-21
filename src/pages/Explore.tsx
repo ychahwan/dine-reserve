@@ -8,6 +8,7 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
   CalendarDays,
+  Flame,
   Heart,
   MapPin,
   Search,
@@ -47,6 +48,8 @@ type AvailabilitySummary = {
 
 export default function Explore() {
   const restaurants = useQuery(api.restaurants.search, {});
+  const trending = useQuery(api.restaurants.trending);
+  const forYou = useQuery(api.restaurants.forYou);
   const ensureDemoData = useMutation(api.seed.ensureDemoData);
   const [seeded, setSeeded] = useState(false);
 
@@ -123,6 +126,11 @@ export default function Explore() {
   const favoriteIds = useMemo(
     () => new Set((favorites ?? []).map((r) => r._id)),
     [favorites],
+  );
+
+  // Discovery rails only show in the unfiltered "browse" state.
+  const hasActiveFilters = !!(
+    q.trim() || cuisine || city || seat || nonSmoking || dietary || solo
   );
 
   // The chosen day + party (+ seating preference) carry into the restaurant
@@ -373,6 +381,50 @@ export default function Explore() {
                     </button>
                   </Link>
                 </Card>
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* For you — personalized recommendations (deterministic concierge) */}
+        {!hasActiveFilters && (forYou ?? []).length > 0 && (
+          <section className="mt-6">
+            <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <Sparkles className="size-3.5 text-primary" /> For you
+            </h2>
+            <div className="mt-3 space-y-3">
+              {forYou!.map((id) => (
+                <RestaurantCard
+                  key={id}
+                  id={id}
+                  to={cardLink(id)}
+                  summary={summaryMap.get(id)}
+                  date={quickDate ?? today()}
+                  favorited={favoriteIds.has(id)}
+                  onToggleFavorite={handleToggleFavorite}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {/* Trending now — popular this week */}
+        {!hasActiveFilters && (trending ?? []).length > 0 && (
+          <section className="mt-6">
+            <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
+              <Flame className="size-3.5 text-orange-500" /> Trending now
+            </h2>
+            <div className="mt-3 space-y-3">
+              {trending!.map((id) => (
+                <RestaurantCard
+                  key={id}
+                  id={id}
+                  to={cardLink(id)}
+                  summary={summaryMap.get(id)}
+                  date={quickDate ?? today()}
+                  favorited={favoriteIds.has(id)}
+                  onToggleFavorite={handleToggleFavorite}
+                />
               ))}
             </div>
           </section>

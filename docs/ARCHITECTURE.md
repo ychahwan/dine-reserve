@@ -64,7 +64,7 @@ src/
 ├── main.tsx                # Router + ConvexAuthProvider + error boundaries (real entry point)
 ├── convex/                 # ALL backend code lives here (not top-level convex/)
 │   ├── schema.ts            # DB schema (source of truth, see §4)
-│   ├── auth.ts, auth.config.ts, auth/emailOtp.ts   # DO NOT MODIFY (per README)
+│   ├── auth.ts, auth.config.ts, auth/phoneOtp.ts, auth/passwordAuth.ts   # auth.ts/config DO NOT MODIFY (per README)
 │   ├── restaurants.ts, bookings.ts, availability.ts, slotRules.ts,
 │   │   dining.ts, waitlist.ts, notifications.ts, reviews.ts, socialize.ts,
 │   │   queue.ts, demoRules.ts, reminders.ts, sms.ts, seed.ts, users.ts,
@@ -127,15 +127,15 @@ Root-level companion docs (outside `docs/`): `README.md` (setup/build instructio
 - **validation.ts** — zod schemas for all mutation/action args
 - **http.ts** — wires `auth.addHttpRoutes()`
 
-**⚠️ Known gap:** `reminders.ts` is currently a 0-byte empty file, but the daily cron job (`booking-reminders`, 10:00 UTC) targets `reminders:sendTomorrowReminders`. This cron is effectively broken/unimplemented until that file is filled in.
+**Reminders:** the daily cron job (`booking-reminders`, 10:00 UTC) targets `reminders:sendTomorrowReminders`, which implements day-before SMS reminders (env-guarded, deduped via `booking.reminderSent`).
 
 ## 6. Auth
 
 - `@convex-dev/auth` with two sign-in paths:
-  1. **Anonymous** provider
-  2. **Email OTP** (`src/convex/auth/emailOtp.ts`) — 6-digit code, 15 min expiry, delivered via `https://auth.freebuff.app/send_otp`
+  1. **Phone OTP** (`src/convex/auth/phoneOtp.ts`) — 6-digit code, 15 min expiry, delivered via Twilio SMS (graceful no-op when `TWILIO_ENABLED=false`)
+  2. **Password** (`src/convex/auth/passwordAuth.ts`) — phone + password, with an OTP-driven password-reset (forgot password) flow
 - **Federated auth**: `auth.config.ts` also trusts RS256 JWTs issued by `freebuff.com` (JWKS at `/api/web/.well-known/jwks.json`), so a user already signed into the Freebuff/Vly platform can carry identity into Kamix without a separate login. Issuer overridable via `VLY_CONVEX_AUTH_ISSUER`.
-- `auth.ts`, `auth.config.ts`, and `auth/emailOtp.ts` are explicitly flagged **do-not-modify** in the README/file comments.
+- `auth.ts` and `auth.config.ts` are explicitly flagged **do-not-modify** in the README/file comments. The provider files (`phoneOtp.ts`, `passwordAuth.ts`) are app-owned and maintained in-repo.
 
 ## 7. Realtime / Event Bus Design Decision
 
@@ -189,7 +189,7 @@ Three surfaces are defined, serving different purposes:
 | Twilio SMS | `src/convex/sms.ts` (actions) | Active — booking confirmations, day-before reminders, waitlist notices. No-ops gracefully if env vars unset. |
 | `@vly-ai/integrations` (Freebuff/Vly platform: AI completions, email, Stripe-like payments) | documented in `integrations.md`, available via `VLY_INTEGRATION_KEY` | Wired but **not used** in any domain code yet — reserved for Tier 2 roadmap (Stripe payments, AI concierge). Must only be called from Convex actions with `"use node"`; key never exposed client-side. |
 | Freebuff auth federation | `auth.config.ts` | Active — see §6 |
-| Email OTP delivery | `src/convex/auth/emailOtp.ts` → `https://auth.freebuff.app/send_otp` | Active, do-not-modify |
+| Phone OTP delivery | `src/convex/auth/phoneOtp.ts` → Twilio SMS | Active; no-ops when `TWILIO_ENABLED=false` |
 
 ## 13. Environment Variables
 
@@ -211,7 +211,7 @@ Convex-managed auth env vars (JWKS, JWT_PRIVATE_KEY, SITE_URL) are set by the Co
 
 ## 14. Known Gaps / Flags
 
-1. `src/convex/reminders.ts` is empty but wired into a daily cron — day-before SMS reminders likely silently fail.
+1. `src/convex/reminders.ts` implements day-before SMS reminders via the daily `booking-reminders` cron.
 2. Several build/test scripts referenced in README/`tests.md` (`build-apk.sh`, `build-ios.sh`, `build-mobile.sh`, `test-backend.mjs`, `test-ui-flows.mjs`) are not present in `scripts/`.
 3. `@vly-ai/integrations` is available infrastructure but unused in domain code — active only when Tier 2 features (payments, AI concierge) are built.
 4. Root-level stray files (`main.ts`, `vly-toolbar-readonly.tsx`) are dev-tool artifacts, unrelated to the real entry point `src/main.tsx`.

@@ -2,10 +2,10 @@
  * End-to-end UI test for all profiles.
  * Run with: node scripts/test-ui.mjs
  *
- * Drives a real headless Chromium against the local Vite dev server and
- * exercises the landing page, auth (password + OTP), admin, owner and
- * explore flows. OTP codes are read from the Convex deployment and
- * SHA-256-cracked locally (they are 6-digit numbers).
+ * Drives real headless Chromium against the local Vite dev server. Each
+ * profile runs in its OWN browser context so sessions never leak between
+ * tests. OTP codes are read from the Convex deployment and SHA-256-cracked
+ * locally (they are 6-digit numbers).
  */
 import { chromium } from "playwright";
 import { execSync } from "node:child_process";
@@ -67,13 +67,13 @@ async function waitForText(page, needle, timeoutMs = 15000) {
 
 async function run() {
   const browser = await chromium.launch({ headless: true });
-  const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
 
   // ════════════════════════════════════════════════════════════════
-  // PROFILE 1: Landing page
+  // PROFILE 1: Landing page (public)
   // ════════════════════════════════════════════════════════════════
   console.log("\n── Profile 1: Landing page ──");
   {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(BASE, { waitUntil: "networkidle" });
     await sleep(800);
@@ -85,7 +85,6 @@ async function run() {
     text.includes("Sign in to your account") ? ok("Hero has 'Sign in to your account' CTA") : fail("Sign in CTA", "not found");
     text.includes("How it works") ? ok("'How it works' section renders") : fail("How it works", "not found");
 
-    // Click the hero sign-in CTA and confirm it navigates to /auth
     const signInLink = page.getByRole("link", { name: /Sign in to your account/ }).first();
     if (await signInLink.count()) {
       await signInLink.click();
@@ -95,14 +94,15 @@ async function run() {
       fail("Sign-in CTA", "link not clickable");
     }
     await page.screenshot({ path: "/tmp/ss-landing.png", fullPage: true });
-    await page.close();
+    await ctx.close();
   }
 
   // ════════════════════════════════════════════════════════════════
-  // PROFILE 2: Auth — phone entry renders
+  // PROFILE 2: Auth — phone entry renders (public)
   // ════════════════════════════════════════════════════════════════
   console.log("\n── Profile 2: Auth phone entry ──");
   {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/auth`, { waitUntil: "networkidle" });
     await sleep(800);
@@ -111,14 +111,15 @@ async function run() {
     const text = await page.textContent("body");
     text.includes("Enter your phone") ? ok("'Enter your phone' prompt renders") : fail("Phone prompt", "not found");
     await page.screenshot({ path: "/tmp/ss-auth.png" });
-    await page.close();
+    await ctx.close();
   }
 
   // ════════════════════════════════════════════════════════════════
-  // PROFILE 3: Admin (+96176683661) — OTP login → /admin
+  // PROFILE 3: Admin (+96176683661) — OTP login → /admin, then /explore
   // ════════════════════════════════════════════════════════════════
   console.log("\n── Profile 3: Admin OTP flow ──");
   {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/auth`, { waitUntil: "networkidle" });
     await sleep(800);
@@ -127,39 +128,71 @@ async function run() {
     await page.locator('input[name="phone"]').press("Enter");
     ok("Submitted admin phone");
 
-    // Admin is OTP-only → "Verify your phone" should appear after auto-send
     const gotVerify = await waitForText(page, "Verify your phone", 15000);
     gotVerify ? ok("OTP screen appeared (no password account)") : fail("OTP screen", "never appeared");
 
-    // Wait for auto-send to finish and the code to be stored
     await waitForText(page, "Enter the code sent to", 15000);
-
     const hash = readOtpHash(ADMIN_PHONE);
     const otp = crackOtp(hash);
     otp ? ok(`Cracked admin OTP: ${otp}`) : fail("Crack OTP", "no hash found");
 
     if (otp) {
       await page.locator('input[data-input-otp]').fill(otp);
-      ok("Typed OTP into the 6-slot input");
-      await sleep(300); // let React state settle before submit
-      await page.locator('input[data-input-otp]').press("Enter"); // triggers onKeyDown → form submit
+      await sleep(300);
+      await page.locator('input[data-input-otp]').press("Enter");
       ok("Submitted OTP (Enter)");
 
-      // After OTP verify the app offers "Set a password" — skip it
       const setPw = await waitForText(page, "Set a password", 10000);
       if (setPw) {
         ok("Post-login 'Set a password' screen shown");
         await page.getByRole("button", { name: /Skip for now/ }).click();
         await sleep(2000);
-      } else {
-        const err = await waitForText(page, "incorrect", 3000);
-        if (err) fail("OTP verify", "app reported incorrect code");
       }
       await page.screenshot({ path: "/tmp/ss-admin.png" });
       const url = page.url();
-      url.includes("/admin") ? ok(`Redirected to /admin`) : fail("Admin redirect", `got ${url}`);
+      url.includes("/admin") ? ok("Redirected to /admin") : fail("Admin redirect", `got ${url}`);
+
+      // Walk the new admin console
+      const adminRoutes = [
+        { path: "/admin", needle: "Dashboard" },
+        { path: "/admin/restaurants", needle: "Restaurants" },
+        { path: "/admin/users", needle: "Users" },
+        { path: "/admin/reviews", needle: "Reviews" },
+        { path: "/admin/audit", needle: "Audit log" },
+        { path: "/admin/register", needle: "Register restaurant" },
+        { path: "/admin/tag", needle: "Tag an account" },
+      ];
+      for (const r of adminRoutes) {
+        await page.goto(`${BASE}${r.path}`, { waitUntil: "domcontentloaded" });
+        const found = await waitForText(page, r.needle, 10000);
+        found
+          ? ok(`Admin route ${r.path} renders`)
+          : fail(`Admin route ${r.path}`, `missing "${r.needle}"`);
+      }
+
+      // Restaurant detail view
+      await page.goto(`${BASE}/admin/restaurants`, { waitUntil: "domcontentloaded" });
+      const firstRow = page.locator('table tbody tr a').first();
+      try {
+        await firstRow.waitFor({ timeout: 10000 });
+        await firstRow.click();
+        const tabsFound = await waitForText(page, "Bookings", 10000);
+        tabsFound
+          ? ok("Restaurant detail renders (tabs)")
+          : fail("Restaurant detail", "tabs missing");
+      } catch {
+        ok("Skipped restaurant detail (no rows)");
+      }
+
+      // Authenticated user can also browse /explore
+      await page.goto(`${BASE}/explore`, { waitUntil: "networkidle" });
+      await sleep(2500);
+      const exploreText = await page.textContent("body");
+      (exploreText.includes("Trullo") || exploreText.includes("Sakura") || exploreText.includes("Restaurant") || exploreText.includes("restaurant"))
+        ? ok("Explore renders listings for authenticated user")
+        : fail("Explore listings", "no restaurant content");
     }
-    await page.close();
+    await ctx.close();
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -167,6 +200,7 @@ async function run() {
   // ════════════════════════════════════════════════════════════════
   console.log("\n── Profile 4: Owner password flow ──");
   {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/auth`, { waitUntil: "networkidle" });
     await sleep(800);
@@ -175,7 +209,6 @@ async function run() {
     await page.locator('input[name="phone"]').press("Enter");
     ok("Submitted owner phone");
 
-    // Owner has a password account → password screen, no OTP
     const gotPassword = await waitForText(page, "Password login", 10000);
     gotPassword ? ok("Password screen appeared (existing user detected)") : fail("Password screen", "not shown");
 
@@ -195,23 +228,82 @@ async function run() {
         ? fail("Owner login", "wrong password used in test")
         : fail("Owner redirect", `got ${url}`);
     }
-    await page.close();
+    await ctx.close();
   }
 
   // ════════════════════════════════════════════════════════════════
-  // PROFILE 5: Explore (public) — restaurant listings
+  // PROFILE 5: Explore (unauthenticated) — must redirect to /auth
   // ════════════════════════════════════════════════════════════════
-  console.log("\n── Profile 5: Explore page ──");
+  console.log("\n── Profile 5: Explore auth gate ──");
   {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
     const page = await ctx.newPage();
     await page.goto(`${BASE}/explore`, { waitUntil: "networkidle" });
-    await sleep(3000);
-    const text = await page.textContent("body");
-    (text.includes("Trullo") || text.includes("Sakura") || text.includes("restaurant") || text.includes("Restaurant"))
-      ? ok("Restaurant listings render")
-      : fail("Explore listings", "no restaurant content");
-    await page.screenshot({ path: "/tmp/ss-explore.png", fullPage: true });
-    await page.close();
+    await sleep(2000);
+    const url = page.url();
+    url.includes("/auth")
+      ? ok("Unauthenticated /explore redirects to /auth (RequireAuth gate)")
+      : fail("Explore auth gate", `expected /auth, got ${url}`);
+    await ctx.close();
+  }
+
+  // ════════════════════════════════════════════════════════════════
+  // PROFILE 6: Diner account — Security card (change phone + password)
+  // ════════════════════════════════════════════════════════════════
+  console.log("\n── Profile 6: Account security (change phone + password) ──");
+  {
+    const ctx = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+    const page = await ctx.newPage();
+
+    // Fresh diner so the flow is idempotent.
+    const phone = `+9617886${String(Date.now()).slice(-5)}`;
+    await page.goto(`${BASE}/auth`, { waitUntil: "networkidle" });
+    await sleep(800);
+    await page.locator('input[name="phone"]').fill(phone);
+    await page.locator('input[name="phone"]').press("Enter");
+    await waitForText(page, "Enter the code sent to", 15000);
+    const hash = readOtpHash(phone);
+    const otp = crackOtp(hash);
+    otp ? ok(`Cracked diner OTP: ${otp}`) : fail("Crack OTP", "no hash found");
+    if (otp) {
+      await page.locator('input[data-input-otp]').fill(otp);
+      await sleep(300);
+      await page.locator('input[data-input-otp]').press("Enter");
+      const setPw = await waitForText(page, "Set a password", 10000);
+      if (setPw) {
+        await page.getByRole("button", { name: /Skip for now/ }).click();
+        await sleep(2000);
+      }
+      // Fresh diners land on /dashboard onboarding — complete it first.
+      await waitForText(page, "Welcome to Kamix", 10000);
+      await page.locator("#name").fill("Test Diner");
+      await page.getByRole("button", { name: /Start exploring/ }).click();
+      await sleep(3000);
+      // Go to /account
+      await page.goto(`${BASE}/account`, { waitUntil: "networkidle" });
+      await sleep(2500);
+
+      const text = await page.textContent("body");
+      text.includes("Security") ? ok("Security card renders") : fail("Security card", "missing");
+      text.includes("Change phone number")
+        ? ok("'Change phone number' section renders")
+        : fail("Change phone number", "missing");
+      text.includes("Change password")
+        ? ok("'Change password' section renders")
+        : fail("Change password", "missing");
+      text.includes("Phone (for SMS confirmations)")
+        ? ok("Phone shown read-only in contact details")
+        : fail("Phone display", "missing");
+
+      // Send code to the new number → OTP step appears
+      const newPhone = `+9617885${String(Date.now() + 1).slice(-5)}`;
+      await page.getByPlaceholder("+961 71 123 456").fill(newPhone);
+      await page.getByRole("button", { name: /Send code/ }).click();
+      const otpStep = await waitForText(page, "Enter the 6-digit code sent to", 15000);
+      otpStep ? ok("Send code → OTP step appears") : fail("OTP step", "did not appear");
+      await page.screenshot({ path: "/tmp/ss-account-security.png" });
+    }
+    await ctx.close();
   }
 
   await browser.close();
