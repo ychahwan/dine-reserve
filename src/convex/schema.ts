@@ -625,6 +625,19 @@ const schema = defineSchema(
       .index("by_booking", ["bookingId"])
       .index("by_sender", ["senderUserId"])
       .index("by_receiver", ["receiverUserId"]),
+
+    // Platform-level configuration editable by the admin in the console:
+    // API keys (Gemini, Twilio, …) stored server-side so they can be
+    // changed at runtime without redeploying environment variables.
+    // `value` is plaintext in the DB — the admin console masks it in the UI
+    // and the value is only readable by admins through the settings actions.
+    appSettings: defineTable({
+      key: v.string(), // e.g. "GEMINI_API_KEY", "TWILIO_ACCOUNT_SID"
+      value: v.string(),
+      updatedBy: v.id("users"),
+      updatedAt: v.number(),
+    })
+      .index("by_key", ["key"]),
   },
   {
     schemaValidation: true,

@@ -26,12 +26,12 @@ export const sendBookingSms = action({
     partySize: v.number(),
     code: v.optional(v.string()),
   },
-  handler: async (_ctx, { to, event, restaurantName, city, date, time, partySize, code }) => {
+  handler: async (ctx, { to, event, restaurantName, city, date, time, partySize, code }) => {
     const body =
       event === "confirmed"
         ? `Kamix: your table for ${partySize} at ${restaurantName} (${city}) on ${date} at ${time} is confirmed. Code: ${code}. See you soon!`
         : `Kamix: your booking at ${restaurantName} on ${date} at ${time} has been cancelled.`;
-    return await sendTwilioMessage(to, body);
+    return await sendTwilioMessage(to, body, ctx);
   },
 });
 
@@ -48,9 +48,9 @@ export const sendBookingReminder = action({
     partySize: v.number(),
     code: v.optional(v.string()),
   },
-  handler: async (_ctx, { to, restaurantName, city, date, time, partySize, code }) => {
+  handler: async (ctx, { to, restaurantName, city, date, time, partySize, code }) => {
     const body = `Kamix reminder: ${restaurantName} (${city}) tomorrow at ${time} for ${partySize}. Code: ${code}. Reply or cancel in the app if plans change — see you soon!`;
-    return await sendTwilioMessage(to, body);
+    return await sendTwilioMessage(to, body, ctx);
   },
 });
 
@@ -62,9 +62,9 @@ export const sendOtpSms = action({
     phone: v.string(), // E.164 phone number
     code: v.string(),  // 6-digit OTP
   },
-  handler: async (_ctx, { phone, code }) => {
+  handler: async (ctx, { phone, code }) => {
     const body = `Your Kamix verification code is: ${code}. It expires in 15 minutes.`;
-    return await sendTwilioMessage(phone, body);
+    return await sendTwilioMessage(phone, body, ctx);
   },
 });
 
@@ -80,8 +80,8 @@ export const sendWaitlistSms = action({
     time: v.string(), // HH:mm
     partySize: v.number(),
   },
-  handler: async (_ctx, { to, restaurantName, city, date, time, partySize }) => {
+  handler: async (ctx, { to, restaurantName, city, date, time, partySize }) => {
     const body = `Kamix: good news! A table for ${partySize} just opened at ${restaurantName} (${city}) on ${date} at ${time}. Book it now before it's gone!`;
-    return await sendTwilioMessage(to, body);
+    return await sendTwilioMessage(to, body, ctx);
   },
 });

@@ -6,7 +6,13 @@
  * timeout; sms.ts did not). A credentials/API change had to be made in two
  * places. This module is the single source of truth — both call sites go
  * through `sendTwilioMessage`.
+ *
+ * Credentials resolve from the admin-editable `appSettings` table first
+ * (settings.ts), falling back to the process environment — so the admin
+ * console Settings page can change them at runtime without a redeploy.
  */
+
+import { api } from "./_generated/api";
 
 /** Result of a send attempt. `sent: true` only on an HTTP 2xx. */
 export type TwilioSendResult = {
@@ -17,7 +23,9 @@ export type TwilioSendResult = {
   error?: string;
 };
 
-/** Resolve Twilio credentials from the environment. Supports two auth modes:
+/**
+ * Resolve Twilio credentials from admin settings (stored) or the
+ * environment. Supports two auth modes:
  *  - Account SID + main Auth Token (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)
  *  - Account SID + API Key (TWILIO_ACCOUNT_SID stays the URL/account, but
  *    Basic Auth uses TWILIO_API_KEY_SID / TWILIO_API_KEY_SECRET instead —
@@ -27,23 +35,37 @@ export type TwilioSendResult = {
  * Sender resolution prefers a Messaging Service
  * (TWILIO_MESSAGING_SERVICE_SID) over a bare From number
  * (TWILIO_FROM_NUMBER): a Messaging Service with a registered Alphanumeric
- * Sender ID (e.g. \"Beity\") routes far more reliably into markets like
+ * Sender ID (e.g. "Beity") routes far more reliably into markets like
  * Lebanon than a raw US long code.
  */
-function twilioConfig() {
+async function twilioConfig(ctx: { runQuery: (q: any, a: any) => Promise<any> } | undefined) {
+  const env = process.env;
+  // Read a value from admin settings if present, else from the environment.
+  const setting = async (key: string): Promise<string | undefined> => {
+    if (ctx) {
+      try {
+        const row = await ctx.runQuery(api.settings.getSettingDb, { key });
+        if (row?.value) return row.value;
+      } catch {
+        // fall through to env
+      }
+    }
+    return env[key];
+  };
+
   // Respect the TWILIO_ENABLED kill-switch: when set to "false" all SMS
   // sending is skipped regardless of whether credentials are present.
-  const enabled = process.env.TWILIO_ENABLED;
+  const enabled = await setting("TWILIO_ENABLED");
   if (enabled !== undefined && enabled.toLowerCase() === "false") return null;
 
-  const accountSid = process.env.TWILIO_ACCOUNT_SID;
-  const messagingServiceSid = process.env.TWILIO_MESSAGING_SERVICE_SID;
-  const from = process.env.TWILIO_FROM_NUMBER;
+  const accountSid = await setting("TWILIO_ACCOUNT_SID");
+  const messagingServiceSid = await setting("TWILIO_MESSAGING_SERVICE_SID");
+  const from = await setting("TWILIO_FROM_NUMBER");
   if (!accountSid || (!messagingServiceSid && !from)) return null;
 
-  const apiKeySid = process.env.TWILIO_API_KEY_SID;
-  const apiKeySecret = process.env.TWILIO_API_KEY_SECRET;
-  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const apiKeySid = await setting("TWILIO_API_KEY_SID");
+  const apiKeySecret = await setting("TWILIO_API_KEY_SECRET");
+  const authToken = await setting("TWILIO_AUTH_TOKEN");
 
   const authUser = apiKeySid || accountSid;
   const authPass = apiKeySid ? apiKeySecret : authToken;
@@ -62,9 +84,16 @@ function twilioConfig() {
  * `skipped`) when Twilio isn't configured or the destination is invalid —
  * callers must never break their flow because SMS is down. 10-second abort
  * so a hung Twilio connection can't block an auth action or a booking.
+ *
+ * `ctx` is optional and only used to resolve admin-stored credentials; when
+ * omitted (or when nothing is stored) the process environment is used.
  */
-export async function sendTwilioMessage(to: string, body: string): Promise<TwilioSendResult> {
-  const cfg = twilioConfig();
+export async function sendTwilioMessage(
+  to: string,
+  body: string,
+  ctx?: { runQuery: (q: any, a: any) => Promise<any> },
+): Promise<TwilioSendResult> {
+  const cfg = await twilioConfig(ctx);
   if (!cfg) return { sent: false, skipped: true, reason: "twilio not configured" };
   if (!to || !/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
 

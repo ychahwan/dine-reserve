@@ -432,7 +432,10 @@
     "errQueueTimeout": "We couldn't confirm your table in time — please try again.",
     "errWaitlist": "Could not join the waitlist.",
     "joinedWaitlist": "You're on the list — we'll text you when a table frees up!",
-    "bookedToast": "Table booked — confirmation sent!"
+    "bookedToast": "Table booked — confirmation sent!",
+    "reviewCount_one": "1 review",
+    "reviewCount_other": "{{count}} reviews",
+    "verifiedVisit": "Verified visit"
   },
   "lang": {
     "label": "Language",

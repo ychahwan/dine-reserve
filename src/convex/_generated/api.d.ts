@@ -31,6 +31,7 @@ import type * as reminders from "../reminders.js";
 import type * as restaurants from "../restaurants.js";
 import type * as reviews from "../reviews.js";
 import type * as seed from "../seed.js";
+import type * as settings from "../settings.js";
 import type * as slotRules from "../slotRules.js";
 import type * as sms from "../sms.js";
 import type * as socialize from "../socialize.js";
@@ -71,6 +72,7 @@ declare const fullApi: ApiFromModules<{
   restaurants: typeof restaurants;
   reviews: typeof reviews;
   seed: typeof seed;
+  settings: typeof settings;
   slotRules: typeof slotRules;
   sms: typeof sms;
   socialize: typeof socialize;

@@ -432,7 +432,10 @@
     "errQueueTimeout": "Nous n'avons pas pu confirmer votre table à temps — veuillez réessayer.",
     "errWaitlist": "Impossible de rejoindre la liste d'attente.",
     "joinedWaitlist": "Vous êtes sur la liste — nous vous enverrons un SMS dès qu'une table se libère !",
-    "bookedToast": "Table réservée — confirmation envoyée !"
+    "bookedToast": "Table réservée — confirmation envoyée !",
+    "reviewCount_one": "1 avis",
+    "reviewCount_other": "{{count}} avis",
+    "verifiedVisit": "Visite vérifiée"
   },
   "lang": {
     "label": "Langue",

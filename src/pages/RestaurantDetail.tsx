@@ -1,4 +1,5 @@
 import { CustomerShell } from "@/components/CustomerShell";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -57,6 +58,21 @@ import {
   whatsappShareUrl,
 } from "@/lib/format";
 import { spiceEmoji, spiceLabel } from "@/lib/menu";
+
+/** "Maria N" → "MN" for the review avatar. */
+function initialsOf(name: string) {
+  return name
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((w) => w[0]!.toUpperCase())
+    .join("");
+}
+
+/** "Aug 2026" → "Aug 21, 2026" for review dates. */
+function formatReviewDate(ts: number) {
+  return new Date(ts).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+}
 import { toast } from "sonner";
 
 const DAYS_TO_SHOW = 14;
@@ -872,12 +888,6 @@ export default function RestaurantDetail() {
         <div className="mt-6 px-4 pb-4">
           <div className="flex items-center justify-between">
             <h2 className="font-semibold">{t("detail.reviewsTitle")}</h2>
-            {reviewsData && reviewsData.count > 0 && (
-              <span className="flex items-center gap-1 text-sm font-medium text-amber-600 dark:text-amber-400">
-                <Star className="size-4 fill-current" /> {reviewsData.avg.toFixed(1)}
-                <span className="font-normal text-muted-foreground">({reviewsData.count})</span>
-              </span>
-            )}
           </div>
           {reviewsData === undefined ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
@@ -888,38 +898,96 @@ export default function RestaurantDetail() {
               {t("detail.noReviews")}
             </p>
           ) : (
-            <div className="mt-3 space-y-2">
-              {reviewsData.reviews.map((rev) => (
-                <div key={rev._id} className="rounded-xl border border-border/70 bg-card px-4 py-3">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="flex items-center gap-1 text-amber-500">
+            <>
+              {/* Rating summary — average + distribution bars */}
+              <div className="mt-3 flex flex-col gap-4 rounded-2xl border border-border/70 bg-card p-4 sm:flex-row sm:items-center sm:gap-6">
+                <div className="flex items-center gap-3 sm:flex-col sm:gap-1 sm:text-center">
+                  <span className="text-4xl font-bold tracking-tight">{reviewsData.avg.toFixed(1)}</span>
+                  <div className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-0.5 text-amber-500">
                       {Array.from({ length: 5 }).map((_, i) => (
                         <Star
                           key={i}
-                          className={cn("size-3.5", i < rev.rating ? "fill-current" : "text-muted-foreground/25")}
+                          className={cn("size-3.5", i < Math.round(reviewsData.avg) ? "fill-current" : "text-muted-foreground/25")}
                         />
                       ))}
                     </span>
-                    <span className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
-                      {rev.author} ·{" "}
-                      {new Date(rev.createdAt).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
-                      {/* Diner can delete their own review; admins can delete any */}
-                      {(rev.userId === user?._id || user?.role === "admin") && (
-                        <button
-                          onClick={() => setReviewToDelete(rev._id)}
-                          className="flex size-6 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
-                          aria-label="Delete review"
-                          title="Delete review"
-                        >
-                          <Trash2 className="size-3.5" />
-                        </button>
-                      )}
+                    <span className="text-xs text-muted-foreground">
+                      {t("detail.reviewCount", { count: reviewsData.count })}
                     </span>
                   </div>
-                  {rev.text && <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{rev.text}</p>}
                 </div>
-              ))}
-            </div>
+                <div className="min-w-0 flex-1 space-y-1.5">
+                  {[5, 4, 3, 2, 1].map((star) => {
+                    const n = reviewsData.reviews.filter((r) => r.rating === star).length;
+                    const pct = reviewsData.count ? (n / reviewsData.count) * 100 : 0;
+                    return (
+                      <div key={star} className="flex items-center gap-2 text-xs">
+                        <span className="w-5 shrink-0 text-right tabular-nums text-muted-foreground">{star}</span>
+                        <Star className="size-3 shrink-0 fill-current text-amber-500" />
+                        <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
+                          <div
+                            className="h-full rounded-full bg-amber-500"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                        <span className="w-6 shrink-0 tabular-nums text-muted-foreground">{n}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Review cards */}
+              <div className="mt-3 space-y-2">
+                {reviewsData.reviews.map((rev) => (
+                  <div key={rev._id} className="rounded-xl border border-border/70 bg-card px-4 py-3">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex min-w-0 items-center gap-2.5">
+                        <Avatar className="size-9 shrink-0">
+                          <AvatarFallback className="bg-primary/10 text-xs font-semibold text-primary">
+                            {initialsOf(rev.author)}
+                          </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                            <span className="truncate text-sm font-medium">{rev.author}</span>
+                            <span className="inline-flex items-center gap-0.5 rounded-full bg-emerald-500/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-600 dark:text-emerald-400">
+                              <CheckCircle2 className="size-3" /> {t("detail.verifiedVisit")}
+                            </span>
+                          </div>
+                          <span className="mt-0.5 flex items-center gap-0.5 text-amber-500">
+                            {Array.from({ length: 5 }).map((_, i) => (
+                              <Star
+                                key={i}
+                                className={cn("size-3", i < rev.rating ? "fill-current" : "text-muted-foreground/25")}
+                              />
+                            ))}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1">
+                        <span className="whitespace-nowrap text-xs text-muted-foreground">
+                          {formatReviewDate(rev.createdAt)}
+                        </span>
+                        {/* Diner can delete their own review; admins can delete any */}
+                        {(rev.userId === user?._id || user?.role === "admin") && (
+                          <button
+                            onClick={() => setReviewToDelete(rev._id)}
+                            className="flex size-6 items-center justify-center rounded-full text-muted-foreground/50 transition-colors hover:bg-destructive/10 hover:text-destructive"
+                            aria-label="Delete review"
+                            title="Delete review"
+                          >
+                            <Trash2 className="size-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {rev.text && <p className="mt-2 text-sm leading-6 text-muted-foreground">{rev.text}</p>}
+                  </div>
+                ))}
+              </div>
+            </>
           )}
         </div>
       </div>

@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { action } from "./_generated/server";
 import { api } from "./_generated/api";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { getSetting } from "./settings";
 
 /**
  * AI-Powered Smart Reservations — Diner Concierge
@@ -28,7 +29,7 @@ export const recommendDinner = action({
     dinerName: string;
     query: string;
   }> => {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = await getSetting(ctx, "GEMINI_API_KEY");
     if (!apiKey) throw new Error("AI concierge is not configured (missing GEMINI_API_KEY).");
 
     // ── 1. Read the diner's data from Convex ──────────────────────────
@@ -124,7 +125,7 @@ export const ownerInsights = action({
     insights: any[];
     summary: string;
   }> => {
-    const apiKey = process.env.GEMINI_API_KEY;
+    const apiKey = await getSetting(ctx, "GEMINI_API_KEY");
     if (!apiKey) throw new Error("AI insights are not configured (missing GEMINI_API_KEY).");
 
     const user: any = await ctx.runQuery(api.users.currentUser);

@@ -22,6 +22,7 @@ const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminUserDetail = lazy(() => import("./pages/admin/AdminUserDetail.tsx"));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews.tsx"));
 const AdminAudit = lazy(() => import("./pages/admin/AdminAudit.tsx"));
+const AdminSettings = lazy(() => import("./pages/admin/AdminSettings.tsx"));
 const AdminRegister = lazy(() => import("./pages/admin/AdminRegister.tsx"));
 const AdminTag = lazy(() => import("./pages/admin/AdminTag.tsx"));
 const Explore = lazy(() => import("./pages/Explore.tsx"));
@@ -153,6 +154,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="users/:id" element={<AdminUserDetail />} />
                 <Route path="reviews" element={<AdminReviews />} />
                 <Route path="audit" element={<AdminAudit />} />
+                <Route path="settings" element={<AdminSettings />} />
                 <Route path="register" element={<AdminRegister />} />
                 <Route path="tag" element={<AdminTag />} />
               </Route>

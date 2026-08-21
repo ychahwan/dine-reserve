@@ -8,6 +8,7 @@ import {
   LogOut,
   PlusCircle,
   ScrollText,
+  Settings,
   ShieldCheck,
   Star,
   Store,
@@ -23,6 +24,7 @@ const NAV = [
   { to: "/admin/users", icon: Users, label: "Users" },
   { to: "/admin/reviews", icon: Star, label: "Reviews" },
   { to: "/admin/audit", icon: ScrollText, label: "Audit log" },
+  { to: "/admin/settings", icon: Settings, label: "Settings" },
 ];
 
 const ACTIONS = [
