@@ -41,6 +41,7 @@ export default function SetPassword() {
   );
 
   const showCurrentPassword = hasPassword?.exists === true;
+  const passwordStatusLoading = hasPassword === undefined;
 
   if (isLoading) {
     return (
@@ -69,7 +70,14 @@ export default function SetPassword() {
         newPassword,
         currentPassword: currentPassword || undefined,
       });
-      navigate("/owner", { replace: true });
+      // Role-based redirect (same logic as Auth.tsx resolveTarget).
+      // Never redirect to /dashboard — it checks mustChangePassword and could
+      // loop back here before the Convex reactive query refreshes.
+      const target =
+        user?.role === "admin" ? "/admin"
+        : user?.role === "owner" ? "/owner"
+        : "/explore";
+      navigate(target, { replace: true });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not update your password.");
       setSaving(false);
@@ -150,7 +158,7 @@ export default function SetPassword() {
                 <Button
                   type="submit"
                   className="w-full"
-                  disabled={saving || newPassword.length < 8 || newPassword !== confirm}
+                  disabled={saving || passwordStatusLoading || newPassword.length < 8 || newPassword !== confirm}
                 >
                   {saving ? (
                     <>

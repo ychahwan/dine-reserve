@@ -186,6 +186,20 @@ async function run() {
           : fail(`Admin route ${r.path}`, `missing "${r.needle}"`);
       }
 
+      // User detail → "Set a password" card renders
+      await page.goto(`${BASE}/admin/users`, { waitUntil: "domcontentloaded" });
+      const firstUserRow = page.locator('table tbody tr a').first();
+      try {
+        await firstUserRow.waitFor({ timeout: 10000 });
+        await firstUserRow.click();
+        const setPwCard = await waitForText(page, "Set a password", 10000);
+        setPwCard
+          ? ok("User detail shows 'Set a password' card")
+          : fail("Set password card", "not rendered on user detail");
+      } catch {
+        fail("Set password card", "no user rows to open");
+      }
+
       // Restaurant detail view
       await page.goto(`${BASE}/admin/restaurants`, { waitUntil: "domcontentloaded" });
       const firstRow = page.locator('table tbody tr a').first();

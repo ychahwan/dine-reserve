@@ -33,7 +33,16 @@ export const create = mutation({
     if (booking.userId !== userId) {
       throw new Error("You can only review your own visits.");
     }
-    if (booking.status !== "completed") {
+    // Allow review for completed bookings OR past confirmed bookings that
+    // the owner hasn't marked yet (prevents the diner being locked out if
+    // the owner forgets to update status).
+    const todayKey = (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    })();
+    const isCompleted = booking.status === "completed";
+    const isPastConfirmed = booking.status === "confirmed" && booking.date < todayKey;
+    if (!isCompleted && !isPastConfirmed) {
       throw new Error("You can only review after your visit.");
     }
 
@@ -109,8 +118,14 @@ export const myReviewable = query({
       .collect();
     const reviewedBookingIds = new Set(reviewed.map((r) => r.bookingId));
 
+    const todayKey = (() => {
+      const now = new Date();
+      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    })();
     const candidates = bookings.filter(
-      (b) => b.status === "completed" && !reviewedBookingIds.has(b._id),
+      (b) =>
+        !reviewedBookingIds.has(b._id) &&
+        (b.status === "completed" || (b.status === "confirmed" && b.date < todayKey)),
     );
     const restaurants = await Promise.all(candidates.map((b) => ctx.db.get(b.restaurantId)));
 

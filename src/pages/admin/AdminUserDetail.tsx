@@ -1,9 +1,11 @@
 import { Spinner } from "@/components/ui/spinner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { api } from "@/convex/_generated/api";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { useParams, Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
@@ -13,13 +15,38 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Gift, Mail, Phone } from "lucide-react";
+import { ArrowLeft, Eye, EyeOff, Gift, KeyRound, Loader2, Mail, Phone } from "lucide-react";
 import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote } from "./AdminUI";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
+import { useState } from "react";
+import { toast } from "sonner";
 
 export default function AdminUserDetail() {
   const { id } = useParams();
   const data = useQuery(api.adminView.userDetail, { id: id as never });
+  const setUserPassword = useMutation(api.admin.setUserPassword);
+
+  const [newPassword, setNewPassword] = useState("");
+  const [showPass, setShowPass] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleSetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id) return;
+    setError(null);
+    setSaving(true);
+    try {
+      await setUserPassword({ userId: id as never, newPassword });
+      toast.success("Password set — the user must change it on next login.");
+      setNewPassword("");
+      setShowPass(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not set the password.");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   if (data === undefined) {
     return (
@@ -64,6 +91,54 @@ export default function AdminUserDetail() {
               <div><p className="text-xl font-bold">{data.reviews.length}</p><p className="text-[11px] text-muted-foreground">Reviews</p></div>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border-border/70">
+        <CardHeader className="pb-3">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <KeyRound className="size-4 text-primary" /> Set a password
+          </CardTitle>
+          <CardDescription>
+            Create or reset {user.name ?? "this user"}&apos;s password. They&apos;ll be asked to
+            set a new one on their next login — you won&apos;t need to know it afterwards.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSetPassword} className="flex flex-wrap items-end gap-3">
+            <div className="relative min-w-60 flex-1">
+              <Input
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+                placeholder="At least 8 characters"
+                type={showPass ? "text" : "password"}
+                disabled={saving}
+                required
+                autoComplete="new-password"
+              />
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={() => setShowPass((v) => !v)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground"
+                aria-label={showPass ? "Hide password" : "Show password"}
+              >
+                {showPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </button>
+            </div>
+            <Button type="submit" disabled={saving || newPassword.length < 8}>
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Setting…
+                </>
+              ) : (
+                "Set password"
+              )}
+            </Button>
+            {error && (
+              <p className="w-full rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+            )}
+          </form>
         </CardContent>
       </Card>
 

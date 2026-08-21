@@ -110,6 +110,15 @@ export const onboard = mutation({
     const cleanName = parseOrThrow(profileNameSchema, args.name);
     let cleanPhone = parseOrThrow(profilePhoneSchema, args.phone);
 
+    // Validate phone format if provided (must be E.164-ish: + followed by 8-15 digits).
+    if (cleanPhone) {
+      const normalized = normalizePhone(cleanPhone);
+      if (normalized.length < 8 || normalized.length > 15 || !/^\+\d+$/.test(normalized)) {
+        throw new Error("Enter a valid phone number (e.g. +961 71 123 456).");
+      }
+      cleanPhone = normalized;
+    }
+
     const existing = await ctx.db.get(userId);
 
     // Auto-populate phone from auth account if not explicitly provided.

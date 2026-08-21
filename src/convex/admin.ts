@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { createAccount, modifyAccountCredentials } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import { mutation, MutationCtx, query } from "./_generated/server";
 import { FEATURES } from "./schema";
 import { parseOrThrow, restaurantArgsSchema } from "./validation";
@@ -149,6 +150,9 @@ export const registerRestaurant = mutation({
     // Store the owner under the canonical phone so login (verbatim auth-library
     // lookup) and hasPasswordAccount routing agree regardless of formatting.
     const ownerPhone = normalizePhone(args.ownerPhone);
+    if (ownerPhone.length < 8 || ownerPhone.length > 15 || !/^\+\d+$/.test(ownerPhone)) {
+      throw new Error("Enter a valid phone number (e.g. +961 71 123 456).");
+    }
 
     // Create (or link) the owner's password account. shouldLinkViaPhone links
     // to an existing phone-verified user when one exists.
@@ -253,6 +257,46 @@ export const tagAsRestaurant = mutation({
 });
 
 /**
+ * Create or replace the password account for a user under its CANONICAL
+ * phone (so the verbatim auth-library lookup matches regardless of how the
+ * number is stored or typed). Shared by ensureOwnerPassword and
+ * setUserPassword. Returns the user doc (or null if it vanished).
+ */
+async function setPasswordForUser(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  phone: string,
+  newPassword: string,
+) {
+  const existing = await ctx.db
+    .query("authAccounts")
+    .withIndex("providerAndAccountId", (q) =>
+      q.eq("provider", "password").eq("providerAccountId", phone),
+    )
+    .unique();
+  if (existing) {
+    await modifyAccountCredentials(ctx as never, {
+      provider: "password",
+      account: { id: phone, secret: newPassword },
+    });
+  } else {
+    const user = await ctx.db.get(userId);
+    await createAccount(ctx as never, {
+      provider: "password",
+      account: { id: phone, secret: newPassword },
+      profile: {
+        email: phone,
+        phone,
+        ...(user?.name ? { name: user.name } : {}),
+      },
+      shouldLinkViaEmail: false,
+      shouldLinkViaPhone: true,
+    });
+  }
+  return await ctx.db.get(userId);
+}
+
+/**
  * Admin-only: ensure a tagged owner has a working password account.
  * Used internally by the admin console so tagged accounts can actually log in
  * with a password even if they previously only used OTP.
@@ -270,37 +314,14 @@ export const ensureOwnerPassword = mutation({
     if (tempPassword.length < 8) {
       throw new Error("Temporary password must be at least 8 characters.");
     }
-    const cleanPhone = phone.trim();
+    const cleanPhone = normalizePhone(phone);
     const user = await ctx.db
       .query("users")
       .withIndex("phone", (q) => q.eq("phone", cleanPhone))
       .first();
     if (!user) throw new Error("No account found with that phone number.");
 
-    const existing = await ctx.db
-      .query("authAccounts")
-      .withIndex("providerAndAccountId", (q) =>
-        q.eq("provider", "password").eq("providerAccountId", cleanPhone),
-      )
-      .unique();
-    if (existing) {
-      await modifyAccountCredentials(ctx as never, {
-        provider: "password",
-        account: { id: cleanPhone, secret: tempPassword },
-      });
-    } else {
-      await createAccount(ctx as never, {
-        provider: "password",
-        account: { id: cleanPhone, secret: tempPassword },
-        profile: {
-          email: cleanPhone,
-          phone: cleanPhone,
-          ...(user.name ? { name: user.name } : {}),
-        },
-        shouldLinkViaEmail: false,
-        shouldLinkViaPhone: true,
-      });
-    }
+    await setPasswordForUser(ctx, user._id, cleanPhone, tempPassword);
     await ctx.db.patch(user._id, { mustChangePassword: true, role: "owner", onboarded: true });
 
     await logAdminAction(ctx, userId, "ensureOwnerPassword", {
@@ -309,5 +330,41 @@ export const ensureOwnerPassword = mutation({
     });
 
     return await ctx.db.get(user._id);
+  },
+});
+
+/**
+ * Admin-only: set or reset ANY user's password (diner, owner or admin).
+ * Creates the password account if the user only had OTP, or replaces the
+ * existing password. The user must set a new password on their next login
+ * (mustChangePassword = true) — same trusted flow as restaurant owners.
+ */
+export const setUserPassword = mutation({
+  args: { userId: v.id("users"), newPassword: v.string() },
+  handler: async (ctx, { userId, newPassword }) => {
+    const { userId: adminUserId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "setUserPassword",
+      userId: adminUserId,
+      limit: 60,
+      windowMs: 60 * 60_000, // 60 per hour
+    });
+    if (newPassword.length < 8) {
+      throw new Error("Password must be at least 8 characters.");
+    }
+    const user = await ctx.db.get(userId);
+    if (!user) throw new Error("User not found.");
+    const phone = normalizePhone(user.phone ?? "");
+    if (!phone) throw new Error("This account has no phone number on file.");
+
+    await setPasswordForUser(ctx, userId, phone, newPassword);
+    await ctx.db.patch(userId, { mustChangePassword: true });
+
+    await logAdminAction(ctx, adminUserId, "setUserPassword", {
+      targetUserId: userId as unknown as string,
+      details: JSON.stringify({ phone }),
+    });
+
+    return await ctx.db.get(userId);
   },
 });

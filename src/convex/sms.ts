@@ -79,7 +79,7 @@ export const sendBookingSms = action({
     if (!cfg) {
       return { sent: false, skipped: true, reason: "twilio not configured" };
     }
-    if (!to) return { sent: false, skipped: true, reason: "no phone on booking" };
+    if (!to || !/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
 
     const body =
       event === "confirmed"
@@ -125,7 +125,7 @@ export const sendBookingReminder = action({
     if (!cfg) {
       return { sent: false, skipped: true, reason: "twilio not configured" };
     }
-    if (!to) return { sent: false, skipped: true, reason: "no phone on booking" };
+    if (!to || !/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
 
     const body = `Kamix reminder: ${restaurantName} (${city}) tomorrow at ${time} for ${partySize}. Code: ${code}. Reply or cancel in the app if plans change — see you soon!`;
 
@@ -163,7 +163,7 @@ export const sendOtpSms = action({
     if (!cfg) {
       return { sent: false, skipped: true, reason: "twilio not configured" };
     }
-    if (!phone) return { sent: false, skipped: true, reason: "no phone" };
+    if (!phone || !/^\+\d{8,15}$/.test(phone)) return { sent: false, skipped: true, reason: "invalid phone" };
 
     const body = `Your Kamix verification code is: ${code}. It expires in 15 minutes.`;
 
@@ -205,7 +205,7 @@ export const sendWaitlistSms = action({
     if (!cfg) {
       return { sent: false, skipped: true, reason: "twilio not configured" };
     }
-    if (!to) return { sent: false, skipped: true, reason: "no phone on waitlist" };
+    if (!to || !/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
 
     const body = `Kamix: good news! A table for ${partySize} just opened at ${restaurantName} (${city}) on ${date} at ${time}. Book it now before it's gone!`;
 

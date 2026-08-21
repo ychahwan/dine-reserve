@@ -206,5 +206,90 @@ console.log("\n=== FLOW 3: Change password — wrong current password rejected =
   ok("missing current password rejected", missingRejected);
 }
 
+console.log("\n=== FLOW 4: Admin sets a password for a user ===");
+{
+  // Fresh diner (phone-OTP only, no password yet).
+  const phone = `+9617884${String(Date.now()).slice(-5)}`;
+  callFn("auth:signIn", { provider: "phone-otp", params: { phone } }, null, "action");
+  const code = crackOtp(phone);
+  ok("fresh diner OTP sent", code !== null);
+  const dinerRes = callFn(
+    "auth:signIn",
+    { provider: "phone-otp", params: { phone, code } },
+    null,
+    "action",
+  );
+  const dinerToken = dinerRes?.tokens?.value ?? dinerRes?.tokens?.token ?? null;
+  ok("fresh diner token issued", !!dinerToken);
+  const dinerMe = callFn("users:currentUser", {}, dinerToken, "query");
+  ok("fresh diner created", !!dinerMe?._id, dinerMe?._id);
+  ok("fresh diner has NO password yet", dinerMe?.mustChangePassword !== true);
+
+  // Non-admin cannot use the mutation.
+  let blocked = false;
+  try {
+    callFn(
+      "admin:setUserPassword",
+      { userId: dinerMe._id, newPassword: "AdminSetPass123!" },
+      dinerToken,
+      "mutation",
+    );
+  } catch (e) {
+    blocked = String(e.message).includes("Admins only");
+  }
+  ok("non-admin blocked from setUserPassword", blocked);
+
+  // Admin (OTP login) sets the password for the fresh diner.
+  callFn("auth:signIn", { provider: "phone-otp", params: { phone: "+96176683661" } }, null, "action");
+  const adminCode = crackOtp("+96176683661");
+  ok("admin OTP sent", adminCode !== null);
+  const adminRes = callFn(
+    "auth:signIn",
+    { provider: "phone-otp", params: { phone: "+96176683661", code: adminCode } },
+    null,
+    "action",
+  );
+  const adminToken = adminRes?.tokens?.value ?? adminRes?.tokens?.token ?? null;
+  ok("admin token issued", !!adminToken);
+
+  const set = callFn(
+    "admin:setUserPassword",
+    { userId: dinerMe._id, newPassword: "AdminSetPass123!" },
+    adminToken,
+    "mutation",
+  );
+  ok("setUserPassword succeeded", set?.mustChangePassword === true, JSON.stringify(set));
+
+  // The diner can now log in with the admin-set password (forced change flag on).
+  const pwRes = callFn(
+    "auth:signIn",
+    {
+      provider: "password",
+      params: { phone, password: "AdminSetPass123!", flow: "signIn" },
+    },
+    null,
+    "action",
+  );
+  const pwToken = pwRes?.tokens?.value ?? pwRes?.tokens?.token ?? null;
+  ok("diner logs in with admin-set password", !!pwToken);
+  const pwMe = callFn("users:currentUser", {}, pwToken, "query");
+  ok("same user owns the new password account", pwMe?._id === dinerMe._id, pwMe?._id);
+  ok("mustChangePassword is set (forced change on next login)", pwMe?.mustChangePassword === true);
+
+  // Wrong password is still rejected.
+  let badPw = false;
+  try {
+    callFn(
+      "auth:signIn",
+      { provider: "password", params: { phone, password: "WrongPass123!", flow: "signIn" } },
+      null,
+      "action",
+    );
+  } catch {
+    badPw = true;
+  }
+  ok("wrong password rejected", badPw);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

@@ -524,6 +524,9 @@ export const confirmGuest = mutation({
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
     if (booking.date < todayKey) throw new Error("This booking is in the past.");
 
+    if (booking.userId === userId) {
+      throw new Error("You're the host — you're already on the list.");
+    }
     const guests = booking.guests ?? [];
     if (guests.some((g) => g.userId === userId)) {
       throw new Error("You already confirmed your seat.");
