@@ -25,7 +25,8 @@
     "deploy:render": "bash scripts/deploy-render.sh",
     "convex:up": "docker compose up -d convex",
     "convex:up:build": "docker compose up --build -d convex",
-    "convex:down": "docker compose down -v"
+    "convex:down": "docker compose down -v",
+    "seed:activity": "node scripts/seed-activity.mjs"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

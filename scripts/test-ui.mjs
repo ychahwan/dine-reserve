@@ -88,11 +88,14 @@ async function run() {
     text.includes("Already have an account") ? ok("Hero offers 'Sign in' for existing users") : fail("Sign in offer", "not found");
 
     // Real partner count must come from the backend, not a hard-coded number.
-    const partnerMatch = text.match(/(\d+)\s+partner restaurant/);
+    // (wait for the async stats query so the number is actually on screen)
+    const gotCount = await waitForText(page, "partner restaurant", 10000);
+    const textAfter = await page.textContent("body");
+    const partnerMatch = textAfter.match(/(\d+)\s+partner restaurant/);
     const count = partnerMatch ? parseInt(partnerMatch[1], 10) : NaN;
-    Number.isInteger(count) && count > 0
+    gotCount && Number.isInteger(count) && count > 0
       ? ok(`Real partner count rendered: ${count}`)
-      : fail("Partner count", `no live number found in ${text.slice(0, 300)}`);
+      : fail("Partner count", gotCount ? `no number: ${textAfter.slice(0, 300)}` : "count never appeared");
     // Socialize section
     text.includes("Socialize") ? ok("'Socialize' section renders") : fail("Socialize", "not found");
     text.includes("Dining alone doesn't mean dining solo")

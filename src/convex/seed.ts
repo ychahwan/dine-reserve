@@ -1,3 +1,4 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -753,6 +754,303 @@ export const retrofitDemoData = mutation({
 });
 
 // ---------------------------------------------------------------------------
+// demo activity generator — realistic bookings / orders / reviews
+//
+// The AI concierge (ai.recommendDinner) and ops advisor (ai.ownerInsights)
+// are only as good as the data they read. The base seed ships a handful of
+// bookings, so this generator backfills ~5 weeks of believable history for
+// every demo restaurant (@kamix.demo owners): completed / no-show /
+// cancelled bookings across weekdays (weekends busier), dine-in orders on
+// the restaurant's real menu items, verified reviews, waitlist entries and
+// checked-in timestamps — so wait-time analytics have real signal too.
+// Idempotent: skips any restaurant that already has >15 bookings.
+// ---------------------------------------------------------------------------
+
+const REVIEW_TEXTS = [
+  "Wonderful evening — the service was warm and the food arrived fast.",
+  "Great spot for a date night. Booking through the app was seamless.",
+  "Solid food and a lovely atmosphere. Will definitely come back.",
+  "The staff went above and beyond for our anniversary. Highly recommend.",
+  "Came for a birthday dinner — they even brought out a dessert with a candle.",
+  "Delicious, fresh, and beautifully presented. A new favorite.",
+  "Lovely vibe and generous portions. The terrace is the place to sit.",
+  "Good food but the wait was a bit long on a busy Friday night.",
+  "Nice menu and friendly team. Parking nearby is tricky though.",
+  "Perfect for a business lunch — quiet enough to talk, fast enough to leave on time.",
+  "The specials were fantastic and reasonably priced.",
+  "Cozy and authentic. You can tell the kitchen cares.",
+  "Great cocktails and even better pasta. We'll be back next week!",
+  "Decent food, but service slowed down when it got busy.",
+  "Amazing value for the quality. Highly recommended.",
+  "The chef's tasting menu was the highlight of our trip.",
+];
+
+const REVIEWERS = [
+  "Ava", "Leo", "Mia", "Noah", "Zoe", "Liam", "Emma", "Ethan", "Grace", "Lucas",
+  "Sofia", "Mason", "Chloe", "Oscar", "Ruby", "Felix", "Nora", "Adam", "Ivy", "Owen",
+];
+
+/** Deterministic PRNG so every run produces the same dataset. */
+function mulberry32(seed: number) {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
+
+function randomCode(rand: () => number): string {
+  let out = "";
+  for (let i = 0; i < 6; i++) {
+    out += CODE_ALPHABET[Math.floor(rand() * CODE_ALPHABET.length)];
+  }
+  return out;
+}
+
+/** "YYYY-MM-DD" + "HH:mm" → epoch ms (UTC — only relative ordering matters here). */
+function bookingTimeMs(date: string, time: string): number {
+  return new Date(`${date}T${time}:00Z`).getTime();
+}
+
+/** Pick n distinct items (weighted toward popular) from a menu list. */
+function pickItems<T extends { _id: string; name: string; priceCents: number; popular?: boolean }>(
+  rand: () => number,
+  items: T[],
+  max: number,
+): T[] {
+  if (items.length === 0) return [];
+  const weighted = items.flatMap((it) => Array(it.popular ? 3 : 1).fill(it));
+  const picked: T[] = [];
+  const used = new Set<string>();
+  const count = 1 + Math.floor(rand() * max);
+  for (let i = 0; i < count && picked.length < max; i++) {
+    const candidate = weighted[Math.floor(rand() * weighted.length)]!;
+    if (used.has(candidate._id)) continue;
+    used.add(candidate._id);
+    picked.push(candidate);
+  }
+  return picked.length > 0 ? picked : [items[Math.floor(rand() * items.length)]!];
+}
+
+/**
+ * Generate the realistic history for all demo restaurants. Admin-only (it
+ * writes a lot of rows). Safe to re-run — skips restaurants with data.
+ */
+export const generateDemoActivity = mutation({
+  args: {},
+  handler: async (ctx) => {
+    // Admin-only: this writes a lot of rows; diners shouldn't trigger it.
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("You must be signed in.");
+    const me = await ctx.db.get(userId as Id<"users">);
+    if (me?.role !== "admin") throw new Error("Admins only.");
+
+    const rand = mulberry32(20260821);
+    const now = Date.now();
+    const todayKey = daysFromNow(0);
+
+    // demo restaurants = owned by @kamix.demo accounts
+    const restaurants = await ctx.db.query("restaurants").collect();
+    const demo: Doc<"restaurants">[] = [];
+    for (const r of restaurants) {
+      const owner = await safeGet<Doc<"users">>(ctx, r.ownerId);
+      if (owner?.email?.endsWith("@kamix.demo")) demo.push(r);
+    }
+    if (demo.length === 0) return { seeded: false, reason: "no demo restaurants" };
+
+    // demo diners = the seeded customer accounts (@kamix.demo)
+    const allUsers = await ctx.db.query("users").collect();
+    const diners = allUsers.filter(
+      (u) => u.email?.endsWith("@kamix.demo") && u.role === "customer",
+    );
+    if (diners.length < 5) return { seeded: false, reason: "not enough demo diners" };
+
+    const totals = { restaurants: 0, bookings: 0, orders: 0, reviews: 0, waitlist: 0 };
+
+    for (const r of demo) {
+      // idempotency: only generate for restaurants with little/no history
+      const existing = await ctx.db
+        .query("bookings")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+        .collect();
+      if (existing.length > 15) {
+        totals.restaurants++;
+        continue; // already has activity
+      }
+
+      const sections = await ctx.db
+        .query("sections")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+        .collect();
+      const hours = await ctx.db
+        .query("hours")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+        .collect();
+      const menuItems = await ctx.db
+        .query("menuItems")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+        .collect();
+
+      const times: string[] = [];
+      for (const h of hours.filter((x) => x.enabled)) {
+        const open = Number(h.open.slice(0, 2)) * 60 + Number(h.open.slice(3, 5));
+        const close = Number(h.close.slice(0, 2)) * 60 + Number(h.close.slice(3, 5));
+        for (let m = open + 60; m <= close - 30; m += 30) {
+          const t = `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
+          if (!times.includes(t)) times.push(t);
+        }
+      }
+      if (times.length === 0) times.push("19:00", "19:30", "20:00", "20:30", "21:00", "21:30");
+
+      let restaurantBookings = 0;
+      let restaurantOrders = 0;
+      let restaurantReviews = 0;
+
+      // 5 weeks of history: Fri/Sat busiest, Sun moderate, Mon–Thu quieter
+      for (let d = 35; d >= 0; d--) {
+        const date = daysFromNow(-d);
+        const dow = new Date(`${date}T00:00:00`).getDay();
+        const isWeekend = dow === 5 || dow === 6;
+        const isSunday = dow === 0;
+        const count = isWeekend
+          ? 3 + Math.floor(rand() * 4) // 3–6
+          : isSunday
+            ? 2 + Math.floor(rand() * 3) // 2–4
+            : 1 + Math.floor(rand() * 3); // 1–3
+
+        for (let i = 0; i < count; i++) {
+          const isPast = date < todayKey;
+          const status = isPast
+            ? rand() < 0.12
+              ? "no_show"
+              : rand() < 0.18
+                ? "cancelled"
+                : "completed"
+            : "confirmed";
+          if (status === "cancelled") continue; // cancelled rows add no signal
+
+          const diner = diners[Math.floor(rand() * diners.length)]!;
+          const section = sections.length > 0 ? sections[Math.floor(rand() * sections.length)] : null;
+          const time = times[Math.floor(rand() * times.length)]!;
+          const partySize = [1, 2, 2, 2, 3, 3, 4, 4, 5][Math.floor(rand() * 9)]!;
+          const createdOffset = 1 + Math.floor(rand() * 72) * 3600_000; // booked 1h–3d ahead
+          const createdAt = isPast ? bookingTimeMs(date, time) - createdOffset : now - createdOffset;
+          const checkedInAt =
+            status === "completed" ? bookingTimeMs(date, time) + Math.floor((rand() - 0.4) * 30 * 60_000) : undefined;
+
+          const code = randomCode(rand);
+          const bookingId = await ctx.db.insert("bookings", {
+            restaurantId: r._id,
+            userId: diner._id,
+            name: diner.name ?? diner.email ?? "Guest",
+            email: diner.email,
+            phone: diner.phone,
+            date,
+            time,
+            partySize,
+            sectionId: section?._id,
+            sectionName: section?.name,
+            kind: section?.kind,
+            smoking: section?.smoking,
+            status: status as "confirmed" | "completed" | "no_show",
+            code,
+            notes: rand() < 0.15 ? "Birthday" : rand() < 0.1 ? "Window table please" : undefined,
+            occasion: rand() < 0.12 ? ["Birthday", "Anniversary", "Date night", "Business"][Math.floor(rand() * 4)] : undefined,
+            createdAt,
+            updatedAt: status === "completed" && checkedInAt ? checkedInAt + 70 * 60_000 : createdAt,
+            smsSent: true,
+            reminderSent: isPast ? true : undefined,
+            checkedInAt: checkedInAt && checkedInAt > 0 ? checkedInAt : undefined,
+          });
+          restaurantBookings++;
+
+          // dine-in order for most completed visits, using real menu items
+          if (status === "completed" && menuItems.length > 0 && rand() < 0.6) {
+            const picked = pickItems(rand, menuItems, 4);
+            const items = picked.map((it) => {
+              const quantity = 1 + (rand() < 0.35 ? 1 : 0);
+              return {
+                menuItemId: it._id,
+                name: it.name,
+                priceCents: it.priceCents,
+                quantity,
+                ingredients: (it.ingredients ?? undefined) as string[] | undefined,
+              };
+            });
+            const totalCents = items.reduce((s, it) => s + it.priceCents * it.quantity, 0);
+            const orderAt = (checkedInAt ?? createdAt) + 15 * 60_000;
+            await ctx.db.insert("dineOrders", {
+              bookingId,
+              restaurantId: r._id,
+              userId: diner._id,
+              items,
+              totalCents,
+              status: "completed",
+              createdAt: orderAt,
+              updatedAt: orderAt + 55 * 60_000,
+            });
+            restaurantOrders++;
+          }
+
+          // verified review for a share of completed visits
+          if (status === "completed" && rand() < 0.4) {
+            const ratingRoll = rand();
+            const rating = ratingRoll < 0.05 ? 1 : ratingRoll < 0.15 ? 2 : ratingRoll < 0.3 ? 3 : ratingRoll < 0.6 ? 4 : 5;
+            await ctx.db.insert("reviews", {
+              restaurantId: r._id,
+              userId: diner._id,
+              bookingId,
+              rating,
+              text: REVIEW_TEXTS[Math.floor(rand() * REVIEW_TEXTS.length)],
+              createdAt: (checkedInAt ?? createdAt) + 26 * 3600_000, // next day
+            });
+            restaurantReviews++;
+          }
+        }
+      }
+
+      // a couple of waitlist entries for sold-out slots (waiting + one freed)
+      const future = daysFromNow(1 + Math.floor(rand() * 3));
+      const slots = await ctx.db
+        .query("slots")
+        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", r._id).eq("date", future))
+        .collect();
+      const full = slots.filter((s) => s.remaining === 0);
+      const target = full.length > 0 ? full[Math.floor(rand() * full.length)] : null;
+      if (target) {
+        const diner = diners[Math.floor(rand() * diners.length)]!;
+        await ctx.db.insert("waitlist", {
+          restaurantId: r._id,
+          sectionId: target.sectionId,
+          sectionName: sections.find((s) => s._id === target.sectionId)?.name,
+          date: future,
+          time: target.time,
+          partySize: 2,
+          userId: diner._id,
+          name: diner.name ?? "Guest",
+          phone: diner.phone,
+          status: "waiting",
+          createdAt: now - Math.floor(rand() * 12) * 3600_000,
+        });
+        totals.waitlist++;
+      }
+
+      totals.restaurants++;
+      totals.bookings += restaurantBookings;
+      totals.orders += restaurantOrders;
+      totals.reviews += restaurantReviews;
+    }
+
+    return { seeded: true, totals };
+  },
+});
+
+// ---------------------------------------------------------------------------
 // data reset — wipe or reset (npm run wipe / npm run seed)
 // ---------------------------------------------------------------------------
 
@@ -782,6 +1080,8 @@ const ALL_TABLES = [
   "giftTypes",
   "dinerPresence",
   "giftDeliveries",
+  "stories",
+  "loyaltyLedger",
 ] as const;
 
 /** Deletes every row from every app table — the data, not the schema. */
