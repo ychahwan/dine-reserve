@@ -114,7 +114,10 @@ Innovative features and improvements, organized by impact and implementation com
 
 ---
 
-### 9. Multi-Language Support (i18n) — ⏳ DEFERRED
+### 9. Multi-Language Support (i18n) — ✅ DONE (v1: EN/AR/FR diner app)
+**Built:** i18next + react-i18next; `en.json` / `ar.json` / `fr.json` (407 keys each), auto-detect (localStorage → browser) with English default, full **RTL flip** for Arabic (`dir=rtl`), and a language switcher (globe menu) on the Landing nav, Auth header, and customer shell. Translated the whole diner surface: Landing, Auth (phone→OTP→password→reset), onboarding, customer nav, Notifications, Set-password, Explore (filters/quick-find/cards), Account (profile/security/prefs/points), MyBookings (cards/statuses/5 dialogs), and RestaurantDetail (booking panel/menu/reviews/waitlist).
+
+**Remaining:** owner console, admin panel, AI concierge strings, and SMS copy (all English-only for now).
 **What:** Arabic + English + French (Lebanon's three main languages).
 
 **Why deferred:** touches every page + RTL layout; best done as a dedicated milestone with a translation pass. High value — doubles the addressable market.

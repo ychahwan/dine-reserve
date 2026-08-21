@@ -16,7 +16,9 @@ import {
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useMutation, useQuery } from "convex/react";
+import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
@@ -60,6 +62,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   const { isLoading: authLoading, isAuthenticated, user, signIn } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const { t } = useTranslation();
 
   // The landing page's hero phone box links here as /auth?phone=… — start
   // straight at the OTP/password step instead of making the user re-type it.
@@ -144,7 +147,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(resolveTarget());
     } catch (err) {
       console.error("Password sign-in error:", err);
-      setError("Invalid phone number or password.");
+      setError(t("auth.errInvalidPassword"));
       setIsLoading(false);
       setPassword("");
     }
@@ -181,8 +184,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       console.error("OTP send error:", err);
       setError(
         err instanceof Error && err.message === "timeout"
-          ? "SMS service is slow — please try again."
-          : "Failed to send verification code. Please try again."
+          ? t("auth.errSmsSlow")
+          : t("auth.errSendFailed")
       );
       otpSentRef.current = false;
       setIsLoading(false);
@@ -211,7 +214,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setIsLoading(false);
     } catch (err) {
       console.error("OTP verification error:", err);
-      setError("The verification code is incorrect.");
+      setError(t("auth.errWrongCode"));
       setIsLoading(false);
       setOtp("");
     }
@@ -233,7 +236,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(resolveTarget());
     } catch (err) {
       console.error("Set password error:", err);
-      setError(err instanceof Error ? err.message : "Failed to set password.");
+      setError(err instanceof Error ? err.message : t("auth.errSetPassword"));
       setIsLoading(false);
     }
   };
@@ -252,7 +255,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       setIsLoading(false);
     } catch (err) {
       console.error("Password reset request error:", err);
-      setError("We couldn't start a password reset for this number. Try again.");
+      setError(t("auth.errResetFailed"));
       setIsLoading(false);
     }
   };
@@ -268,7 +271,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       navigate(resolveTarget());
     } catch (err) {
       console.error("Password reset error:", err);
-      setError("The reset code is incorrect or expired. Try again.");
+      setError(t("auth.errResetCode"));
       setIsLoading(false);
       setOtp("");
     }
@@ -305,7 +308,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       </div>
 
       {/* Brand */}
-      <div className="relative flex justify-center pt-10">
+      <div className="relative flex items-center justify-center gap-3 pt-10">
         <button
           onClick={() => navigate("/")}
           className="group flex items-center gap-2.5 transition-opacity hover:opacity-90"
@@ -318,10 +321,13 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               Kamix
             </span>
             <span className="block text-[11px] text-muted-foreground">
-              Reserve great tables
+              {t("auth.brandTagline")}
             </span>
           </span>
         </button>
+        <div className="absolute right-4">
+          <LanguageSwitcher />
+        </div>
       </div>
 
       {/* Auth Content */}
@@ -339,9 +345,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               {step === "enter-phone" && (
                 <>
                   <CardHeader className="text-center">
-                    <CardTitle className="text-xl">Enter your phone</CardTitle>
+                    <CardTitle className="text-xl">{t("auth.enterPhoneTitle")}</CardTitle>
                     <CardDescription>
-                      We&apos;ll text you a code to sign in
+                      {t("auth.enterPhoneDesc")}
                     </CardDescription>
                   </CardHeader>
                   <form onSubmit={handlePhoneSubmit}>
@@ -351,7 +357,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                           <Phone className="absolute left-3 top-3 h-4 w-4 text-muted-foreground" />
                           <Input
                             name="phone"
-                            placeholder="+961 71 123 456"
+                            placeholder={t("auth.enterPhonePlaceholder")}
                             type="tel"
                             className="pl-9"
                             disabled={isLoading}
@@ -383,10 +389,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <>
                   <CardHeader className="text-center">
                     <CardTitle className="flex items-center justify-center gap-2">
-                      <KeyRound className="size-5" /> Password login
+                      <KeyRound className="size-5" /> {t("auth.passwordTitle")}
                     </CardTitle>
                     <CardDescription>
-                      Enter your password for {step.phone}
+                      {t("auth.passwordDesc", { phone: step.phone })}
                     </CardDescription>
                   </CardHeader>
                   <form onSubmit={handlePasswordSubmit}>
@@ -394,12 +400,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       <input type="hidden" name="phone" value={step.phone} />
                       <input type="hidden" name="flow" value="signIn" />
                       <div className="space-y-2">
-                        <Label htmlFor="password">Password</Label>
+                        <Label htmlFor="password">{t("auth.passwordLabel")}</Label>
                         <Input
                           id="password"
                           name="password"
                           type="password"
-                          placeholder="Enter your password"
+                          placeholder={t("auth.passwordPlaceholder")}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           disabled={isLoading}
@@ -418,7 +424,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                           onClick={handleForgotPassword}
                           disabled={isLoading}
                         >
-                          Forgot password?
+                          {t("auth.forgotPassword")}
                         </Button>
                       </div>
                     </CardContent>
@@ -431,11 +437,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         {isLoading ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Signing in...
+                            {t("auth.signingIn")}
                           </>
                         ) : (
                           <>
-                            Sign in
+                            {t("auth.signIn")}
                             <ArrowRight className="ml-2 h-4 w-4" />
                           </>
                         )}
@@ -447,7 +453,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         disabled={isLoading}
                         className="w-full"
                       >
-                        Use a different phone number
+                        {t("auth.differentNumber")}
                       </Button>
                     </CardFooter>
                   </form>
@@ -459,10 +465,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <>
                   <CardHeader className="text-center">
                     <CardTitle className="flex items-center justify-center gap-2">
-                      <KeyRound className="size-5" /> Reset your password
+                      <KeyRound className="size-5" /> {t("auth.resetTitle")}
                     </CardTitle>
                     <CardDescription>
-                      Enter the code sent to {step.phone} and choose a new password
+                      {t("auth.resetDesc", { phone: step.phone })}
                     </CardDescription>
                   </CardHeader>
                   <form onSubmit={handleResetPassword}>
@@ -493,12 +499,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       </div>
 
                       <div className="space-y-2">
-                        <Label htmlFor="new-password">New password</Label>
+                        <Label htmlFor="new-password">{t("auth.newPassword")}</Label>
                         <Input
                           id="new-password"
                           name="newPassword"
                           type="password"
-                          placeholder="At least 8 characters"
+                          placeholder={t("common.minChars")}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           disabled={isLoading}
@@ -519,11 +525,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         {isLoading ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Resetting...
+                            {t("auth.resetting")}
                           </>
                         ) : (
                           <>
-                            Reset password
+                            {t("auth.resetPassword")}
                             <ArrowRight className="ml-2 h-4 w-4" />
                           </>
                         )}
@@ -535,7 +541,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         disabled={isLoading}
                         className="w-full"
                       >
-                        Back to login
+                        {t("auth.backToLogin")}
                       </Button>
                     </CardFooter>
                   </form>
@@ -547,12 +553,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <>
                   <CardHeader className="text-center">
                     <CardTitle className="flex items-center justify-center gap-2">
-                      <MessageSquare className="size-5" /> Verify your phone
+                      <MessageSquare className="size-5" /> {t("auth.otpTitle")}
                     </CardTitle>
                     <CardDescription>
                       {isLoading
-                        ? "Sending code..."
-                        : `Enter the code sent to ${step.phone}`}
+                        ? t("auth.sendingCode")
+                        : t("auth.otpDesc", { phone: step.phone })}
                     </CardDescription>
                   </CardHeader>
                   <form onSubmit={handleOtpSubmit}>
@@ -586,7 +592,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         </p>
                       )}
                       <p className="text-sm text-muted-foreground text-center mt-4">
-                        Didn&apos;t receive a code?{" "}
+                        {t("auth.didntGet")}{" "}
                         <Button
                           variant="link"
                           className="p-0 h-auto"
@@ -596,7 +602,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                             handleSendOtp(true);
                           }}
                         >
-                          Resend
+                          {t("common.resend")}
                         </Button>
                       </p>
                     </CardContent>
@@ -609,11 +615,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         {isLoading ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Verifying...
+                            {t("auth.verifying")}
                           </>
                         ) : (
                           <>
-                            Verify
+                            {t("auth.verify")}
                             <ArrowRight className="ml-2 h-4 w-4" />
                           </>
                         )}
@@ -625,7 +631,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         disabled={isLoading}
                         className="w-full"
                       >
-                        Use a different phone number
+                        {t("auth.differentNumber")}
                       </Button>
                     </CardFooter>
                   </form>
@@ -637,10 +643,10 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                 <>
                   <CardHeader className="text-center">
                     <CardTitle className="flex items-center justify-center gap-2">
-                      <KeyRound className="size-5" /> Set a password
+                      <KeyRound className="size-5" /> {t("auth.setPasswordTitle")}
                     </CardTitle>
                     <CardDescription>
-                      Speed up your next login — no SMS needed
+                      {t("auth.setPasswordDesc")}
                     </CardDescription>
                   </CardHeader>
                   <form onSubmit={handleSetPassword}>
@@ -648,12 +654,12 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                       <input type="hidden" name="phone" value={step.phone} />
                       <input type="hidden" name="flow" value="signUp" />
                       <div className="space-y-2">
-                        <Label htmlFor="new-password">Password</Label>
+                        <Label htmlFor="new-password">{t("auth.passwordLabel")}</Label>
                         <Input
                           id="new-password"
                           name="password"
                           type="password"
-                          placeholder="At least 8 characters"
+                          placeholder={t("common.minChars")}
                           value={password}
                           onChange={(e) => setPassword(e.target.value)}
                           disabled={isLoading}
@@ -674,11 +680,11 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         {isLoading ? (
                           <>
                             <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                            Saving...
+                            {t("auth.saving")}
                           </>
                         ) : (
                           <>
-                            Save password
+                            {t("auth.savePassword")}
                             <ArrowRight className="ml-2 h-4 w-4" />
                           </>
                         )}
@@ -690,7 +696,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                         disabled={isLoading}
                         className="w-full"
                       >
-                        Skip for now
+                        {t("common.skip")}
                       </Button>
                     </CardFooter>
                   </form>

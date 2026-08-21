@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
@@ -12,18 +13,20 @@ import {
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Navigate, NavLink, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
-const TABS = [
-  { to: "/explore", label: "Explore", icon: Compass },
-  { to: "/bookings", label: "Bookings", icon: CalendarCheck },
-  { to: "/account", label: "You", icon: UserRound },
+const TAB_KEYS = [
+  { to: "/explore", key: "nav.explore", icon: Compass },
+  { to: "/bookings", key: "nav.bookings", icon: CalendarCheck },
+  { to: "/account", key: "nav.you", icon: UserRound },
 ];
 
 export function CustomerShell({ children }: { children: ReactNode }) {
   const { user, signOut } = useAuth();
   const navigate = useNavigate();
   const unread = useQuery(api.dinerNotify.unreadCount);
+  const { t } = useTranslation();
 
   const handleSignOut = async () => {
     await signOut();
@@ -46,7 +49,8 @@ export function CustomerShell({ children }: { children: ReactNode }) {
           <span className="font-semibold tracking-tight">Kamix</span>
         </Link>
         <div className="flex items-center gap-1">
-          <Link to="/notifications" aria-label="Notifications" className="relative">
+          <LanguageSwitcher />
+          <Link to="/notifications" aria-label={t("nav.notifications")} className="relative">
             <span className="flex size-9 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground">
               <Bell className="size-4.5" />
             </span>
@@ -59,7 +63,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
           <Button
             variant="ghost"
             size="icon-sm"
-            aria-label="Sign out"
+            aria-label={t("common.signOut")}
             onClick={handleSignOut}
             className="text-muted-foreground"
           >
@@ -74,7 +78,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
       {/* Bottom nav */}
       <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-md border-t border-border/60 bg-background/95 backdrop-blur-md">
         <div className="grid grid-cols-3">
-          {TABS.map((tab) => (
+          {TAB_KEYS.map((tab) => (
             <NavLink
               key={tab.to}
               to={tab.to}
@@ -96,7 +100,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
                   >
                     <tab.icon className="size-5" />
                   </span>
-                  {tab.label}
+                  {t(tab.key)}
                 </>
               )}
             </NavLink>

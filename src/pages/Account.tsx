@@ -32,20 +32,22 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
+import { Trans, useTranslation } from "react-i18next";
 import { OCCASIONS } from "@/lib/format";
 import { DIETARY_TAGS } from "@/lib/menu";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 
 const SEAT_OPTIONS = [
-  { value: "inside", label: "Inside", icon: Sofa },
-  { value: "outside", label: "Outside", icon: Wind },
-  { value: "bar", label: "Bar", icon: Users },
+  { value: "inside", key: "common.inside", icon: Sofa },
+  { value: "outside", key: "common.outside", icon: Wind },
+  { value: "bar", key: "common.bar", icon: Users },
 ] as const;
 
 export default function Account() {
   const { user, isLoading, signOut } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const updateProfile = useMutation(api.users.updateProfile);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
   const favorites = useQuery(api.users.myFavorites);
@@ -105,9 +107,9 @@ export default function Account() {
         name,
         prefs: { dietary, seating: seating as ("inside" | "outside" | "bar")[], occasions },
       });
-      toast.success("Profile updated");
+      toast.success(t("account.updated"));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not save changes.");
+      setError(err instanceof Error ? err.message : t("account.errSave"));
     } finally {
       setSaving(false);
     }
@@ -116,7 +118,7 @@ export default function Account() {
   // Send an OTP to the NEW number — nothing moves until the code is verified.
   const handleStartPhoneChange = async () => {
     if (!newPhone.trim()) {
-      setPhoneError("Enter the new phone number.");
+      setPhoneError(t("account.errPhoneEmpty"));
       return;
     }
     setPhoneBusy(true);
@@ -125,9 +127,9 @@ export default function Account() {
       await startPhoneChange({ newPhone: newPhone.trim() });
       setPhoneStep("code-sent");
       setPhoneCode("");
-      toast.success("Code sent to the new number");
+      toast.success(t("account.codeSent"));
     } catch (err) {
-      setPhoneError(err instanceof Error ? err.message : "Could not send the code.");
+      setPhoneError(err instanceof Error ? err.message : t("account.errPhoneSend"));
     } finally {
       setPhoneBusy(false);
     }
@@ -142,9 +144,9 @@ export default function Account() {
       setPhoneStep("idle");
       setNewPhone("");
       setPhoneCode("");
-      toast.success(`Phone updated to ${updated?.phone ?? "the new number"}`);
+      toast.success(t("account.phoneUpdated", { phone: updated?.phone ?? t("account.notSet") }));
     } catch (err) {
-      setPhoneError(err instanceof Error ? err.message : "Incorrect code. Try again.");
+      setPhoneError(err instanceof Error ? err.message : t("account.errPhoneConfirm"));
       setPhoneCode("");
     } finally {
       setPhoneBusy(false);
@@ -155,11 +157,11 @@ export default function Account() {
     e.preventDefault();
     setPwError(null);
     if (newPassword.length < 8) {
-      setPwError("New password must be at least 8 characters.");
+      setPwError(t("account.pwMin"));
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPwError("New passwords don't match.");
+      setPwError(t("account.pwMatch"));
       return;
     }
     setPwBusy(true);
@@ -171,9 +173,9 @@ export default function Account() {
       setCurrentPassword("");
       setNewPassword("");
       setConfirmPassword("");
-      toast.success(needsCurrentPassword ? "Password updated" : "Password set");
+      toast.success(needsCurrentPassword ? t("account.pwUpdated") : t("account.pwSet"));
     } catch (err) {
-      setPwError(err instanceof Error ? err.message : "Could not update your password.");
+      setPwError(err instanceof Error ? err.message : t("setpw.errGeneric"));
     } finally {
       setPwBusy(false);
     }
@@ -185,9 +187,9 @@ export default function Account() {
   const handleRemoveFavorite = async (id: string, name: string) => {
     try {
       await toggleFavorite({ restaurantId: id as never });
-      toast.success(`Removed ${name} from favorites`);
+      toast.success(t("explore.favRemoved", { name }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update favorites.");
+      toast.error(err instanceof Error ? err.message : t("explore.favError"));
     }
   };
 
@@ -208,8 +210,8 @@ export default function Account() {
   return (
     <CustomerShell>
       <div className="px-4 pt-5 pb-6">
-        <h1 className="text-xl font-bold tracking-tight">Your account</h1>
-        <p className="mt-0.5 text-sm text-muted-foreground">Profile, preferences and security</p>
+        <h1 className="text-xl font-bold tracking-tight">{t("account.title")}</h1>
+        <p className="mt-0.5 text-sm text-muted-foreground">{t("account.subtitle")}</p>
 
         {/* Profile card */}
         <Card className="mt-5 rounded-2xl border-border/70 p-0 shadow-sm">
@@ -229,11 +231,11 @@ export default function Account() {
                 >
                   {isOwner ? (
                     <>
-                      <Store className="size-3" /> Restaurant owner
+                      <Store className="size-3" /> {t("account.ownerBadge")}
                     </>
                   ) : (
                     <>
-                      <UserRound className="size-3" /> Diner
+                      <UserRound className="size-3" /> {t("account.dinerBadge")}
                     </>
                   )}
                 </Badge>
@@ -249,9 +251,9 @@ export default function Account() {
               <div className="flex items-center gap-3">
                 <span className="flex size-12 shrink-0 items-center justify-center rounded-2xl bg-primary/15 text-xl">⭐</span>
                 <div>
-                  <p className="font-semibold">Kamix Points</p>
+                  <p className="font-semibold">{t("account.pointsTitle")}</p>
                   <p className="text-xs text-muted-foreground">
-                    Earned for completed bookings, reviews and Socialize activity
+                    {t("account.pointsSub")}
                   </p>
                 </div>
               </div>
@@ -259,7 +261,7 @@ export default function Account() {
                 <p className="text-2xl font-bold tracking-tight text-primary">
                   {loyalty?.points ?? "…"}
                 </p>
-                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">points</p>
+                <p className="text-[10px] uppercase tracking-wide text-muted-foreground">{t("account.points")}</p>
               </div>
             </div>
             {(loyalty?.activity ?? []).length > 0 && (
@@ -268,12 +270,12 @@ export default function Account() {
                   <div key={a._id} className="flex items-center justify-between text-xs">
                     <span className="text-muted-foreground">
                       {a.source === "booking_completed"
-                        ? "Completed booking"
+                        ? t("account.actBooking")
                         : a.source === "review"
-                          ? "Wrote a review"
+                          ? t("account.actReview")
                           : a.source === "gift_sent"
-                            ? "Sent a Socialize gift"
-                            : "Checked in"}
+                            ? t("account.actGift")
+                            : t("account.actCheckin")}
                     </span>
                     <span className="font-semibold text-emerald-600 dark:text-emerald-400">
                       +{a.amount} pts
@@ -288,26 +290,26 @@ export default function Account() {
         {/* Edit form */}
         <Card className="mt-4 rounded-2xl border-border/70 p-0 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Contact details</CardTitle>
+            <CardTitle className="text-base">{t("account.contactTitle")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSave} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="acc-name">Name</Label>
+                <Label htmlFor="acc-name">{t("account.name")}</Label>
                 <Input
                   id="acc-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="Your name"
+                  placeholder={t("account.namePlaceholder")}
                   disabled={saving}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Phone (for SMS confirmations)</Label>
+                <Label>{t("account.phoneLabel")}</Label>
                 <div className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/30 px-3 py-2 text-sm">
                   <Phone className="size-4 shrink-0 text-muted-foreground" />
                   <span className="flex-1 truncate">
-                    {user?.phone ?? "Not set"}
+                    {user?.phone ?? t("account.notSet")}
                   </span>
                   <Button
                     type="button"
@@ -321,11 +323,11 @@ export default function Account() {
                         ?.scrollIntoView({ behavior: "smooth", block: "center" });
                     }}
                   >
-                    Change
+                    {t("account.change")}
                   </Button>
                 </div>
                 <p className="text-xs text-muted-foreground">
-                  Changing your number sends a verification code to the new number first.
+                  {t("account.phoneHint")}
                 </p>
               </div>
               {error && (
@@ -336,10 +338,10 @@ export default function Account() {
               <Button type="submit" disabled={saving} className="w-full">
                 {saving ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" /> Saving…
+                    <Loader2 className="size-4 animate-spin" /> {t("account.saving")}
                   </>
                 ) : (
-                  "Save changes"
+                  t("account.saveChanges")
                 )}
               </Button>
             </form>
@@ -353,18 +355,20 @@ export default function Account() {
         >
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <ShieldCheck className="size-4 text-primary" /> Security
+              <ShieldCheck className="size-4 text-primary" /> {t("account.securityTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-5">
             {/* Change phone number */}
             <div className="rounded-xl border border-border/70 p-4">
               <p className="flex items-center gap-2 text-sm font-semibold">
-                <Phone className="size-4 text-primary" /> Change phone number
+                <Phone className="size-4 text-primary" /> {t("account.changePhone")}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
-                We text a code to the <strong>new</strong> number. Your login and SMS
-                confirmations move only after you verify it.
+                <Trans i18nKey="account.changePhoneHint">
+                  We text a code to the <strong>new</strong> number. Your login and SMS
+                  confirmations move only after you verify it.
+                </Trans>
               </p>
               {phoneStep === "idle" ? (
                 <div className="mt-3 flex flex-col gap-2 sm:flex-row">
@@ -387,13 +391,13 @@ export default function Account() {
                     ) : (
                       <MessageSquare className="mr-2 size-4" />
                     )}
-                    Send code
+                    {t("account.sendCode")}
                   </Button>
                 </div>
               ) : (
                 <div className="mt-3 space-y-3">
                   <p className="text-xs text-muted-foreground">
-                    Enter the 6-digit code sent to <strong>{newPhone}</strong>
+                    <Trans i18nKey="account.enterCode" values={{ phone: newPhone }} components={{ strong: <strong /> }} />
                   </p>
                   <div className="flex flex-col items-center gap-3 sm:flex-row sm:justify-between">
                     <InputOTP
@@ -420,7 +424,7 @@ export default function Account() {
                         }}
                         disabled={phoneBusy}
                       >
-                        Back
+                        {t("common.back")}
                       </Button>
                       <Button
                         type="button"
@@ -429,12 +433,12 @@ export default function Account() {
                         disabled={phoneBusy || phoneCode.length !== 6}
                       >
                         {phoneBusy && <Loader2 className="mr-2 size-4 animate-spin" />}
-                        Confirm
+                        {t("account.confirm")}
                       </Button>
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground">
-                    Didn&apos;t get it?{" "}
+                    {t("auth.didntGet")}{" "}
                     <Button
                       type="button"
                       variant="link"
@@ -442,7 +446,7 @@ export default function Account() {
                       onClick={handleStartPhoneChange}
                       disabled={phoneBusy}
                     >
-                      Resend code
+                      {t("account.resendCode")}
                     </Button>
                   </p>
                 </div>
@@ -457,21 +461,21 @@ export default function Account() {
             {/* Change password */}
             <div className="rounded-xl border border-border/70 p-4">
               <p className="flex items-center gap-2 text-sm font-semibold">
-                <KeyRound className="size-4 text-primary" /> Change password
+                <KeyRound className="size-4 text-primary" /> {t("account.changePassword")}
               </p>
               <p className="mt-0.5 text-xs text-muted-foreground">
                 {needsCurrentPassword
-                  ? "Use your current password. If you forgot it, sign out and use “Forgot password?” on the login screen — a temporary code is texted to your phone."
-                  : "You don't have a password yet — set one here so you can log in without SMS."}
+                  ? t("account.changePasswordHint")
+                  : t("account.setPasswordHint")}
               </p>
               <form onSubmit={handleChangePassword} className="mt-3 space-y-3">
                 {needsCurrentPassword && (
                   <div className="space-y-2">
-                    <Label htmlFor="acc-current-password">Current password</Label>
+                    <Label htmlFor="acc-current-password">{t("account.currentPassword")}</Label>
                     <Input
                       id="acc-current-password"
                       type="password"
-                      placeholder="Your current password"
+                      placeholder={t("account.currentPasswordPlaceholder")}
                       value={currentPassword}
                       onChange={(e) => setCurrentPassword(e.target.value)}
                       disabled={pwBusy}
@@ -481,11 +485,11 @@ export default function Account() {
                 )}
                 <div className="grid gap-3 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <Label htmlFor="acc-new-password">New password</Label>
+                    <Label htmlFor="acc-new-password">{t("account.newPassword")}</Label>
                     <Input
                       id="acc-new-password"
                       type="password"
-                      placeholder="At least 8 characters"
+                      placeholder={t("common.minChars")}
                       value={newPassword}
                       onChange={(e) => setNewPassword(e.target.value)}
                       disabled={pwBusy}
@@ -493,11 +497,11 @@ export default function Account() {
                     />
                   </div>
                   <div className="space-y-2">
-                    <Label htmlFor="acc-confirm-password">Confirm new password</Label>
+                    <Label htmlFor="acc-confirm-password">{t("account.confirmPassword")}</Label>
                     <Input
                       id="acc-confirm-password"
                       type="password"
-                      placeholder="Repeat new password"
+                      placeholder={t("account.confirmPasswordPlaceholder")}
                       value={confirmPassword}
                       onChange={(e) => setConfirmPassword(e.target.value)}
                       disabled={pwBusy}
@@ -517,7 +521,7 @@ export default function Account() {
                   className="w-full sm:w-auto"
                 >
                   {pwBusy && <Loader2 className="mr-2 size-4 animate-spin" />}
-                  Update password
+                  {t("account.updatePassword")}
                 </Button>
               </form>
             </div>
@@ -528,12 +532,12 @@ export default function Account() {
         <Card className="mt-4 rounded-2xl border-border/70 p-0 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Sparkles className="size-4 text-primary" /> Dining preferences
+              <Sparkles className="size-4 text-primary" /> {t("account.prefsTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div>
-              <p className="mb-2 text-sm font-medium">Dietary</p>
+              <p className="mb-2 text-sm font-medium">{t("account.prefsDietary")}</p>
               <div className="flex flex-wrap gap-2">
                 {DIETARY_TAGS.map((d) => (
                   <button
@@ -553,7 +557,7 @@ export default function Account() {
               </div>
             </div>
             <div>
-              <p className="mb-2 text-sm font-medium">Seating vibe</p>
+              <p className="mb-2 text-sm font-medium">{t("account.prefsSeating")}</p>
               <div className="flex flex-wrap gap-2">
                 {SEAT_OPTIONS.map((s) => (
                   <button
@@ -567,13 +571,13 @@ export default function Account() {
                         : "border-border bg-card text-muted-foreground hover:text-foreground",
                     )}
                   >
-                    <s.icon className="size-3.5" /> {s.label}
+                    <s.icon className="size-3.5" /> {t(s.key)}
                   </button>
                 ))}
               </div>
             </div>
             <div>
-              <p className="mb-2 text-sm font-medium">Occasions you celebrate</p>
+              <p className="mb-2 text-sm font-medium">{t("account.prefsOccasions")}</p>
               <div className="flex flex-wrap gap-2">
                 {OCCASIONS.map((o) => (
                   <button
@@ -593,7 +597,7 @@ export default function Account() {
               </div>
             </div>
             <p className="text-xs text-muted-foreground">
-              These are used to personalize your search and booking experience.
+              {t("account.prefsHint")}
             </p>
           </CardContent>
         </Card>
@@ -602,7 +606,7 @@ export default function Account() {
         <Card className="mt-4 rounded-2xl border-border/70 p-0 shadow-sm">
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center gap-2 text-base">
-              <Heart className="size-4 text-primary" /> Saved restaurants
+              <Heart className="size-4 text-primary" /> {t("account.savedTitle")}
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -612,7 +616,7 @@ export default function Account() {
               </div>
             ) : favorites.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                Tap the ♥ on any restaurant to save it here for quick access.
+                {t("account.savedEmpty")}
               </p>
             ) : (
               <div className="space-y-2">
@@ -652,34 +656,33 @@ export default function Account() {
               to="/explore"
               className="flex items-center gap-3 px-5 py-4 text-sm font-medium transition-colors hover:bg-muted/40"
             >
-              <Compass className="size-4 text-primary" /> Explore restaurants
+              <Compass className="size-4 text-primary" /> {t("account.exploreLink")}
             </Link>
             <Link
               to="/bookings"
               className="flex items-center gap-3 px-5 py-4 text-sm font-medium transition-colors hover:bg-muted/40"
             >
-              <CalendarCheck2 className="size-4 text-primary" /> My bookings
+              <CalendarCheck2 className="size-4 text-primary" /> {t("account.myBookingsLink")}
             </Link>
             {isOwner && (
               <Link
                 to="/owner"
                 className="flex items-center gap-3 px-5 py-4 text-sm font-medium transition-colors hover:bg-muted/40"
               >
-                <Store className="size-4 text-primary" /> Owner dashboard
+                <Store className="size-4 text-primary" /> {t("account.ownerLink")}
               </Link>
             )}
             <button
               onClick={handleSignOut}
               className="flex w-full items-center gap-3 px-5 py-4 text-left text-sm font-medium text-destructive transition-colors hover:bg-destructive/5"
             >
-              <LogOut className="size-4" /> Sign out
+              <LogOut className="size-4" /> {t("common.signOut")}
             </button>
           </CardContent>
         </Card>
 
         <p className="mt-6 flex items-center justify-center gap-1.5 text-center text-xs text-muted-foreground">
-          <ShieldCheck className="size-3.5 text-primary" /> Your data is protected — seat
-          bookings are atomic and can never double-book.
+          <ShieldCheck className="size-3.5 text-primary" /> {t("account.footerNote")}
         </p>
 
         {isLoading && (

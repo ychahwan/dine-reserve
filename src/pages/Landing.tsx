@@ -16,47 +16,26 @@ import { motion } from "framer-motion";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Input } from "@/components/ui/input";
+import { LanguageSwitcher } from "@/components/LanguageSwitcher";
+import { useTranslation } from "react-i18next";
 import { useQuery } from "convex/react";
 import { api } from "@/convex/_generated/api";
 
 const STEPS = [
-  {
-    icon: Search,
-    title: "Find a free table",
-    text: "See real availability — inside, terrace or bar — before you call.",
-  },
-  {
-    icon: CalendarDays,
-    title: "Book in one tap",
-    text: "Pick your party, vibe and time. Your table is locked in instantly.",
-  },
-  {
-    icon: MessageSquareText,
-    title: "Confirmed by SMS",
-    text: "Confirmations and reminders straight to your phone.",
-  },
+  { icon: Search, titleKey: "landing.step1Title", textKey: "landing.step1Text" },
+  { icon: CalendarDays, titleKey: "landing.step2Title", textKey: "landing.step2Text" },
+  { icon: MessageSquareText, titleKey: "landing.step3Title", textKey: "landing.step3Text" },
 ];
 
 const SOCIALIZE_POINTS = [
-  {
-    icon: PartyPopper,
-    title: "See who's dining tonight",
-    text: "On the day of your booking, appear in the room and spot other diners around you — or stay invisible if you'd rather.",
-  },
-  {
-    icon: Gift,
-    title: "Send a drink or dessert",
-    text: "Surprise a fellow diner with a gift from the restaurant's catalog. It's charged to your bill — a toast from across the room.",
-  },
-  {
-    icon: Check,
-    title: "Reveal it your way",
-    text: "Deliver the news instantly, or keep it a secret surprise until the restaurant brings it to their table.",
-  },
+  { icon: PartyPopper, titleKey: "landing.soc1Title", textKey: "landing.soc1Text" },
+  { icon: Gift, titleKey: "landing.soc2Title", textKey: "landing.soc2Text" },
+  { icon: Check, titleKey: "landing.soc3Title", textKey: "landing.soc3Text" },
 ];
 
 export default function Landing() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const [phone, setPhone] = useState("");
   // Real partner count from the backend (not a hard-coded claim).
   const stats = useQuery(api.restaurants.stats);
@@ -81,11 +60,12 @@ export default function Landing() {
             <span className="text-lg font-semibold tracking-tight">Kamix</span>
           </Link>
           <div className="flex items-center gap-2">
+            <LanguageSwitcher />
             <Button variant="ghost" size="sm" asChild>
-              <Link to="/auth">Sign in</Link>
+              <Link to="/auth">{t("common.signIn")}</Link>
             </Button>
             <Button size="sm" asChild>
-              <Link to="/auth">Get started</Link>
+              <Link to="/auth">{t("common.getStarted")}</Link>
             </Button>
           </div>
         </div>
@@ -102,16 +82,15 @@ export default function Landing() {
           >
             <Badge variant="secondary" className="mb-5 gap-1.5 rounded-full px-3 py-1">
               <span className="size-1.5 rounded-full bg-primary" />
-              Live table availability, in real time
+              {t("landing.heroBadge")}
             </Badge>
             <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
-              Book your table
+              {t("landing.title1")}
               <br />
-              <span className="text-primary">before you leave.</span>
+              <span className="text-primary">{t("landing.title2")}</span>
             </h1>
             <p className="mx-auto mt-5 max-w-xl text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
-              See exactly which tables are free — inside, outside, at the bar —
-              and lock yours in seconds. No calls, no waiting.
+              {t("landing.subtitle")}
             </p>
           </motion.div>
 
@@ -128,7 +107,7 @@ export default function Landing() {
               <Input
                 type="tel"
                 inputMode="tel"
-                placeholder="+961 71 123 456"
+                placeholder={t("landing.phonePlaceholder")}
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
                 className="h-12 pl-10 text-base"
@@ -137,7 +116,7 @@ export default function Landing() {
               />
             </div>
             <Button type="submit" size="lg" className="h-12 px-6 text-base">
-              Get started <ArrowRight className="size-4" />
+              {t("common.getStarted")} <ArrowRight className="size-4" />
             </Button>
           </motion.form>
 
@@ -147,9 +126,9 @@ export default function Landing() {
             transition={{ duration: 0.5, delay: 0.25 }}
             className="mt-4 text-sm text-muted-foreground"
           >
-            Already have an account?{" "}
+            {t("landing.alreadyHave")}{" "}
             <Link to="/auth" className="font-medium text-primary hover:underline">
-              Sign in
+              {t("common.signIn")}
             </Link>
           </motion.p>
 
@@ -162,16 +141,16 @@ export default function Landing() {
             <span className="flex items-center gap-2">
               <Users className="size-4" />{" "}
               {restaurantCount !== null
-                ? `${restaurantCount} ${restaurantCount === 1 ? "partner restaurant" : "partner restaurants"}`
-                : "Loading partners…"}
+                ? t("landing.partner", { count: restaurantCount })
+                : t("landing.loadingPartners")}
             </span>
             {cityCount !== null && cityCount > 0 && (
               <span className="flex items-center gap-2">
-                <Store className="size-4" /> {cityCount} {cityCount === 1 ? "city" : "cities"}
+                <Store className="size-4" /> {t("landing.city", { count: cityCount })}
               </span>
             )}
             <span className="flex items-center gap-2">
-              <Check className="size-4" /> Free to join
+              <Check className="size-4" /> {t("landing.freeToJoin")}
             </span>
           </motion.div>
         </div>
@@ -181,15 +160,15 @@ export default function Landing() {
       <section id="how" className="border-t border-border/60">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-medium uppercase tracking-widest text-primary">How it works</p>
+            <p className="text-sm font-medium uppercase tracking-widest text-primary">{t("landing.howLabel")}</p>
             <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
-              From hungry to seated in three steps
+              {t("landing.howTitle")}
             </h2>
           </div>
           <div className="mt-10 grid gap-5 md:grid-cols-3">
             {STEPS.map((step, i) => (
               <motion.div
-                key={step.title}
+                key={step.titleKey}
                 initial={{ opacity: 0, y: 16 }}
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-80px" }}
@@ -202,8 +181,8 @@ export default function Landing() {
                 <div className="mb-4 flex size-11 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
                   <step.icon className="size-5" />
                 </div>
-                <h3 className="font-semibold">{step.title}</h3>
-                <p className="mt-2 text-sm leading-6 text-muted-foreground">{step.text}</p>
+                <h3 className="font-semibold">{t(step.titleKey)}</h3>
+                <p className="mt-2 text-sm leading-6 text-muted-foreground">{t(step.textKey)}</p>
               </motion.div>
             ))}
           </div>
@@ -215,32 +194,29 @@ export default function Landing() {
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="grid items-center gap-10 lg:grid-cols-2">
             <div>
-              <p className="text-sm font-medium uppercase tracking-widest text-primary">Socialize</p>
+              <p className="text-sm font-medium uppercase tracking-widest text-primary">{t("landing.socializeLabel")}</p>
               <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-                Dining alone doesn&apos;t mean dining solo.
+                {t("landing.socializeTitle")}
               </h2>
               <p className="mt-5 text-base leading-7 text-muted-foreground">
-                On the day of your booking, Kamix opens a private room for your
-                restaurant — see who else is dining, make yourself visible, and
-                send a drink or dessert to a fellow table. It&apos;s the classic
-                &ldquo;send a bottle to table 12&rdquo; moment, without needing to ask.
+                {t("landing.socializeBody")}
               </p>
               <div className="mt-8 space-y-5">
                 {SOCIALIZE_POINTS.map((point) => (
-                  <div key={point.title} className="flex items-start gap-4">
+                  <div key={point.titleKey} className="flex items-start gap-4">
                     <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                       <point.icon className="size-5" />
                     </div>
                     <div>
-                      <p className="font-semibold">{point.title}</p>
-                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{point.text}</p>
+                      <p className="font-semibold">{t(point.titleKey)}</p>
+                      <p className="mt-1 text-sm leading-6 text-muted-foreground">{t(point.textKey)}</p>
                     </div>
                   </div>
                 ))}
               </div>
               <Button size="lg" className="mt-8 h-12 px-7 text-base" asChild>
                 <Link to="/auth">
-                  Try Socialize on your next booking <ArrowRight className="size-4" />
+                  {t("landing.socializeCta")} <ArrowRight className="size-4" />
                 </Link>
               </Button>
             </div>
@@ -254,11 +230,11 @@ export default function Landing() {
                       <PartyPopper className="size-4" />
                     </span>
                     <div>
-                      <p className="text-sm font-semibold">Who&apos;s dining</p>
-                      <p className="text-xs text-muted-foreground">Tonight · 8:00 PM</p>
+                      <p className="text-sm font-semibold">{t("landing.mockTitle")}</p>
+                      <p className="text-xs text-muted-foreground">{t("landing.mockSubtitle")}</p>
                     </div>
                   </div>
-                  <Badge variant="secondary" className="text-xs">Visible</Badge>
+                  <Badge variant="secondary" className="text-xs">{t("landing.mockVisible")}</Badge>
                 </div>
                 <div className="space-y-3">
                   {[
@@ -278,14 +254,14 @@ export default function Landing() {
                         <p className="text-xs text-muted-foreground">{diner.time}</p>
                       </div>
                       <span className="flex items-center gap-1 rounded-full bg-emerald-600/10 px-2 py-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-                        <Check className="size-3" /> Checked in
+                        <Check className="size-3" /> {t("landing.mockCheckedIn")}
                       </span>
                     </div>
                   ))}
                 </div>
                 <div className="mt-4 flex items-center justify-between rounded-xl bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground">
                   <span className="flex items-center gap-1.5">
-                    <Gift className="size-3.5 text-primary" /> Send Karim a dessert
+                    <Gift className="size-3.5 text-primary" /> {t("landing.mockSendGift")}
                   </span>
                   <span className="font-medium text-primary">+$9</span>
                 </div>
@@ -300,19 +276,18 @@ export default function Landing() {
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6">
           <div className="grid items-center gap-8 lg:grid-cols-2">
             <div>
-              <p className="text-sm font-medium uppercase tracking-widest text-primary">For restaurant owners</p>
+              <p className="text-sm font-medium uppercase tracking-widest text-primary">{t("landing.ownersLabel")}</p>
               <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
-                Fill your free tables, live.
+                {t("landing.ownersTitle")}
               </h2>
               <p className="mt-4 text-base leading-7 text-muted-foreground">
-                Set your sections, hours and menus once. Walk-ins, callers and app
-                bookings all draw from the same availability — never oversell a table.
+                {t("landing.ownersBody")}
               </p>
               <ul className="mt-6 space-y-3">
                 {[
-                  "Inside, terrace, bar & smoking zones",
-                  "Live menu manager with pricing",
-                  "Bookings & no-shows in one dashboard",
+                  t("landing.ownerFeature1"),
+                  t("landing.ownerFeature2"),
+                  t("landing.ownerFeature3"),
                 ].map((item) => (
                   <li key={item} className="flex items-start gap-3 text-sm text-muted-foreground">
                     <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -325,7 +300,7 @@ export default function Landing() {
             </div>
             <Button size="lg" className="h-12 px-7 text-base lg:justify-self-start" asChild>
               <Link to="/auth?returnTo=/owner">
-                Claim your restaurant <ArrowRight className="size-4" />
+                {t("landing.ownersCta")} <ArrowRight className="size-4" />
               </Link>
             </Button>
           </div>
@@ -342,11 +317,11 @@ export default function Landing() {
             <span className="font-semibold tracking-tight">Kamix</span>
           </div>
           <p className="text-sm text-muted-foreground">
-            © {new Date().getFullYear()} Kamix · Live restaurant availability
+            © {new Date().getFullYear()} Kamix · {t("landing.footerTagline")}
           </p>
           <div className="flex items-center gap-4 text-sm text-muted-foreground">
-            <Link to="/auth" className="transition-colors hover:text-foreground">Sign in</Link>
-            <Link to="/auth?returnTo=/owner" className="transition-colors hover:text-foreground">Owners</Link>
+            <Link to="/auth" className="transition-colors hover:text-foreground">{t("common.signIn")}</Link>
+            <Link to="/auth?returnTo=/owner" className="transition-colors hover:text-foreground">{t("landing.footerOwners")}</Link>
           </div>
         </div>
       </footer>

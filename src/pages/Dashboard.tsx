@@ -7,6 +7,7 @@ import { Loader2, Utensils } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { useMutation } from "convex/react";
 
 export default function Dashboard() {
@@ -38,6 +39,7 @@ export default function Dashboard() {
 
 function Onboarding({ onDone }: { onDone: () => void }) {
   const onboard = useMutation(api.users.onboard);
+  const { t } = useTranslation();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -53,7 +55,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
       await onboard({ role: "customer", name, phone: phone || undefined });
       onDone();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(err instanceof Error ? err.message : t("onboard.error"));
       setSaving(false);
     }
   };
@@ -70,27 +72,27 @@ function Onboarding({ onDone }: { onDone: () => void }) {
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
             <Utensils className="size-7" />
           </div>
-          <h1 className="text-2xl font-bold tracking-tight">Welcome to Kamix</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("onboard.welcome")}</h1>
           <p className="mt-2 text-sm text-muted-foreground">
-            Tell us your name and start finding tables.
+            {t("onboard.subtitle")}
           </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-5 rounded-2xl border border-border bg-card p-6">
           <div className="space-y-2">
-            <Label htmlFor="name">Your name</Label>
+            <Label htmlFor="name">{t("onboard.name")}</Label>
             <Input
               id="name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. Alex Morgan"
+              placeholder={t("onboard.namePlaceholder")}
               required
               disabled={saving}
             />
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="phone">Phone (for SMS confirmations)</Label>
+            <Label htmlFor="phone">{t("common.phone")}</Label>
             <Input
               id="phone"
               value={phone}
@@ -100,7 +102,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
               disabled={saving}
             />
             <p className="text-xs text-muted-foreground">
-              Optional — but booking confirmations by SMS need it.
+              {t("onboard.phoneHint")}
             </p>
           </div>
 
@@ -113,10 +115,10 @@ function Onboarding({ onDone }: { onDone: () => void }) {
           <Button type="submit" className="w-full" size="lg" disabled={saving}>
             {saving ? (
               <>
-                <Loader2 className="size-4 animate-spin" /> Setting up…
+                <Loader2 className="size-4 animate-spin" /> {t("onboard.settingUp")}
               </>
             ) : (
-              "Start exploring"
+              t("onboard.start")
             )}
           </Button>
         </form>

@@ -17,28 +17,30 @@ import {
 } from "lucide-react";
 import { useEffect } from "react";
 import { Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 
-function timeAgo(ts: number): string {
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
-}
-
-const TYPE_META: Record<string, { icon: typeof BellRing; label: string; cls: string }> = {
-  favorite_story: { icon: ChefHat, label: "New from a favorite", cls: "bg-rose-500/10 text-rose-600 dark:text-rose-400" },
-  reengage: { icon: Sparkles, label: "We miss you", cls: "bg-primary/10 text-primary" },
-  guest_joined: { icon: UserPlus, label: "Your party grew", cls: "bg-sky-500/10 text-sky-600 dark:text-sky-400" },
-  review_nudge: { icon: Star, label: "Rate your visit", cls: "bg-amber-500/10 text-amber-600 dark:text-amber-400" },
-  waitlist_freed: { icon: Gift, label: "Table freed up!", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
-  booking_reminder: { icon: CalendarCheck2, label: "Reminder", cls: "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" },
+const TYPE_KEYS: Record<string, string> = {
+  favorite_story: "notif.typeFavoriteStory",
+  reengage: "notif.typeReengage",
+  guest_joined: "notif.typeGuestJoined",
+  review_nudge: "notif.typeReviewNudge",
+  waitlist_freed: "notif.typeWaitlistFreed",
+  booking_reminder: "notif.typeBookingReminder",
 };
 
 export default function Notifications() {
   const notifications = useQuery(api.dinerNotify.myNotifications);
   const markAllRead = useMutation(api.dinerNotify.markAllRead);
+  const { t } = useTranslation();
+
+  function timeAgo(ts: number): string {
+    const s = Math.floor((Date.now() - ts) / 1000);
+    if (s < 60) return t("notif.justNow");
+    if (s < 3600) return t("notif.mAgo", { count: Math.floor(s / 60) });
+    if (s < 86400) return t("notif.hAgo", { count: Math.floor(s / 3600) });
+    return t("notif.dAgo", { count: Math.floor(s / 86400) });
+  }
 
   // Opening the feed marks everything read.
   useEffect(() => {
@@ -50,35 +52,39 @@ export default function Notifications() {
     <CustomerShell>
       <div className="px-4 pt-5 pb-6">
         <h1 className="flex items-center gap-2 text-xl font-bold tracking-tight">
-          <BellRing className="size-5 text-primary" /> Notifications
+          <BellRing className="size-5 text-primary" /> {t("notif.title")}
         </h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Personalized updates about your restaurants, bookings and waitlists
+          {t("notif.subtitle")}
         </p>
 
         {notifications === undefined ? (
           <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
             <Spinner className="size-6" />
-            <p className="text-sm">Loading notifications…</p>
+            <p className="text-sm">{t("notif.loading")}</p>
           </div>
         ) : notifications.length === 0 ? (
           <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border py-16 text-center">
             <BellRing className="size-9 text-muted-foreground/60" />
             <div>
-              <p className="font-medium">All caught up</p>
+              <p className="font-medium">{t("notif.emptyTitle")}</p>
               <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-                Save a restaurant to get notified when they post news, and you'll
-                get nudges after your visits and when waitlist tables free up.
+                {t("notif.emptyBody")}
               </p>
             </div>
             <Button asChild>
-              <Link to="/explore">Explore restaurants</Link>
+              <Link to="/explore">{t("notif.emptyCta")}</Link>
             </Button>
           </div>
         ) : (
           <div className="mt-5 space-y-2">
             {notifications.map((n) => {
-              const meta = TYPE_META[n.type] ?? TYPE_META.favorite_story;
+              const key = TYPE_KEYS[n.type] ?? "notif.typeFavoriteStory";
+              const meta = {
+                icon: n.type === "guest_joined" ? UserPlus : n.type === "review_nudge" ? Star : n.type === "waitlist_freed" ? Gift : n.type === "booking_reminder" ? CalendarCheck2 : n.type === "reengage" ? Sparkles : ChefHat,
+                label: t(key),
+                cls: n.type === "favorite_story" ? "bg-rose-500/10 text-rose-600 dark:text-rose-400" : n.type === "guest_joined" ? "bg-sky-500/10 text-sky-600 dark:text-sky-400" : n.type === "review_nudge" ? "bg-amber-500/10 text-amber-600 dark:text-amber-400" : n.type === "waitlist_freed" ? "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" : n.type === "booking_reminder" ? "bg-indigo-500/10 text-indigo-600 dark:text-indigo-400" : "bg-primary/10 text-primary",
+              };
               const Icon = meta.icon;
               const inner = (
                 <div className="flex items-start gap-3 rounded-2xl border border-border/70 bg-card px-4 py-3.5 transition-colors hover:bg-muted/40">
@@ -110,7 +116,7 @@ export default function Notifications() {
             })}
 
             <div className="flex items-center justify-center gap-1.5 pt-4 text-xs text-muted-foreground">
-              <CheckCheck className="size-3.5" /> Marked as read
+              <CheckCheck className="size-3.5" /> {t("notif.markedRead")}
             </div>
           </div>
         )}

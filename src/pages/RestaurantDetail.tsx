@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
   bookingShareText,
@@ -50,11 +51,11 @@ import { toast } from "sonner";
 const DAYS_TO_SHOW = 14;
 
 type SeatPref = "inside" | "outside" | "bar";
-const SEAT_OPTIONS: { value: SeatPref | null; label: string; icon: LucideIcon }[] = [
-  { value: null, label: "Any seating", icon: Sofa },
-  { value: "inside", label: "Inside", icon: Sofa },
-  { value: "outside", label: "Outside", icon: Wind },
-  { value: "bar", label: "Bar", icon: Users },
+const SEAT_KEYS: { value: SeatPref | null; key: string; icon: LucideIcon }[] = [
+  { value: null, key: "common.anySeating", icon: Sofa },
+  { value: "inside", key: "common.inside", icon: Sofa },
+  { value: "outside", key: "common.outside", icon: Wind },
+  { value: "bar", key: "common.bar", icon: Users },
 ];
 
 type MenuItemLike = {
@@ -88,6 +89,7 @@ export default function RestaurantDetail() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const { user } = useAuth();
+  const { t } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: id as never });
   const reviewsData = useQuery(api.reviews.listForRestaurant, { restaurantId: id as never });
   const stories = useQuery(api.stories.forRestaurant, { restaurantId: id as never });
@@ -280,9 +282,9 @@ export default function RestaurantDetail() {
       setSubmitting(false);
       setOccasion(null);
       setNotes("");
-      toast.success("Table booked — confirmation sent!");
+      toast.success(t("detail.bookedToast"));
     } else if (trackedEntry.status === "failed") {
-      const msg = trackedEntry.error ?? "No tables left at this time. Try a different time.";
+      const msg = trackedEntry.error ?? t("detail.errNoTables");
       setBookingError(msg);
       setQueueEntryId(null);
       setQueuePosition(null);
@@ -306,10 +308,10 @@ export default function RestaurantDetail() {
         phone: phone.trim() || undefined,
       });
       setWaitlistSlot(null);
-      toast.success("You're on the list — we'll text you when a table frees up!");
+      toast.success(t("detail.joinedWaitlist"));
     } catch (err) {
-      setWaitlistError(err instanceof Error ? err.message : "Could not join the waitlist.");
-      toast.error(err instanceof Error ? err.message : "Could not join the waitlist.");
+      setWaitlistError(err instanceof Error ? err.message : t("detail.errWaitlist"));
+      toast.error(err instanceof Error ? err.message : t("detail.errWaitlist"));
     } finally {
       setWaitlistSubmitting(false);
     }
@@ -320,7 +322,7 @@ export default function RestaurantDetail() {
     setFavoriteBusy(true);
     try {
       const res = await toggleFavorite({ restaurantId: data.restaurant._id as never });
-      toast.success(res.favorited ? "Saved to your favorites" : "Removed from favorites");
+      toast.success(res.favorited ? t("detail.savedFav") : t("detail.removedFav"));
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not update favorites.");
     } finally {
@@ -333,7 +335,7 @@ export default function RestaurantDetail() {
       <CustomerShell>
         <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground">
           <Spinner className="size-6" />
-          <p className="text-sm">Loading restaurant…</p>
+          <p className="text-sm">{t("detail.loading")}</p>
         </div>
       </CustomerShell>
     );
@@ -350,7 +352,7 @@ export default function RestaurantDetail() {
     setNonSmoking(false);
     const panel = document.getElementById("book-panel");
     panel?.scrollIntoView({ behavior: "smooth", block: "start" });
-    toast.info("Bar seat for 1 — pick a time below");
+    toast.info(t("detail.barSeatToast"));
   };
 
   return (
@@ -369,7 +371,7 @@ export default function RestaurantDetail() {
           <button
             onClick={() => navigate(-1)}
             className="absolute left-4 top-4 flex size-9 items-center justify-center rounded-full bg-black/40 text-white backdrop-blur transition-colors hover:bg-black/60"
-            aria-label="Back"
+            aria-label={t("detail.back")}
           >
             <ArrowLeft className="size-5" />
           </button>
@@ -380,8 +382,8 @@ export default function RestaurantDetail() {
               "absolute right-4 top-4 flex size-9 items-center justify-center rounded-full backdrop-blur transition-colors",
               isFavorite ? "bg-white text-rose-500" : "bg-black/40 text-white hover:bg-black/60",
             )}
-            aria-label={isFavorite ? "Remove from favorites" : "Save to favorites"}
-            title={isFavorite ? "Remove from favorites" : "Save to favorites"}
+            aria-label={isFavorite ? t("explore.removeFav") : t("explore.saveFav")}
+            title={isFavorite ? t("explore.removeFav") : t("explore.saveFav")}
           >
             <Heart className={cn("size-5", isFavorite && "fill-current")} />
           </button>
@@ -405,17 +407,17 @@ export default function RestaurantDetail() {
               <span className="font-normal text-muted-foreground">({rating.count})</span>
             </Badge>
           )}
-          {r.features.outside && <Badge variant="outline">Outside</Badge>}
-          {r.features.bar && <Badge variant="outline">Bar</Badge>}
-          {r.features.smoking && <Badge variant="outline">Smoking area</Badge>}
+          {r.features.outside && <Badge variant="outline">{t("detail.outside")}</Badge>}
+          {r.features.bar && <Badge variant="outline">{t("common.bar")}</Badge>}
+          {r.features.smoking && <Badge variant="outline">{t("detail.smokingArea")}</Badge>}
           {r.features.soloFriendly && (
             <Badge variant="outline" className="gap-1 text-primary">
-              <Users className="size-3" /> Solo-friendly
+              <Users className="size-3" /> {t("explore.soloFriendly")}
             </Badge>
           )}
           {policyHours > 0 && (
             <Badge variant="outline" className="gap-1 text-emerald-700 dark:text-emerald-400">
-              <ShieldCheck className="size-3" /> Free cancel until {policyHours}h before
+              <ShieldCheck className="size-3" /> {t("detail.freeCancel", { hours: policyHours })}
             </Badge>
           )}
           {r.phone && (
@@ -454,11 +456,11 @@ export default function RestaurantDetail() {
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               <CalendarDays className="size-4 text-primary" />
-              <h2 className="font-semibold">Book a table</h2>
+              <h2 className="font-semibold">{t("detail.bookTable")}</h2>
             </div>
             {r.features.bar && (
               <Button size="sm" variant="outline" onClick={quickBarSeat}>
-                <Users className="size-3.5" /> Bar seat for 1
+                <Users className="size-3.5" /> {t("detail.barSeat1")}
               </Button>
             )}
           </div>
@@ -497,7 +499,7 @@ export default function RestaurantDetail() {
                 {formatDate(date)}
               </span>
               <Button variant="outline" size="sm" onClick={() => setShowDateStrip(true)}>
-                Change date
+                {t("detail.changeDate")}
               </Button>
             </div>
           )}
@@ -505,7 +507,7 @@ export default function RestaurantDetail() {
           {/* Party size */}
           <div className="mt-4 flex items-center justify-between rounded-xl border border-border/80 bg-muted/30 px-4 py-3">
             <span className="flex items-center gap-2 text-sm font-medium">
-              <Users className="size-4 text-muted-foreground" /> Party size
+              <Users className="size-4 text-muted-foreground" /> {t("detail.partySize")}
             </span>
             <div className="flex items-center gap-3">
               <Button
@@ -530,9 +532,9 @@ export default function RestaurantDetail() {
 
           {/* Seating preference — pre-filtered from Explore, still changeable */}
           <div className="mt-3 flex flex-wrap gap-2">
-            {SEAT_OPTIONS.map((s) => (
+            {SEAT_KEYS.map((s) => (
               <button
-                key={s.label}
+                key={s.key}
                 onClick={() => setSeatPref(seatPref === s.value ? null : s.value)}
                 className={cn(
                   "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
@@ -541,7 +543,7 @@ export default function RestaurantDetail() {
                     : "border-border bg-card text-muted-foreground hover:text-foreground",
                 )}
               >
-                <s.icon className="size-3.5" /> {s.label}
+                <s.icon className="size-3.5" /> {t(s.key)}
               </button>
             ))}
             <button
@@ -553,7 +555,7 @@ export default function RestaurantDetail() {
                   : "border-border bg-card text-muted-foreground hover:text-foreground",
               )}
             >
-              <Sparkles className="size-3.5" /> Non-smoking
+              <Sparkles className="size-3.5" /> {t("explore.nonSmoking")}
             </button>
           </div>
 
@@ -571,8 +573,8 @@ export default function RestaurantDetail() {
             >
               <CalendarDays className="mt-0.5 size-3.5 shrink-0" />
               <span>
-                <span className="font-medium">Prediction:</span> {prediction.message}{" "}
-                <span className="opacity-70">(based on {prediction.sampleWeeks} similar past {prediction.sampleWeeks === 1 ? "week" : "weeks"})</span>
+                <span className="font-medium">{t("detail.prediction")}</span> {prediction.message}{" "}
+                <span className="opacity-70">{t("detail.predictionBased", { count: prediction.sampleWeeks, weeks: t("common.week", { count: prediction.sampleWeeks }) })}</span>
               </span>
             </div>
           )}
@@ -581,24 +583,23 @@ export default function RestaurantDetail() {
           <div className="mt-4">
             {availability == null ? (
               <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-                <Spinner className="size-4" /> Checking availability…
+                <Spinner className="size-4" /> {t("detail.checking")}
               </div>
             ) : !availability.open ? (
               <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-                Closed on {formatDate(date)} — pick another day.
+                {t("detail.closedOn", { date: formatDate(date) })}
               </div>
             ) : (
               <>
                 {availableSlots.length === 0 ? (
                   <div className="rounded-xl border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-                    No free tables for {partySize} {partySize === 1 ? "guest" : "guests"} with those
-                    preferences. Try another time or date — or check the waitlist below.
+                    {t("detail.noFreeTables", { count: partySize, guests: t("common.guest", { count: partySize }) })}
                   </div>
                 ) : (
                   <>
                     <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                       {showDateStrip ? `${formatDate(date)} — ` : ""}
-                      {availability.openTime} to {availability.closeTime}
+                      {t("detail.hoursRange", { open: availability.openTime, close: availability.closeTime })}
                     </p>
                     <div className="grid grid-cols-3 gap-2">
                       {availableSlots.map((slot) => (
@@ -621,7 +622,7 @@ export default function RestaurantDetail() {
                                 : "text-muted-foreground",
                             )}
                           >
-                            {slot.sectionName} · {slot.remaining} left
+                            {slot.sectionName} · {t("detail.left", { count: slot.remaining })}
                           </span>
                         </button>
                       ))}
@@ -635,7 +636,7 @@ export default function RestaurantDetail() {
                     <div className="mb-2 mt-4 flex items-center gap-2">
                       <BellRing className="size-3.5 text-muted-foreground" />
                       <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Sold out — tap a time to join the waitlist
+                        {t("detail.soldOutWaitlist")}
                       </p>
                     </div>
                     <div className="grid grid-cols-3 gap-2">
@@ -652,18 +653,18 @@ export default function RestaurantDetail() {
                             {formatTime(slot.time)}
                           </span>
                           <span className="block text-[10px] text-destructive">
-                            {slot.remaining === 0 ? "Full" : `${slot.remaining} left`} · waitlist
+                            {slot.remaining === 0 ? t("detail.full") : t("detail.left", { count: slot.remaining })} · {t("bookings.waitlist").toLowerCase()}
                           </span>
                         </button>
                       ))}
                     </div>
                     {fullSlots.length > 9 && (
                       <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
-                        +{fullSlots.length - 9} more sold-out times
+                        {t("detail.moreSoldOut", { count: fullSlots.length - 9 })}
                       </p>
                     )}
                     <p className="mt-2 text-[10px] text-muted-foreground">
-                      We&apos;ll text you the moment a table frees up — no payment needed.
+                      {t("detail.waitlistHint")}
                     </p>
                   </>
                 )}
@@ -688,21 +689,21 @@ export default function RestaurantDetail() {
           >
             {selectedSlot ? (
               <>
-                Book {formatTime(selectedSlot.time)} for {partySize}
+                {t("detail.bookTime", { time: formatTime(selectedSlot.time), count: partySize })}
                 {selectedSection ? ` · ${selectedSection.name}` : ""}
               </>
             ) : (
-              "Select a time"
+              t("detail.selectTime")
             )}
           </Button>
         </Card>
 
         {/* Menu */}
         <div className="mt-6 px-4">
-          <h2 className="font-semibold">Menu</h2>
+          <h2 className="font-semibold">{t("detail.menu")}</h2>
           {menuDocs.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
-              Menu coming soon — but you can still book a table.
+              {t("detail.menuSoon")}
             </p>
           ) : (
             <>
@@ -716,7 +717,7 @@ export default function RestaurantDetail() {
                       : "border-border bg-card text-muted-foreground",
                   )}
                 >
-                  All items
+                  {t("detail.allItems")}
                 </button>
                 {menuDocs.map((m) => (
                   <button
@@ -735,7 +736,7 @@ export default function RestaurantDetail() {
               </div>
 
               {groupedItems.length === 0 ? (
-                <p className="mt-3 text-sm text-muted-foreground">No items on this menu yet.</p>
+                <p className="mt-3 text-sm text-muted-foreground">{t("detail.noItems")}</p>
               ) : (
                 <div className="mt-3 space-y-5 pb-4">
                   {groupedItems.map(([category, items]) => (
@@ -746,7 +747,7 @@ export default function RestaurantDetail() {
                         </h3>
                         <div className="h-px flex-1 bg-border/80" />
                         <span className="text-[10px] text-muted-foreground/70">
-                          {items.length} {items.length === 1 ? "item" : "items"}
+                          {items.length} {t("detail.item", { count: items.length })}
                         </span>
                       </div>
                       <div className="mt-2 space-y-2">
@@ -768,7 +769,7 @@ export default function RestaurantDetail() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                                   <p className="text-sm font-medium">{item.name}</p>
-                                  {item.popular && <span className="text-xs text-primary">★ Popular</span>}
+                                  {item.popular && <span className="text-xs text-primary">★ {t("detail.popular")}</span>}
                                   {spice && (
                                     <span className="text-xs" title={spiceName ?? ""}>
                                       {spice}
@@ -791,7 +792,7 @@ export default function RestaurantDetail() {
                                     {(item.allergens?.length ?? 0) > 0 && (
                                       <span
                                         className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
-                                        title={`Contains: ${item.allergens!.join(", ")}`}
+                                        title={t("detail.contains", { list: item.allergens!.join(", ") })}
                                       >
                                         ⚠ {item.allergens!.join(", ")}
                                       </span>
@@ -817,7 +818,7 @@ export default function RestaurantDetail() {
         {/* Reviews */}
         <div className="mt-6 px-4 pb-4">
           <div className="flex items-center justify-between">
-            <h2 className="font-semibold">What diners say</h2>
+            <h2 className="font-semibold">{t("detail.reviewsTitle")}</h2>
             {reviewsData && reviewsData.count > 0 && (
               <span className="flex items-center gap-1 text-sm font-medium text-amber-600 dark:text-amber-400">
                 <Star className="size-4 fill-current" /> {reviewsData.avg.toFixed(1)}
@@ -827,11 +828,11 @@ export default function RestaurantDetail() {
           </div>
           {reviewsData === undefined ? (
             <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
-              <Spinner className="size-4" /> Loading reviews…
+              <Spinner className="size-4" /> {t("detail.loadingReviews")}
             </div>
           ) : reviewsData.count === 0 ? (
             <p className="mt-2 rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">
-              No reviews yet — be the first after your visit. You can rate it from My Bookings.
+              {t("detail.noReviews")}
             </p>
           ) : (
             <div className="mt-3 space-y-2">
@@ -864,15 +865,14 @@ export default function RestaurantDetail() {
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
           <Card className="w-full max-w-sm rounded-3xl p-6 text-center shadow-2xl">
             <Spinner className="mx-auto size-8 text-primary" />
-            <h3 className="mt-4 text-lg font-bold tracking-tight">Holding your table…</h3>
+            <h3 className="mt-4 text-lg font-bold tracking-tight">{t("detail.holdingTable")}</h3>
             <p className="mt-1.5 text-sm text-muted-foreground">
               {queuePosition && queuePosition > 1
-                ? `You're #${queuePosition} in line for ${r.name} at ${formatTime(selectedSlot?.time ?? "")}.`
-                : `Confirming your table at ${r.name}…`}
+                ? t("detail.queuePosition", { position: queuePosition, name: r.name, time: formatTime(selectedSlot?.time ?? "") })
+                : t("detail.confirmingTable", { name: r.name })}
             </p>
             <p className="mt-3 text-xs text-muted-foreground/80">
-              Popular slots are booked first come, first served — you won&apos;t be charged and
-              this page updates automatically the moment your table is locked in.
+              {t("detail.queueHint")}
             </p>
           </Card>
         </div>
@@ -888,37 +888,37 @@ export default function RestaurantDetail() {
             className="max-h-[88vh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-border bg-card p-6 shadow-2xl sm:rounded-3xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h3 className="text-lg font-bold tracking-tight">Confirm your booking</h3>
+            <h3 className="text-lg font-bold tracking-tight">{t("detail.confirmTitle")}</h3>
             <div className="mt-4 space-y-2.5 rounded-2xl bg-muted/40 p-4 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Restaurant</span>
+                <span className="text-muted-foreground">{t("common.restaurant")}</span>
                 <span className="font-medium">{r.name}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">When</span>
+                <span className="text-muted-foreground">{t("common.when")}</span>
                 <span className="font-medium">
                   {formatDate(date)} · {formatTime(selectedSlot.time)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Party</span>
+                <span className="text-muted-foreground">{t("common.party")}</span>
                 <span className="font-medium">
-                  {partySize} {partySize === 1 ? "guest" : "guests"}
+                  {partySize} {t("common.guest", { count: partySize })}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Seating</span>
-                <span className="font-medium">{selectedSection?.name ?? "Best available"}</span>
+                <span className="text-muted-foreground">{t("common.seating")}</span>
+                <span className="font-medium">{selectedSection?.name ?? t("common.bestAvailable")}</span>
               </div>
               {nonSmoking && (
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Preference</span>
-                  <span className="font-medium">Non-smoking area</span>
+                  <span className="text-muted-foreground">{t("detail.preference")}</span>
+                  <span className="font-medium">{t("detail.nonSmokingArea")}</span>
                 </div>
               )}
               {occasion && (
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Occasion</span>
+                  <span className="text-muted-foreground">{t("detail.occasion")}</span>
                   <span className="font-medium">
                     {occasionEmoji(occasion)} {occasion}
                   </span>
@@ -929,23 +929,23 @@ export default function RestaurantDetail() {
             {policyHours > 0 && (
               <p className="mt-3 flex items-center gap-1.5 rounded-lg bg-emerald-600/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
                 <ShieldCheck className="size-3.5 shrink-0" />
-                Free cancellation until {policyHours} hours before your booking.
+                {t("detail.freeCancelUntil", { hours: policyHours })}
               </p>
             )}
 
             <div className="mt-4 space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="bk-name">Name for the booking *</Label>
+                <Label htmlFor="bk-name">{t("detail.nameForBooking")}</Label>
                 <Input
                   id="bk-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Alex Morgan"
+                  placeholder={t("onboard.namePlaceholder")}
                   disabled={submitting}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="bk-phone">Phone (for SMS confirmation)</Label>
+                <Label htmlFor="bk-phone">{t("detail.phoneForBooking")}</Label>
                 <Input
                   id="bk-phone"
                   type="tel"
@@ -953,11 +953,11 @@ export default function RestaurantDetail() {
                   onChange={(e) => setPhone(e.target.value)}
                   placeholder="+1 555 010 2030"
                   disabled={submitting}
-                />
+              />
               </div>
 
               <div>
-                <p className="mb-1.5 text-sm font-medium">Celebrating something special?</p>
+                <p className="mb-1.5 text-sm font-medium">{t("detail.celebrating")}</p>
                 <div className="flex flex-wrap gap-2">
                   {OCCASIONS.map((o) => (
                     <button
@@ -979,20 +979,19 @@ export default function RestaurantDetail() {
               </div>
 
               <div className="space-y-1.5">
-                <Label htmlFor="bk-notes">Special requests</Label>
+                <Label htmlFor="bk-notes">{t("detail.specialRequests")}</Label>
                 <Textarea
                   id="bk-notes"
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  placeholder="e.g. Window table, candles, nut allergy…"
+                  placeholder={t("detail.requestsPlaceholder")}
                   rows={2}
                   disabled={submitting}
                 />
               </div>
             </div>
             <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CheckCircle2 className="size-3.5 text-primary" /> You&apos;ll get an SMS confirmation
-              with your code.
+              <CheckCircle2 className="size-3.5 text-primary" /> {t("detail.smsConfirm")}
             </p>
             {bookingError && (
               <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1006,10 +1005,10 @@ export default function RestaurantDetail() {
                 onClick={() => setConfirmOpen(false)}
                 disabled={submitting}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button className="flex-1" onClick={handleConfirm} disabled={submitting || !name.trim()}>
-                {submitting ? <Spinner className="size-4" /> : "Confirm booking"}
+                {submitting ? <Spinner className="size-4" /> : t("detail.confirmBooking")}
               </Button>
             </div>
           </div>
@@ -1028,48 +1027,47 @@ export default function RestaurantDetail() {
           >
             <div className="flex items-center gap-2">
               <BellRing className="size-5 text-primary" />
-              <h3 className="text-lg font-bold tracking-tight">Join the waitlist</h3>
+              <h3 className="text-lg font-bold tracking-tight">{t("detail.joinWaitlist")}</h3>
             </div>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              {r.name} is sold out at {formatTime(waitlistSlot.time)} for {partySize}{" "}
-              {partySize === 1 ? "guest" : "guests"} — get notified the second a table frees up.
+              {t("detail.soldOutFor", { name: r.name, time: formatTime(waitlistSlot.time), count: partySize, guests: t("common.guest", { count: partySize }) })}
             </p>
             <div className="mt-4 space-y-2.5 rounded-2xl bg-muted/40 p-4 text-sm">
               <div className="flex justify-between">
-                <span className="text-muted-foreground">When</span>
+                <span className="text-muted-foreground">{t("common.when")}</span>
                 <span className="font-medium">
                   {formatDate(date)} · {formatTime(waitlistSlot.time)}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Party</span>
+                <span className="text-muted-foreground">{t("common.party")}</span>
                 <span className="font-medium">
-                  {partySize} {partySize === 1 ? "guest" : "guests"}
+                  {partySize} {t("common.guest", { count: partySize })}
                 </span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Seating</span>
+                <span className="text-muted-foreground">{t("common.seating")}</span>
                 <span className="font-medium">{waitlistSlot.sectionName}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-muted-foreground">Position</span>
-                <span className="font-medium">First come, first served</span>
+                <span className="text-muted-foreground">{t("detail.position")}</span>
+                <span className="font-medium">{t("detail.fifo")}</span>
               </div>
             </div>
 
             <div className="mt-4 space-y-3">
               <div className="space-y-1.5">
-                <Label htmlFor="wl-name">Name *</Label>
+                <Label htmlFor="wl-name">{t("detail.nameRequired")}</Label>
                 <Input
                   id="wl-name"
                   value={name}
                   onChange={(e) => setName(e.target.value)}
-                  placeholder="e.g. Alex Morgan"
+                  placeholder={t("onboard.namePlaceholder")}
                   disabled={waitlistSubmitting}
                 />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="wl-phone">Phone (for the text alert)</Label>
+                <Label htmlFor="wl-phone">{t("detail.phoneAlert")}</Label>
                 <Input
                   id="wl-phone"
                   type="tel"
@@ -1081,8 +1079,7 @@ export default function RestaurantDetail() {
               </div>
             </div>
             <p className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
-              <CheckCircle2 className="size-3.5 text-primary" /> No payment needed — we only text
-              you when a spot opens.
+              <CheckCircle2 className="size-3.5 text-primary" /> {t("detail.noPayment")}
             </p>
             {waitlistError && (
               <p className="mt-3 rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -1096,14 +1093,14 @@ export default function RestaurantDetail() {
                 onClick={() => setWaitlistSlot(null)}
                 disabled={waitlistSubmitting}
               >
-                Not now
+                {t("bookings.notNow")}
               </Button>
               <Button
                 className="flex-1"
                 onClick={handleJoinWaitlist}
                 disabled={waitlistSubmitting || !name.trim()}
               >
-                {waitlistSubmitting ? <Spinner className="size-4" /> : "Join the waitlist"}
+                {waitlistSubmitting ? <Spinner className="size-4" /> : t("detail.joinWaitlist")}
               </Button>
             </div>
           </div>
@@ -1117,27 +1114,25 @@ export default function RestaurantDetail() {
             <div className="mx-auto flex size-14 items-center justify-center rounded-full bg-emerald-600/10 text-emerald-600">
               <Check className="size-7" />
             </div>
-            <h3 className="mt-4 text-xl font-bold tracking-tight">Table booked!</h3>
+            <h3 className="mt-4 text-xl font-bold tracking-tight">{t("detail.tableBooked")}</h3>
             <p className="mt-1.5 text-sm text-muted-foreground">
-              {bookingResult.section || "Your table"} at {r.name} on {formatDate(date)} at{" "}
-              {formatTime(bookingResult.time)}.
+              {t("detail.bookedSummary", { section: bookingResult.section || t("common.bestAvailable"), name: r.name, date: formatDate(date), time: formatTime(bookingResult.time) })}
             </p>
             {occasion && (
               <p className="mt-3 rounded-xl bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
-                {occasionEmoji(occasion)} We&apos;ll tell {r.name} it&apos;s a special{" "}
-                {occasion.toLowerCase()} — they&apos;ll be ready!
+                {occasionEmoji(occasion)} {t("detail.specialNote", { name: r.name, occasion: occasion.toLowerCase() })}
               </p>
             )}
             <div className="mt-4 rounded-2xl border border-dashed border-primary/40 bg-primary/5 py-3">
               <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Confirmation code
+                {t("detail.confirmationCode")}
               </p>
               <p className="mt-0.5 font-mono text-2xl font-bold tracking-widest text-primary">
                 {bookingResult.code}
               </p>
             </div>
             <p className="mt-3 flex items-center justify-center gap-1.5 text-xs text-muted-foreground">
-              <Clock className="size-3.5" /> Show this code when you arrive.
+              <Clock className="size-3.5" /> {t("detail.showCode")}
             </p>
             <Button
               className="mt-5 w-full bg-[#25D366] text-white hover:bg-[#1ebe5b]"

@@ -52,6 +52,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import {
   bookingShareText,
@@ -66,38 +67,40 @@ import { toast } from "sonner";
 
 type AlertType = "on_my_way" | "running_late" | "arrived" | "special_request";
 
-const ALERT_OPTIONS: { type: AlertType; label: string; desc: string; icon: LucideIcon }[] = [
-  { type: "on_my_way", label: "On my way", desc: "Heading over now", icon: Car },
-  { type: "running_late", label: "Running late", desc: "About 15 min late", icon: Clock },
-  { type: "arrived", label: "I've arrived", desc: "Here, ready when you are", icon: MapPin },
-  { type: "special_request", label: "Special request", desc: "A note for the team", icon: Sparkles },
+const ALERT_KEYS: { type: AlertType; labelKey: string; descKey: string; icon: LucideIcon }[] = [
+  { type: "on_my_way", labelKey: "bookings.alertOnMyWay", descKey: "bookings.alertOnMyWayDesc", icon: Car },
+  { type: "running_late", labelKey: "bookings.alertRunningLate", descKey: "bookings.alertRunningLateDesc", icon: Clock },
+  { type: "arrived", labelKey: "bookings.alertArrived", descKey: "bookings.alertArrivedDesc", icon: MapPin },
+  { type: "special_request", labelKey: "bookings.alertSpecial", descKey: "bookings.alertSpecialDesc", icon: Sparkles },
 ];
 
-const ALERT_LABEL: Record<AlertType, string> = {
-  on_my_way: "On my way",
-  running_late: "Running late",
-  arrived: "I've arrived",
-  special_request: "Special request",
+const ALERT_LABEL_KEY: Record<AlertType, string> = {
+  on_my_way: "bookings.alertOnMyWay",
+  running_late: "bookings.alertRunningLate",
+  arrived: "bookings.alertArrived",
+  special_request: "bookings.alertSpecial",
 };
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useTranslation();
   const map: Record<string, { label: string; cls: string }> = {
     confirmed: {
-      label: "Confirmed",
+      label: t("bookings.statusConfirmed"),
       cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
     },
     completed: {
-      label: "Completed",
+      label: t("bookings.statusCompleted"),
       cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400",
     },
-    cancelled: { label: "Cancelled", cls: "bg-muted text-muted-foreground" },
-    no_show: { label: "No-show", cls: "bg-destructive/10 text-destructive" },
+    cancelled: { label: t("bookings.statusCancelled"), cls: "bg-muted text-muted-foreground" },
+    no_show: { label: t("bookings.statusNoShow"), cls: "bg-destructive/10 text-destructive" },
   };
   const m = map[status] ?? { label: status, cls: "bg-muted text-muted-foreground" };
   return <Badge className={cn("gap-1", m.cls)}>{m.label}</Badge>;
 }
 
 export default function MyBookings() {
+  const { t } = useTranslation();
   const bookings = useQuery(api.bookings.myBookings);
   const cancelBooking = useMutation(api.bookings.cancelBooking);
   const waitlist = useQuery(api.waitlist.myWaitlist);
@@ -229,7 +232,7 @@ export default function MyBookings() {
     const map = new Map<string, { type: AlertType; createdAt: number }>();
     for (const a of myAlerts ?? []) {
       if (!a.bookingId) continue;
-      if (!(a.type in ALERT_LABEL)) continue;
+      if (!(a.type in ALERT_LABEL_KEY)) continue;
       const type = a.type as AlertType;
       if (!map.has(a.bookingId)) map.set(a.bookingId, { type, createdAt: a.createdAt });
     }
@@ -242,7 +245,7 @@ export default function MyBookings() {
     setCancelError(null);
     try {
       await cancelBooking({ bookingId: cancelBookingId as never });
-      toast.success("Booking cancelled.");
+      toast.success(t("bookings.cancelled"));
       setCancelBookingId(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not cancel the booking.";
@@ -261,10 +264,10 @@ export default function MyBookings() {
       const res = await releaseBooking({ bookingId: releaseBookingId as never });
       setReleaseResult(
         res.waitlistNotified
-          ? "Table released — the next diner on the waitlist has been alerted."
-          : "Table released back to the pool.",
+          ? t("bookings.releasedWaitlist")
+          : t("bookings.releasedPool"),
       );
-      toast.success("Table released.");
+      toast.success(t("bookings.released"));
       setReleaseBookingId(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not release the table.";
@@ -281,7 +284,7 @@ export default function MyBookings() {
     setCancelError(null);
     try {
       await cancelWaitlist({ waitlistId: cancelWaitlistId as never });
-      toast.success("You left the waitlist.");
+      toast.success(t("bookings.leftWaitlist"));
       setCancelWaitlistId(null);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not leave the waitlist.";
@@ -297,7 +300,7 @@ export default function MyBookings() {
     setBusyId(bookingId);
     try {
       await checkIn({ bookingId: bookingId as never });
-      toast.success("Checked in — the restaurant knows you're here!");
+      toast.success(t("bookings.checkedIn"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Could not check in.");
     } finally {
@@ -315,7 +318,7 @@ export default function MyBookings() {
         type: alertType,
         message: note.trim() || undefined,
       });
-      toast.success("Restaurant notified — they'll see it in their dashboard.");
+      toast.success(t("bookings.notifiedRestaurant"));
       setNotifyBookingId(null);
       setNote("");
     } catch (e) {
@@ -337,7 +340,7 @@ export default function MyBookings() {
         rating,
         text: reviewText.trim() || undefined,
       });
-      toast.success("Thanks! Your review is live on the restaurant page.");
+      toast.success(t("bookings.thanksReview"));
       setReviewBookingId(null);
       setReviewText("");
       setRating(5);
@@ -354,7 +357,7 @@ export default function MyBookings() {
     const link = `${publicAppUrl()}/invite/${code}`;
     try {
       await navigator.clipboard.writeText(link);
-      toast.success("Invite link copied!");
+      toast.success(t("bookings.inviteCopied"));
     } catch {
       toast.info(`Invite link: ${link}`);
     }
@@ -363,27 +366,27 @@ export default function MyBookings() {
   return (
     <CustomerShell>
       <div className="px-4 pt-5 pb-6">
-        <h1 className="text-xl font-bold tracking-tight">My bookings</h1>
+        <h1 className="text-xl font-bold tracking-tight">{t("bookings.title")}</h1>
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Upcoming reservations, waitlists and your dining history
+          {t("bookings.subtitle")}
         </p>
 
         {bookings === undefined || waitlist === undefined || myAlerts === undefined ? (
           <div className="flex flex-col items-center gap-3 py-20 text-muted-foreground">
             <Spinner className="size-6" />
-            <p className="text-sm">Loading bookings…</p>
+            <p className="text-sm">{t("bookings.loading")}</p>
           </div>
         ) : bookings.length === 0 && activeWaitlist.length === 0 ? (
           <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border py-16 text-center">
             <CalendarCheck2 className="size-9 text-muted-foreground/60" />
             <div>
-              <p className="font-medium">No bookings yet</p>
+              <p className="font-medium">{t("bookings.emptyTitle")}</p>
               <p className="mt-1 text-sm text-muted-foreground">
-                Find a restaurant with free tables and book your first night out.
+                {t("bookings.emptyBody")}
               </p>
             </div>
             <Button asChild>
-              <Link to="/explore">Explore restaurants</Link>
+              <Link to="/explore">{t("bookings.emptyCta")}</Link>
             </Button>
           </div>
         ) : (
@@ -392,7 +395,7 @@ export default function MyBookings() {
             {activeWaitlist.length > 0 && (
               <section className="mt-5">
                 <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  <BellRing className="size-3.5" /> On the waitlist
+                  <BellRing className="size-3.5" /> {t("bookings.waitlist")}
                 </h2>
                 <div className="mt-3 space-y-3">
                   {activeWaitlist.map((w) => {
@@ -431,7 +434,7 @@ export default function MyBookings() {
                                 )}
                               >
                                 <BellRing className="size-3" />
-                                {notified ? "Table freed up!" : "Waiting"}
+                                {notified ? t("bookings.tableFreed") : t("bookings.waiting")}
                               </Badge>
                             </div>
                             <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
@@ -440,11 +443,11 @@ export default function MyBookings() {
                             </p>
                             <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                               <Users className="size-3.5" /> {w.partySize}{" "}
-                              {w.partySize === 1 ? "guest" : "guests"} · {w.sectionName ?? "Best available"}
+                              {t("common.guest", { count: w.partySize })} · {w.sectionName ?? t("common.bestAvailable")}
                             </p>
                             {notified && (
                               <p className="mt-1.5 text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                                A table just freed up — grab it before someone else does!
+                                {t("bookings.freedBody")}
                               </p>
                             )}
                           </div>
@@ -452,7 +455,7 @@ export default function MyBookings() {
                         <div className="flex items-center justify-end gap-2 border-t border-border/60 bg-muted/30 px-4 py-2.5">
                           {notified ? (
                             <Button size="sm" asChild>
-                              <Link to={`/restaurant/${w.restaurantId}`}>Book now</Link>
+                              <Link to={`/restaurant/${w.restaurantId}`}>{t("bookings.bookNow")}</Link>
                             </Button>
                           ) : (
                             <Button
@@ -465,7 +468,7 @@ export default function MyBookings() {
                                 setCancelWaitlistId(w._id);
                               }}
                             >
-                              {busyId === w._id ? <Spinner className="size-3.5" /> : "Leave waitlist"}
+                              {busyId === w._id ? <Spinner className="size-3.5" /> : t("bookings.leaveWaitlist")}
                             </Button>
                           )}
                         </div>
@@ -479,7 +482,7 @@ export default function MyBookings() {
             {upcoming.length > 0 && (
               <section className={cn(activeWaitlist.length > 0 && "mt-7")}>
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  Upcoming
+                  {t("bookings.upcoming")}
                 </h2>
                 <div className="mt-3 space-y-3">
                   {upcoming.map((b) => {
@@ -511,7 +514,7 @@ export default function MyBookings() {
                               <div className="flex shrink-0 items-center gap-1.5">
                                 {b.checkedInAt && (
                                   <Badge className="gap-1 bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">
-                                    <CheckCircle2 className="size-3" /> Checked in
+                                    <CheckCircle2 className="size-3" /> {t("bookings.checkedIn")}
                                   </Badge>
                                 )}
                                 <StatusBadge status={b.status} />
@@ -523,19 +526,19 @@ export default function MyBookings() {
                             </p>
                             <p className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                               <Users className="size-3.5" /> {b.partySize}{" "}
-                              {b.partySize === 1 ? "guest" : "guests"}
+                              {t("common.guest", { count: b.partySize })}
                               {b.sectionName ? ` · ${b.sectionName}` : ""}
                             </p>
                             {guests.length > 0 && (
                               <p className="mt-1 flex items-center gap-1 text-xs font-medium text-primary">
                                 <UserPlus className="size-3.5" />
-                                {guests.map((g) => g.name).join(", ")} confirmed
+                                {t("bookings.guestsConfirmed", { names: guests.map((g) => g.name).join(", ") })}
                               </p>
                             )}
                             {sent && (
                               <p className="mt-1.5 flex items-center gap-1 text-xs font-medium text-primary">
                                 <BellRing className="size-3" />
-                                Restaurant notified · {ALERT_LABEL[sent.type]}
+                                {t("bookings.notified", { type: t(ALERT_LABEL_KEY[sent.type]) })}
                               </p>
                             )}
                             {canCheckIn && (
@@ -551,7 +554,7 @@ export default function MyBookings() {
                                 ) : (
                                   <MapPin className="size-3.5" />
                                 )}
-                                I&apos;m here — check in
+                                {t("bookings.checkIn")}
                               </Button>
                             )}
                           </div>
@@ -583,7 +586,7 @@ export default function MyBookings() {
                                 target="_blank"
                                 rel="noreferrer"
                               >
-                                <MessageCircle className="size-3.5" /> Share
+                                <MessageCircle className="size-3.5" /> {t("bookings.share")}
                               </a>
                             </Button>
                             <Button
@@ -593,7 +596,7 @@ export default function MyBookings() {
                               title="Invite friends to this booking"
                               onClick={() => setInviteBookingId(b._id)}
                             >
-                              <UserPlus className="size-3.5" /> Invite
+                              <UserPlus className="size-3.5" /> {t("bookings.invite")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -602,7 +605,7 @@ export default function MyBookings() {
                               title="See who's dining and send a gift"
                               onClick={() => setSocializeBookingId(b._id)}
                             >
-                              <PartyPopper className="size-3.5" /> Socialize
+                              <PartyPopper className="size-3.5" /> {t("bookings.socialize")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -611,7 +614,7 @@ export default function MyBookings() {
                               title="Order, ping the team, view your bill"
                               onClick={() => setDineBookingId(b._id)}
                             >
-                              <Utensils className="size-3.5" /> Dine
+                              <Utensils className="size-3.5" /> {t("bookings.dine")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -625,7 +628,7 @@ export default function MyBookings() {
                                 setNotifyBookingId(b._id);
                               }}
                             >
-                              <BellRing className="size-3.5" /> Notify
+                              <BellRing className="size-3.5" /> {t("bookings.notify")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -634,7 +637,7 @@ export default function MyBookings() {
                               title="Print or save a receipt with QR code"
                               onClick={() => setReceiptBookingId(b._id)}
                             >
-                              <QrCode className="size-3.5" /> Receipt
+                              <QrCode className="size-3.5" /> {t("bookings.receipt")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -647,7 +650,7 @@ export default function MyBookings() {
                                 setReleaseBookingId(b._id);
                               }}
                             >
-                              {busyId === b._id ? <Spinner className="size-3.5" /> : "Release"}
+                              {busyId === b._id ? <Spinner className="size-3.5" /> : t("bookings.release")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -659,7 +662,7 @@ export default function MyBookings() {
                                 setCancelBookingId(b._id);
                               }}
                             >
-                              {busyId === b._id ? <Spinner className="size-3.5" /> : "Cancel"}
+                              {busyId === b._id ? <Spinner className="size-3.5" /> : t("bookings.cancel")}
                             </Button>
                           </div>
                         </div>
@@ -673,7 +676,7 @@ export default function MyBookings() {
             {earlier.length > 0 && (
               <section className="mt-7">
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-                  Past
+                  {t("bookings.past")}
                 </h2>
                 <div className="mt-3 space-y-2">
                   {earlier.map((b) => {
@@ -690,7 +693,7 @@ export default function MyBookings() {
                             </p>
                             <p className="mt-0.5 text-xs text-muted-foreground">
                               {formatDate(b.date)} · {formatTime(b.time)} · {b.partySize}{" "}
-                              {b.partySize === 1 ? "guest" : "guests"}
+                              {t("common.guest", { count: b.partySize })}
                             </p>
                           </div>
                           <div className="flex shrink-0 items-center gap-2">
@@ -706,11 +709,11 @@ export default function MyBookings() {
                                   setReviewBookingId(b._id);
                                 }}
                               >
-                                <Star className="size-3.5" /> Rate visit
+                                <Star className="size-3.5" /> {t("bookings.rateVisit")}
                               </Button>
                             ) : reviewedIds.has(b._id) && b.status === "completed" ? (
                               <span className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
-                                <Star className="size-3.5 fill-current" /> Reviewed
+                                <Star className="size-3.5 fill-current" /> {t("bookings.reviewed")}
                               </span>
                             ) : null}
                             <StatusBadge status={b.status} />
@@ -726,7 +729,7 @@ export default function MyBookings() {
             {upcoming.length === 0 && earlier.length === 0 && activeWaitlist.length === 0 && (
               <div className="mt-6 flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border py-16 text-center">
                 <CalendarX2 className="size-9 text-muted-foreground/60" />
-                <p className="text-sm text-muted-foreground">Nothing here yet.</p>
+                <p className="text-sm text-muted-foreground">{t("bookings.nothingHere")}</p>
               </div>
             )}
           </>
@@ -734,7 +737,7 @@ export default function MyBookings() {
 
         {(bookings ?? []).length > 0 || (waitlist ?? []).length > 0 ? (
           <p className="mt-8 flex items-center justify-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="size-3.5" /> Confirmation codes are checked at the door.
+            <MapPin className="size-3.5" /> {t("bookings.codesAtDoor")}
           </p>
         ) : null}
       </div>
@@ -743,7 +746,7 @@ export default function MyBookings() {
       {bookings === undefined && Object.keys(cachedBookings).length > 0 && (
         <div className="mt-4 rounded-2xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-300">
           <p className="flex items-center gap-1.5 font-medium">
-            <QrCode className="size-4" /> You're offline — showing saved confirmation codes
+            <QrCode className="size-4" /> {t("bookings.offlineTitle")}
           </p>
           <p className="mt-1 text-xs">
             {Object.values(cachedBookings)
@@ -771,13 +774,15 @@ export default function MyBookings() {
       >
         <DialogContent className="max-w-sm rounded-3xl">
           <DialogHeader>
-            <DialogTitle className="tracking-tight">Release this table?</DialogTitle>
+            <DialogTitle className="tracking-tight">{t("bookings.releaseTitle")}</DialogTitle>
             <DialogDescription>
               {bookingToRelease
-                ? `${bookingToRelease.restaurant?.name ?? "This restaurant"} on ${dateLabel(
-                    bookingToRelease.date,
-                  )} at ${formatTime(bookingToRelease.time)} — your seats return to the pool and the next waitlist diner is alerted. You can't undo this.`
-                : "Your seats return to the pool."}
+                ? t("bookings.releaseDesc", {
+                    name: bookingToRelease.restaurant?.name ?? t("common.restaurant"),
+                    date: dateLabel(bookingToRelease.date),
+                    time: formatTime(bookingToRelease.time),
+                  })
+                : t("bookings.releaseDescFallback")}
             </DialogDescription>
           </DialogHeader>
           {releaseResult && (
@@ -793,7 +798,7 @@ export default function MyBookings() {
               }}
               disabled={busyId !== null}
             >
-              Keep my table
+              {t("bookings.keepTable")}
             </Button>
             <Button
               variant="destructive"
@@ -803,7 +808,7 @@ export default function MyBookings() {
                 confirmReleaseBooking();
               }}
             >
-              {busyId === releaseBookingId ? <Spinner className="size-4" /> : "Release table"}
+              {busyId === releaseBookingId ? <Spinner className="size-4" /> : t("bookings.releaseTable")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -834,21 +839,21 @@ export default function MyBookings() {
       >
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Cancel this booking?</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">{t("bookings.cancelTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               {bookingToCancel
-                ? `${bookingToCancel.restaurant?.name ?? "This restaurant"} on ${dateLabel(
-                    bookingToCancel.date,
-                  )} at ${formatTime(bookingToCancel.time)} — your table will be released.`
-                : "Your table will be released."}
+                ? t("bookings.cancelDesc", {
+                    name: bookingToCancel.restaurant?.name ?? t("common.restaurant"),
+                    date: dateLabel(bookingToCancel.date),
+                    time: formatTime(bookingToCancel.time),
+                  })
+                : t("bookings.cancelDescFallback")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {bookingToCancel && (bookingToCancel.restaurant?.cancellationPolicyHours ?? 0) > 0 && (
             <p className="flex items-start gap-1.5 rounded-lg bg-emerald-600/5 px-3 py-2 text-xs text-emerald-700 dark:text-emerald-400">
               <ShieldCheck className="mt-0.5 size-3.5 shrink-0" />
-              Free cancellation until{" "}
-              {bookingToCancel.restaurant!.cancellationPolicyHours} hours before — this booking is
-              still inside that window.
+              {t("bookings.freeCancelUntil", { hours: bookingToCancel.restaurant!.cancellationPolicyHours })}
             </p>
           )}
           {cancelError && (
@@ -861,7 +866,7 @@ export default function MyBookings() {
               disabled={busyId !== null}
               onClick={() => setCancelError(null)}
             >
-              Keep it
+              {t("bookings.keepIt")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
@@ -871,7 +876,7 @@ export default function MyBookings() {
                 confirmCancelBooking();
               }}
             >
-              {busyId === cancelBookingId ? <Spinner className="size-4" /> : "Cancel booking"}
+              {busyId === cancelBookingId ? <Spinner className="size-4" /> : t("bookings.cancelBooking")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -886,13 +891,15 @@ export default function MyBookings() {
       >
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Leave the waitlist?</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">{t("bookings.leaveTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               {waitlistToLeave
-                ? `${waitlistToLeave.restaurant?.name ?? "This restaurant"} on ${dateLabel(
-                    waitlistToLeave.date,
-                  )} at ${formatTime(waitlistToLeave.time)} — you'll stop getting alerts for this time.`
-                : "You'll stop getting alerts for this time."}
+                ? t("bookings.leaveDesc", {
+                    name: waitlistToLeave.restaurant?.name ?? t("common.restaurant"),
+                    date: dateLabel(waitlistToLeave.date),
+                    time: formatTime(waitlistToLeave.time),
+                  })
+                : t("bookings.leaveDescFallback")}
             </AlertDialogDescription>
           </AlertDialogHeader>
           {cancelError && (
@@ -905,7 +912,7 @@ export default function MyBookings() {
               disabled={busyId !== null}
               onClick={() => setCancelError(null)}
             >
-              Stay on list
+              {t("bookings.stayOnList")}
             </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
@@ -915,7 +922,7 @@ export default function MyBookings() {
                 confirmLeaveWaitlist();
               }}
             >
-              {busyId === cancelWaitlistId ? <Spinner className="size-4" /> : "Leave waitlist"}
+              {busyId === cancelWaitlistId ? <Spinner className="size-4" /> : t("bookings.leaveWaitlist")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -933,18 +940,21 @@ export default function MyBookings() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="tracking-tight">Notify {bookingToNotify?.restaurant?.name ?? "the restaurant"}</DialogTitle>
+            <DialogTitle className="tracking-tight">{t("bookings.notifyTitle", { name: bookingToNotify?.restaurant?.name ?? t("common.restaurant") })}</DialogTitle>
             <DialogDescription>
               {bookingToNotify
-                ? `${dateLabel(bookingToNotify.date)} at ${formatTime(bookingToNotify.time)} · ${bookingToNotify.partySize} ${
-                    bookingToNotify.partySize === 1 ? "guest" : "guests"
-                  } — the team will see your update instantly.`
-                : "The team will see your update instantly."}
+                ? t("bookings.notifyDesc", {
+                    date: dateLabel(bookingToNotify.date),
+                    time: formatTime(bookingToNotify.time),
+                    count: bookingToNotify.partySize,
+                    guests: t("common.guest", { count: bookingToNotify.partySize }),
+                  })
+                : t("bookings.notifyDescFallback")}
             </DialogDescription>
           </DialogHeader>
 
           <div className="grid grid-cols-2 gap-2">
-            {ALERT_OPTIONS.map((o) => (
+            {ALERT_KEYS.map((o) => (
               <button
                 key={o.type}
                 type="button"
@@ -964,15 +974,15 @@ export default function MyBookings() {
                 >
                   <o.icon className="size-4" />
                 </span>
-                <span className="text-xs font-semibold leading-tight">{o.label}</span>
-                <span className="text-[10px] leading-tight text-muted-foreground">{o.desc}</span>
+                <span className="text-xs font-semibold leading-tight">{t(o.labelKey)}</span>
+                <span className="text-[10px] leading-tight text-muted-foreground">{t(o.descKey)}</span>
               </button>
             ))}
           </div>
 
           <div className="space-y-1.5">
             <label htmlFor="notify-note" className="text-xs font-medium text-muted-foreground">
-              Add a note <span className="font-normal">(optional)</span>
+              {t("bookings.addNote")} <span className="font-normal">{t("bookings.optional")}</span>
             </label>
             <Textarea
               id="notify-note"
@@ -982,10 +992,10 @@ export default function MyBookings() {
               onChange={(e) => setNote(e.target.value)}
               placeholder={
                 alertType === "special_request"
-                  ? "e.g. Could we get a high chair? Allergies: peanuts."
+                  ? t("bookings.notePlaceholderSpecial")
                   : alertType === "running_late"
-                    ? "e.g. Stuck in traffic, more like 20 minutes."
-                    : "Anything the team should know."
+                    ? t("bookings.notePlaceholderLate")
+                    : t("bookings.notePlaceholder")
               }
             />
           </div>
@@ -1005,11 +1015,11 @@ export default function MyBookings() {
               }}
               disabled={sending}
             >
-              Close
+              {t("common.close")}
             </Button>
             <Button onClick={sendAlert} disabled={sending}>
               {sending ? <Spinner className="size-4" /> : <Send className="size-4" />}
-              Send notification
+              {t("bookings.sendNotification")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1028,10 +1038,10 @@ export default function MyBookings() {
         <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="tracking-tight">
-              Rate your visit to {bookingToReview?.restaurant?.name ?? "the restaurant"}
+              {t("bookings.reviewTitle", { name: bookingToReview?.restaurant?.name ?? t("common.restaurant") })}
             </DialogTitle>
             <DialogDescription>
-              Verified reviews only — this stays tied to your booking so the rating is trustworthy.
+              {t("bookings.reviewDesc")}
             </DialogDescription>
           </DialogHeader>
 
@@ -1054,7 +1064,7 @@ export default function MyBookings() {
 
           <div className="space-y-1.5">
             <label htmlFor="review-text" className="text-xs font-medium text-muted-foreground">
-              Your review <span className="font-normal">(optional)</span>
+              {t("bookings.yourReview")} <span className="font-normal">{t("bookings.optional")}</span>
             </label>
             <Textarea
               id="review-text"
@@ -1062,7 +1072,7 @@ export default function MyBookings() {
               value={reviewText}
               maxLength={500}
               onChange={(e) => setReviewText(e.target.value)}
-              placeholder="What did you love? How was the service, the food, the vibe?"
+              placeholder={t("bookings.reviewPlaceholder")}
             />
           </div>
 
@@ -1081,11 +1091,11 @@ export default function MyBookings() {
               }}
               disabled={reviewSending}
             >
-              Not now
+              {t("bookings.notNow")}
             </Button>
             <Button onClick={submitReview} disabled={reviewSending}>
               {reviewSending ? <Spinner className="size-4" /> : <Star className="size-4" />}
-              Post review
+              {t("bookings.postReview")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -1100,29 +1110,28 @@ export default function MyBookings() {
       >
         <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="tracking-tight">Invite friends</DialogTitle>
+            <DialogTitle className="tracking-tight">{t("bookings.inviteTitle")}</DialogTitle>
             <DialogDescription>
-              Share this link — friends confirm their seat and the party grows automatically
-              (up to the table's remaining capacity).
+              {t("bookings.inviteDesc")}
             </DialogDescription>
           </DialogHeader>
           {bookingToInvite && (
             <>
               <div className="rounded-2xl bg-muted/40 p-4 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-muted-foreground">Restaurant</span>
+                  <span className="text-muted-foreground">{t("common.restaurant")}</span>
                   <span className="font-medium">{bookingToInvite.restaurant?.name ?? "—"}</span>
                 </div>
                 <div className="mt-2 flex justify-between">
-                  <span className="text-muted-foreground">When</span>
+                  <span className="text-muted-foreground">{t("common.when")}</span>
                   <span className="font-medium">
                     {formatDate(bookingToInvite.date)} · {formatTime(bookingToInvite.time)}
                   </span>
                 </div>
                 <div className="mt-2 flex justify-between">
-                  <span className="text-muted-foreground">Party</span>
+                  <span className="text-muted-foreground">{t("common.party")}</span>
                   <span className="font-medium">
-                    {bookingToInvite.partySize + (bookingToInvite.guests?.length ?? 0)} going
+                    {t("bookings.partyGoing", { count: bookingToInvite.partySize + (bookingToInvite.guests?.length ?? 0) })}
                   </span>
                 </div>
               </div>
@@ -1136,7 +1145,7 @@ export default function MyBookings() {
                   className="shrink-0"
                   onClick={() => copyInviteLink(bookingToInvite.code)}
                 >
-                  <Copy className="size-3.5" /> Copy
+                  <Copy className="size-3.5" /> {t("bookings.copy")}
                 </Button>
               </div>
               <Button
@@ -1154,7 +1163,7 @@ export default function MyBookings() {
                   target="_blank"
                   rel="noreferrer"
                 >
-                  <MessageCircle className="size-4" /> Share invite on WhatsApp
+                  <MessageCircle className="size-4" /> {t("bookings.shareWhatsapp")}
                 </a>
               </Button>
             </>

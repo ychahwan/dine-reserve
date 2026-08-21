@@ -16,6 +16,7 @@ import { motion } from "framer-motion";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 
 /**
  * Forced password change. Restaurant accounts created/tagged by the platform
@@ -26,6 +27,7 @@ export default function SetPassword() {
   const { user, isLoading } = useAuth();
   const navigate = useNavigate();
   const setPassword = useMutation(api.users.setPassword);
+  const { t } = useTranslation();
 
   const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -57,11 +59,11 @@ export default function SetPassword() {
     e.preventDefault();
     setError(null);
     if (newPassword.length < 8) {
-      setError("Password must be at least 8 characters.");
+      setError(t("setpw.errMin"));
       return;
     }
     if (newPassword !== confirm) {
-      setError("Passwords don't match.");
+      setError(t("setpw.errMatch"));
       return;
     }
     setSaving(true);
@@ -79,7 +81,7 @@ export default function SetPassword() {
         : "/explore";
       navigate(target, { replace: true });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not update your password.");
+      setError(err instanceof Error ? err.message : t("setpw.errGeneric"));
       setSaving(false);
     }
   };
@@ -103,22 +105,21 @@ export default function SetPassword() {
               <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
                 <KeyRound className="size-6" />
               </div>
-              <CardTitle className="text-xl">Set a new password</CardTitle>
+              <CardTitle className="text-xl">{t("setpw.title")}</CardTitle>
               <CardDescription className="mx-auto max-w-xs">
-                For security, your restaurant account was issued a temporary
-                password. Choose a new one to continue.
+                {t("setpw.desc")}
               </CardDescription>
             </CardHeader>
             <form onSubmit={handleSubmit}>
               <CardContent className="space-y-3">
               {showCurrentPassword && (
                 <div className="space-y-2">
-                  <Label htmlFor="current-password">Current password</Label>
+                  <Label htmlFor="current-password">{t("setpw.current")}</Label>
                   <Input
                     id="current-password"
                     name="currentPassword"
                     type="password"
-                    placeholder="Temporary password you signed in with"
+                    placeholder={t("setpw.currentPlaceholder")}
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     disabled={saving}
@@ -127,11 +128,11 @@ export default function SetPassword() {
                 </div>
               )}
                 <div className="space-y-2">
-                  <Label htmlFor="new-password">New password</Label>
+                  <Label htmlFor="new-password">{t("setpw.new")}</Label>
                   <Input
                     id="new-password"
                     type="password"
-                    placeholder="At least 8 characters"
+                    placeholder={t("common.minChars")}
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     disabled={saving}
@@ -139,11 +140,11 @@ export default function SetPassword() {
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="confirm-password">Confirm new password</Label>
+                  <Label htmlFor="confirm-password">{t("setpw.confirm")}</Label>
                   <Input
                     id="confirm-password"
                     type="password"
-                    placeholder="Repeat your new password"
+                    placeholder={t("setpw.confirmPlaceholder")}
                     value={confirm}
                     onChange={(e) => setConfirm(e.target.value)}
                     disabled={saving}
@@ -162,11 +163,11 @@ export default function SetPassword() {
                 >
                   {saving ? (
                     <>
-                      <Loader2 className="mr-2 size-4 animate-spin" /> Saving…
+                      <Loader2 className="mr-2 size-4 animate-spin" /> {t("setpw.saving")}
                     </>
                   ) : (
                     <>
-                      <ShieldCheck className="mr-2 size-4" /> Save new password
+                      <ShieldCheck className="mr-2 size-4" /> {t("setpw.save")}
                     </>
                   )}
                 </Button>

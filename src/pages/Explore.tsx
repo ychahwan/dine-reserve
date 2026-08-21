@@ -25,6 +25,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { dateFromNow, dateLabel, formatDate, today } from "@/lib/format";
 import { DIETARY_TAGS } from "@/lib/menu";
@@ -34,11 +35,11 @@ const CUISINES = ["Italian", "Japanese", "Mediterranean", "Steakhouse", "Mexican
 const CITIES = ["Milan", "Rome", "New York", "Paris", "London"];
 const DIET_CHIPS = DIETARY_TAGS.slice(0, 4); // Vegetarian, Vegan, Gluten-free, Halal
 type SeatValue = "inside" | "outside" | "bar";
-const SEATS: { value: SeatValue | null; label: string; icon: LucideIcon }[] = [
-  { value: null, label: "Anywhere", icon: Sofa },
-  { value: "inside", label: "Inside", icon: Sofa },
-  { value: "outside", label: "Outside", icon: Wind },
-  { value: "bar", label: "Bar", icon: Users },
+const SEAT_KEYS: { value: SeatValue | null; key: string; icon: LucideIcon }[] = [
+  { value: null, key: "common.anywhere", icon: Sofa },
+  { value: "inside", key: "common.inside", icon: Sofa },
+  { value: "outside", key: "common.outside", icon: Wind },
+  { value: "bar", key: "common.bar", icon: Users },
 ];
 
 type AvailabilitySummary = {
@@ -49,6 +50,7 @@ type AvailabilitySummary = {
 };
 
 export default function Explore() {
+  const { t } = useTranslation();
   const restaurants = useQuery(api.restaurants.search, {});
   const trending = useQuery(api.restaurants.trending);
   const forYou = useQuery(api.restaurants.forYou);
@@ -154,9 +156,9 @@ export default function Explore() {
   const handleToggleFavorite = async (id: string, name: string) => {
     try {
       const res = await toggleFavorite({ restaurantId: id as never });
-      toast.success(res.favorited ? `Saved ${name} to your favorites` : `Removed ${name} from favorites`);
+      toast.success(res.favorited ? t("explore.favSaved", { name }) : t("explore.favRemoved", { name }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update favorites.");
+      toast.error(err instanceof Error ? err.message : t("explore.favError"));
     }
   };
 
@@ -164,9 +166,9 @@ export default function Explore() {
     <CustomerShell>
       <div className="px-4 pt-5">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Find a table</h1>
+          <h1 className="text-xl font-bold tracking-tight">{t("explore.title")}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Live availability from {restaurants?.length ?? "…"} restaurants
+            {t("explore.subtitle", { count: restaurants?.length ?? "…" })}
           </p>
         </div>
 
@@ -174,7 +176,7 @@ export default function Explore() {
         <Card className="mt-4 rounded-2xl border-border/70 p-4">
           <div className="flex items-center gap-2">
             <CalendarDays className="size-4 text-primary" />
-            <p className="text-sm font-semibold">When are you dining?</p>
+            <p className="text-sm font-semibold">{t("explore.whenDining")}</p>
           </div>
           <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
             <button
@@ -186,7 +188,7 @@ export default function Explore() {
                   : "border-border bg-card text-muted-foreground hover:text-foreground",
               )}
             >
-              Any day
+              {t("explore.anyDay")}
             </button>
             {quickDays.map((d) => (
               <button
@@ -200,7 +202,7 @@ export default function Explore() {
                 )}
               >
                 <span className="text-[10px] font-medium uppercase opacity-80">
-                  {d === today() ? "Today" : new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
+                  {d === today() ? t("explore.today") : new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
                 </span>
                 <span className="text-base font-bold leading-5">
                   {new Date(`${d}T00:00:00`).getDate()}
@@ -211,7 +213,7 @@ export default function Explore() {
 
           <div className="mt-3 flex items-center justify-between rounded-xl border border-border/80 bg-muted/30 px-4 py-2.5">
             <span className="flex items-center gap-2 text-sm font-medium">
-              <Users className="size-4 text-muted-foreground" /> Party size
+              <Users className="size-4 text-muted-foreground" /> {t("explore.partySize")}
             </span>
             <div className="flex items-center gap-3">
               <Button
@@ -235,8 +237,8 @@ export default function Explore() {
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
             {quickDate
-              ? `Showing restaurants with room for ${partySize} ${partySize === 1 ? "guest" : "guests"} on ${dateLabel(quickDate)}.`
-              : `Only places with free spots for ${partySize} ${partySize === 1 ? "guest" : "guests"} today are highlighted.`}
+              ? t("explore.showingForDate", { count: partySize, guests: t("common.guest", { count: partySize }), date: dateLabel(quickDate) })
+              : t("explore.showingToday", { count: partySize, guests: t("common.guest", { count: partySize }) })}
           </p>
         </Card>
 
@@ -246,7 +248,7 @@ export default function Explore() {
           <Input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search name, cuisine, city…"
+            placeholder={t("explore.searchPlaceholder")}
             className="h-11 rounded-xl pl-9 shadow-sm"
           />
         </div>
@@ -269,9 +271,9 @@ export default function Explore() {
           ))}
         </div>
         <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
-          {SEATS.map((s) => (
+          {SEAT_KEYS.map((s) => (
             <button
-              key={s.label}
+              key={s.key}
               onClick={() => setSeat(seat === s.value ? null : s.value)}
               className={cn(
                 "flex shrink-0 items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
@@ -280,7 +282,7 @@ export default function Explore() {
                   : "border-border bg-card text-muted-foreground hover:text-foreground",
               )}
             >
-              <s.icon className="size-3.5" /> {s.label}
+              <s.icon className="size-3.5" /> {t(s.key)}
             </button>
           ))}
           <button
@@ -292,7 +294,7 @@ export default function Explore() {
                 : "border-border bg-card text-muted-foreground hover:text-foreground",
             )}
           >
-            <Sparkles className="size-3.5" /> Non-smoking
+            <Sparkles className="size-3.5" /> {t("explore.nonSmoking")}
           </button>
           <button
             onClick={() => setSolo(!solo)}
@@ -302,9 +304,9 @@ export default function Explore() {
                 ? "border-primary bg-primary text-primary-foreground"
                 : "border-border bg-card text-muted-foreground hover:text-foreground",
             )}
-            title="Places that welcome solo diners"
+            title={t("explore.soloFriendly")}
           >
-            <Users className="size-3.5" /> Solo-friendly
+            <Users className="size-3.5" /> {t("explore.soloFriendly")}
           </button>
           <button
             onClick={() => setCity(city ? null : "Milan")}
@@ -315,14 +317,14 @@ export default function Explore() {
                 : "border-border bg-card text-muted-foreground hover:text-foreground",
             )}
           >
-            <MapPin className="size-3.5" /> {city ?? "Any city"}
+            <MapPin className="size-3.5" /> {city ?? t("explore.anyCity")}
           </button>
         </div>
 
         {/* Dietary filter — uses the menu attribute data */}
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            Diet
+            {t("explore.diet")}
           </span>
           {DIET_CHIPS.map((d) => (
             <button
@@ -343,7 +345,7 @@ export default function Explore() {
               onClick={() => setDietary(null)}
               className="text-xs text-muted-foreground underline-offset-2 hover:underline"
             >
-              Clear
+              {t("explore.clear")}
             </button>
           )}
         </div>
@@ -352,7 +354,7 @@ export default function Explore() {
         {(favorites ?? []).length > 0 && (
           <section className="mt-6">
             <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <Heart className="size-3.5 fill-primary text-primary" /> Your saved places
+              <Heart className="size-3.5 fill-primary text-primary" /> {t("explore.savedPlaces")}
             </h2>
             <div className="mt-3 space-y-3">
               {favorites!.map((r) => (
@@ -393,7 +395,7 @@ export default function Explore() {
         {!hasActiveFilters && (forYou ?? []).length > 0 && (
           <section className="mt-6">
             <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <Sparkles className="size-3.5 text-primary" /> For you
+              <Sparkles className="size-3.5 text-primary" /> {t("explore.forYou")}
             </h2>
             <div className="mt-3 space-y-3">
               {forYou!.map((id) => (
@@ -415,7 +417,7 @@ export default function Explore() {
         {(stories ?? []).length > 0 && (
           <section className="mt-6">
             <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <Sparkles className="size-3.5 text-primary" /> Fresh from the kitchens
+              <Sparkles className="size-3.5 text-primary" /> {t("explore.freshKitchens")}
             </h2>
             <div className="no-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1">
               {(stories ?? []).slice(0, 12).map((s) => (
@@ -446,7 +448,7 @@ export default function Explore() {
         {!hasActiveFilters && (trending ?? []).length > 0 && (
           <section className="mt-6">
             <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
-              <Flame className="size-3.5 text-orange-500" /> Trending now
+              <Flame className="size-3.5 text-orange-500" /> {t("explore.trending")}
             </h2>
             <div className="mt-3 space-y-3">
               {trending!.map((id) => (
@@ -469,17 +471,17 @@ export default function Explore() {
           {visible === undefined || summary === undefined ? (
             <div className="flex flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
               <Spinner className="size-6" />
-              <p className="text-sm">Loading restaurants…</p>
+              <p className="text-sm">{t("explore.loadingRestaurants")}</p>
             </div>
           ) : visible.length === 0 ? (
             <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border py-14 text-center">
               <SearchX className="size-8 text-muted-foreground/60" />
               <div>
-                <p className="font-medium">No matches yet</p>
+                <p className="font-medium">{t("explore.noMatches")}</p>
                 <p className="mt-1 text-sm text-muted-foreground">
                   {quickDate
-                    ? `No restaurants with ${partySize} free ${partySize === 1 ? "seat" : "seats"} on ${formatDate(quickDate)} match your filters.`
-                    : "Try clearing a filter or searching differently."}
+                    ? t("explore.noMatchesDate", { count: partySize, seats: t("common.seat", { count: partySize }), date: formatDate(quickDate) })
+                    : t("explore.noMatchesAny")}
                 </p>
               </div>
               <Button
@@ -497,7 +499,7 @@ export default function Explore() {
                   setPartySize(2);
                 }}
               >
-                Clear filters
+                {t("explore.clearFilters")}
               </Button>
             </div>
           ) : (
@@ -536,31 +538,32 @@ function RestaurantCard({
   favorited: boolean;
   onToggleFavorite: (id: string, name: string) => void;
 }) {
+  const { t } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: id as never });
   const wait = useQuery(api.analytics.publicWaitSignal, { restaurantId: id as never });
   if (!data) return null;
   const { restaurant: r, sections, rating } = data;
   const tags: string[] = [];
-  if (r.features.outside) tags.push("Outside");
-  if (r.features.bar) tags.push("Bar");
-  if (r.features.smoking) tags.push("Smoking");
-  if (r.features.soloFriendly) tags.push("Solo-friendly");
+  if (r.features.outside) tags.push(t("common.outside"));
+  if (r.features.bar) tags.push(t("common.bar"));
+  if (r.features.smoking) tags.push(t("detail.smokingArea"));
+  if (r.features.soloFriendly) tags.push(t("explore.soloFriendly"));
   const totalCapacity = sections.reduce((sum, s) => sum + s.capacity, 0);
 
   const statusBadge = !summary
     ? null
     : !summary.open
       ? {
-          label: `Closed ${new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}`,
+          label: t("explore.closedOn", { weekday: new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" }) }),
           cls: "bg-black/50 text-white/90 backdrop-blur",
         }
       : summary.estimated
-        ? { label: "Free spots", cls: "bg-emerald-600 text-white" }
+        ? { label: t("explore.freeSpots"), cls: "bg-emerald-600 text-white" }
         : {
             label:
               summary.freeSeats > 0
-                ? `${summary.freeSeats} ${summary.freeSeats === 1 ? "spot" : "spots"} free`
-                : "Sold out",
+                ? t("explore.spotsFree", { count: summary.freeSeats, spots: t("common.spot", { count: summary.freeSeats }) })
+                : t("explore.soldOut"),
             cls:
               summary.freeSeats > 0
                 ? "bg-emerald-600 text-white"
@@ -618,7 +621,7 @@ function RestaurantCard({
             </Badge>
           ))}
           <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Users className="size-3.5" /> {totalCapacity} seats
+            <Users className="size-3.5" /> {t("explore.seats", { count: totalCapacity })}
           </span>
           {wait?.label && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
@@ -638,13 +641,13 @@ function RestaurantCard({
                 ? "text-primary"
                 : "text-muted-foreground/50 hover:bg-primary/10 hover:text-primary",
             )}
-            aria-label={favorited ? "Remove from favorites" : "Save to favorites"}
-            title={favorited ? "Remove from favorites" : "Save to favorites"}
+            aria-label={favorited ? t("explore.removeFav") : t("explore.saveFav")}
+            title={favorited ? t("explore.removeFav") : t("explore.saveFav")}
           >
             <Heart className={cn("size-4", favorited && "fill-current")} />
           </button>
           <Button size="sm" asChild className="shrink-0">
-            <Link to={to}>Book</Link>
+            <Link to={to}>{t("explore.book")}</Link>
           </Button>
         </div>
       </div>
