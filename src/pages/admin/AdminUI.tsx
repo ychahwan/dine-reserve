@@ -2,7 +2,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { TableHead } from "@/components/ui/table";
-import { ArrowDown, ArrowUp, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowDown, ArrowUp, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight, Star } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SortDirection } from "@/lib/use-table-pagination";
@@ -89,7 +89,7 @@ export function EmptyNote({ children }: { children: React.ReactNode }) {
 
 /* ─── Sortable column header ──────────────────────────────────────────── */
 
-export function SortableHead({
+export function SortableHead<T extends string>({
   label,
   sortKey,
   activeSortKey,
@@ -98,10 +98,10 @@ export function SortableHead({
   className,
 }: {
   label: string;
-  sortKey: string;
-  activeSortKey: string;
+  sortKey: T;
+  activeSortKey: T;
   direction: SortDirection;
-  onToggle: (key: string) => void;
+  onToggle: (key: T) => void;
   className?: string;
 }) {
   const active = sortKey === activeSortKey;

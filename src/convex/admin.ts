@@ -64,19 +64,24 @@ export const claimPlatformAdmin = mutation({
       throw new Error("This account already has admin access.");
     }
 
-    // Prove ownership of the platform-admin phone via the VERIFIED auth
-    // account (phone-otp provider), never via the mutable users.phone profile
-    // field. An attacker who edits their profile phone cannot satisfy this
-    // check: providerAccountId is fixed at account creation by the auth
-    // provider and is not reachable through updateProfile.
-    const phoneAccount = await ctx.db
+    // Prove ownership of the platform-admin phone via a VERIFIED auth
+    // account (phone-otp or password provider).
+    // Collect all auth accounts for this user and check if any match.
+    const authAccounts = await ctx.db
       .query("authAccounts")
       .withIndex("userIdAndProvider", (q) =>
-        q.eq("userId", userId).eq("provider", "phone-otp"),
+        q.eq("userId", userId),
       )
-      .first();
-    if (phoneAccount?.providerAccountId !== PLATFORM_ADMIN_PHONE) {
-      throw new Error("This phone number is not the platform admin.");
+      .collect();
+    const accountPhones = authAccounts.map((a) => a.providerAccountId);
+    const isPlatformAdmin = accountPhones.some(
+      (phone) => phone === PLATFORM_ADMIN_PHONE,
+    );
+    if (!isPlatformAdmin) {
+      throw new Error(
+        "This phone number is not the platform admin. " +
+        `Account phones: [${accountPhones.join(", ")}]`,
+      );
     }
 
     await ctx.db.patch(userId, { role: "admin", onboarded: true });

@@ -21,7 +21,7 @@ import {
   sortItems,
 } from "@/lib/use-table-pagination";
 
-type Row = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listRestaurants>>[number]>;
+type Row = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listRestaurants>>>[number];
 type SortKey = "name" | "owner" | "rating" | "bookings" | "orders" | "revenue";
 
 function extractValue(row: Row, key: SortKey): string | number {

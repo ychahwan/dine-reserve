@@ -11,8 +11,7 @@ export async function generateOtpToken(): Promise<string> {
       crypto.getRandomValues(bytes);
     },
   };
-  const alphabet = "0123456789";
-  return generateRandomString(random, alphabet, 6);
+  const alphabet = "0123456789";    return generateRandomString(random, alphabet, 6);
 }
 
 import { sendTwilioMessage } from "../twilio";

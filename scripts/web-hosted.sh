@@ -24,7 +24,7 @@ fail()  { echo -e "${RED}❌ $1${NC}" >&2; exit 1; }
 if [ -f .env ]; then
   set -a
   # shellcheck disable=SC1091
-  source <(sed 's/\r$//' .env)
+  source /dev/stdin <<< "$(sed 's/\r$//' .env)"
   set +a
 fi
 
