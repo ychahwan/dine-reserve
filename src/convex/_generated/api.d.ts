@@ -9,6 +9,7 @@
  */
 
 import type * as admin from "../admin.js";
+import type * as adminAi from "../adminAi.js";
 import type * as adminView from "../adminView.js";
 import type * as ai from "../ai.js";
 import type * as analytics from "../analytics.js";
@@ -36,6 +37,7 @@ import type * as slotRules from "../slotRules.js";
 import type * as sms from "../sms.js";
 import type * as socialize from "../socialize.js";
 import type * as stories from "../stories.js";
+import type * as testScenario from "../testScenario.js";
 import type * as twilio from "../twilio.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
@@ -50,6 +52,7 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   admin: typeof admin;
+  adminAi: typeof adminAi;
   adminView: typeof adminView;
   ai: typeof ai;
   analytics: typeof analytics;
@@ -77,6 +80,7 @@ declare const fullApi: ApiFromModules<{
   sms: typeof sms;
   socialize: typeof socialize;
   stories: typeof stories;
+  testScenario: typeof testScenario;
   twilio: typeof twilio;
   uploads: typeof uploads;
   users: typeof users;

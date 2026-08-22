@@ -21,6 +21,7 @@ const AdminRestaurantDetail = lazy(() => import("./pages/admin/AdminRestaurantDe
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminUserDetail = lazy(() => import("./pages/admin/AdminUserDetail.tsx"));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews.tsx"));
+const AdminAI = lazy(() => import("./pages/admin/AdminAI.tsx"));
 const AdminReviewDetail = lazy(() => import("./pages/admin/AdminReviewDetail.tsx"));
 const AdminAudit = lazy(() => import("./pages/admin/AdminAudit.tsx"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings.tsx"));
@@ -155,6 +156,7 @@ createRoot(document.getElementById("root")!).render(
                 <Route path="users/:id" element={<AdminUserDetail />} />
                 <Route path="reviews" element={<AdminReviews />} />
                 <Route path="reviews/:id" element={<AdminReviewDetail />} />
+                <Route path="ai" element={<AdminAI />} />
                 <Route path="audit" element={<AdminAudit />} />
                 <Route path="settings" element={<AdminSettings />} />
                 <Route path="register" element={<AdminRegister />} />

@@ -1,0 +1,93 @@
+import { getAuthUserId } from "@convex-dev/auth/server";
+import { v } from "convex/values";
+import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+
+async function requireAdmin(ctx: QueryCtx | MutationCtx) {
+  const userId = await getAuthUserId(ctx);
+  if (userId === null) throw new Error("You must be signed in.");
+  const user = await ctx.db.get(userId);
+  if (user?.role !== "admin") throw new Error("Admins only.");
+  return { userId };
+}
+
+export const overview = query({
+  args: {},
+  handler: async (ctx) => {
+    await requireAdmin(ctx);
+    const [conversations, messages, knowledge, rules] = await Promise.all([
+      ctx.db.query("aiConversations").collect(),
+      ctx.db.query("aiMessages").collect(),
+      ctx.db.query("aiKnowledge").collect(),
+      ctx.db.query("aiSemanticRules").collect(),
+    ]);
+    const users = await Promise.all([...new Set(conversations.map((c) => c.userId))].map((id) => ctx.db.get(id)));
+    const names = new Map(users.filter(Boolean).map((u) => [u!._id, u!.name ?? u!.phone ?? "Customer"]));
+    return {
+      conversations: conversations.sort((a, b) => b.lastMessageAt - a.lastMessageAt).map((c) => ({
+        ...c,
+        customerName: names.get(c.userId) ?? "Customer",
+      })),
+      messageCount: messages.length,
+      knowledge,
+      rules,
+    };
+  },
+});
+
+export const conversation = query({
+  args: { id: v.id("aiConversations") },
+  handler: async (ctx, { id }) => {
+    await requireAdmin(ctx);
+    const thread = await ctx.db.get(id);
+    if (!thread) return null;
+    const [customer, messages] = await Promise.all([
+      ctx.db.get(thread.userId),
+      ctx.db.query("aiMessages").withIndex("by_conversation", (q) => q.eq("conversationId", id)).collect(),
+    ]);
+    return {
+      conversation: thread,
+      customer: customer ? { _id: customer._id, name: customer.name, phone: customer.phone, email: customer.email } : null,
+      messages: messages.sort((a, b) => a.createdAt - b.createdAt),
+    };
+  },
+});
+
+export const saveKnowledge = mutation({
+  args: {
+    id: v.optional(v.id("aiKnowledge")),
+    title: v.string(), category: v.string(), content: v.string(), priority: v.number(), enabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireAdmin(ctx);
+    const values = { title: args.title.trim(), category: args.category.trim(), content: args.content.trim(), priority: args.priority, enabled: args.enabled, updatedBy: userId, updatedAt: Date.now() };
+    if (!values.title || !values.content) throw new Error("Title and content are required.");
+    if (args.id) await ctx.db.patch(args.id, values);
+    else await ctx.db.insert("aiKnowledge", values);
+    return { ok: true };
+  },
+});
+
+export const deleteKnowledge = mutation({
+  args: { id: v.id("aiKnowledge") },
+  handler: async (ctx, { id }) => { await requireAdmin(ctx); await ctx.db.delete(id); return { ok: true }; },
+});
+
+export const saveRule = mutation({
+  args: {
+    id: v.optional(v.id("aiSemanticRules")),
+    name: v.string(), description: v.string(), instruction: v.string(), priority: v.number(), enabled: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    const { userId } = await requireAdmin(ctx);
+    const values = { name: args.name.trim(), description: args.description.trim(), instruction: args.instruction.trim(), priority: args.priority, enabled: args.enabled, updatedBy: userId, updatedAt: Date.now() };
+    if (!values.name || !values.instruction) throw new Error("Name and instruction are required.");
+    if (args.id) await ctx.db.patch(args.id, values);
+    else await ctx.db.insert("aiSemanticRules", values);
+    return { ok: true };
+  },
+});
+
+export const deleteRule = mutation({
+  args: { id: v.id("aiSemanticRules") },
+  handler: async (ctx, { id }) => { await requireAdmin(ctx); await ctx.db.delete(id); return { ok: true }; },
+});

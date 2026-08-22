@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { action } from "./_generated/server";
-import { api } from "./_generated/api";
+import { action, internalMutation, internalQuery } from "./_generated/server";
+import { api, internal } from "./_generated/api";
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { getSetting } from "./settings";
 
@@ -23,11 +23,13 @@ export const recommendDinner = action({
     query: v.string(),
     date: v.optional(v.string()), // YYYY-MM-DD
     partySize: v.optional(v.number()),
+    conversationId: v.optional(v.id("aiConversations")),
   },
-  handler: async (ctx, { query, date, partySize }): Promise<{
+  handler: async (ctx, { query, date, partySize, conversationId }): Promise<{
     recommendations: any[];
     dinerName: string;
     query: string;
+    conversationId: string;
   }> => {
     const apiKey = await getSetting(ctx, "GEMINI_API_KEY");
     if (!apiKey) throw new Error("AI concierge is not configured (missing GEMINI_API_KEY).");
@@ -35,6 +37,17 @@ export const recommendDinner = action({
     // ── 1. Read the diner's data from Convex ──────────────────────────
     const user: any = await ctx.runQuery(api.users.currentUser);
     if (!user) throw new Error("You must be signed in to use the concierge.");
+
+    const activeConversationId = conversationId ?? await ctx.runMutation(internal.ai.createConversation, {
+      userId: user._id,
+      title: query.slice(0, 80),
+    });
+    await ctx.runMutation(internal.ai.recordMessage, {
+      conversationId: activeConversationId,
+      userId: user._id,
+      role: "user",
+      content: query,
+    });
 
     const [bookings, orders, reviews, favorites, restaurants] = await Promise.all([
       ctx.runQuery(api.bookings.myBookings),
@@ -46,6 +59,11 @@ export const recommendDinner = action({
     ]);
 
     // ── 2. Build a bounded context pack ────────────────────────────────
+    const [knowledge, semanticRules] = await Promise.all([
+      ctx.runQuery(internal.ai.enabledKnowledge, {}),
+      ctx.runQuery(internal.ai.enabledSemanticRules, {}),
+    ]);
+
     const context = buildContextPack({
       userName: user.name ?? "Diner",
       bookings: bookings.slice(0, 20),
@@ -60,7 +78,8 @@ export const recommendDinner = action({
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: "gemini-3.6-flash" });
 
-    const prompt = buildPrompt(query, context, { date, partySize });
+    const systemPrompt = await getSetting(ctx, "AI_SYSTEM_PROMPT");
+    const prompt = buildPrompt(query, context, { date, partySize, systemPrompt, knowledge, semanticRules });
 
     // KB-08: a provider hiccup must never surface a raw stack trace to the
     // diner — return a friendly, structured error the UI can render.
@@ -69,7 +88,7 @@ export const recommendDinner = action({
       const result = await model.generateContent(prompt);
       text = result.response.text();
     } catch (e) {
-      return {
+      const failure = {
         recommendations: [
           {
             error: "The concierge is having a moment — please try again.",
@@ -78,7 +97,10 @@ export const recommendDinner = action({
         ],
         dinerName: user.name ?? "Diner",
         query,
+        conversationId: activeConversationId,
       };
+      await ctx.runMutation(internal.ai.recordMessage, { conversationId: activeConversationId, userId: user._id, role: "assistant", content: failure.recommendations[0].error ?? "AI error", metadata: JSON.stringify(failure.recommendations) });
+      return failure;
     }
 
     // ── 4. Parse structured response ───────────────────────────────────
@@ -98,12 +120,37 @@ export const recommendDinner = action({
       });
     }
 
-    return {
+    const response = {
       recommendations,
       dinerName: user.name ?? "Diner",
       query,
+      conversationId: activeConversationId,
     };
+    await ctx.runMutation(internal.ai.recordMessage, { conversationId: activeConversationId, userId: user._id, role: "assistant", content: recommendations.length ? "Recommendations returned" : "No matches found", metadata: JSON.stringify(recommendations) });
+    return response;
   },
+});
+
+export const createConversation = internalMutation({
+  args: { userId: v.id("users"), title: v.optional(v.string()) },
+  handler: async (ctx, { userId, title }) => ctx.db.insert("aiConversations", { userId, title, lastMessageAt: Date.now(), messageCount: 0, createdAt: Date.now() }),
+});
+
+export const recordMessage = internalMutation({
+  args: { conversationId: v.id("aiConversations"), userId: v.id("users"), role: v.union(v.literal("user"), v.literal("assistant")), content: v.string(), metadata: v.optional(v.string()) },
+  handler: async (ctx, args) => {
+    await ctx.db.insert("aiMessages", { ...args, createdAt: Date.now() });
+    const conversation = await ctx.db.get(args.conversationId);
+    if (conversation) await ctx.db.patch(args.conversationId, { lastMessageAt: Date.now(), messageCount: conversation.messageCount + 1 });
+  },
+});
+
+export const enabledKnowledge = internalQuery({
+  args: {}, handler: async (ctx) => ctx.db.query("aiKnowledge").withIndex("by_enabled_priority", (q) => q.eq("enabled", true)).order("desc").take(50),
+});
+
+export const enabledSemanticRules = internalQuery({
+  args: {}, handler: async (ctx) => ctx.db.query("aiSemanticRules").withIndex("by_enabled_priority", (q) => q.eq("enabled", true)).order("desc").take(50),
 });
 
 /**
@@ -301,13 +348,19 @@ function buildContextPack(data: {
 function buildPrompt(
   query: string,
   context: any,
-  opts: { date?: string; partySize?: number },
+  opts: { date?: string; partySize?: number; systemPrompt?: string; knowledge?: any[]; semanticRules?: any[] },
 ) {
   const today = new Date().toISOString().split("T")[0];
   const requestedDate = opts.date ?? today;
   const requestedParty = opts.partySize ?? "not specified";
 
-  return `You are Kamix AI, a personal dining concierge for Lebanon. You help diners find the perfect restaurant and time based on their history, preferences, and real-time availability.
+  return `${opts.systemPrompt || "You are Kamix AI, a personal dining concierge for Lebanon. You help diners find the perfect restaurant and time based on their history, preferences, and real-time availability."}
+
+## Semantic rules
+${(opts.semanticRules ?? []).map((r) => `- ${r.name}: ${r.instruction}`).join("\n") || "No additional semantic rules."}
+
+## Knowledge layer
+${(opts.knowledge ?? []).map((k) => `[${k.category}] ${k.title}: ${k.content}`).join("\n") || "No additional knowledge."}
 
 ## Diner Profile
 Name: ${context.userName}

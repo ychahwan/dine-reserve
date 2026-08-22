@@ -23,6 +23,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 /** Keys the admin console offers to manage. Order = display order. */
 export const SETTING_KEYS = [
   "GEMINI_API_KEY",
+  "AI_SYSTEM_PROMPT",
   "TWILIO_ENABLED",
   "TWILIO_ACCOUNT_SID",
   "TWILIO_AUTH_TOKEN",

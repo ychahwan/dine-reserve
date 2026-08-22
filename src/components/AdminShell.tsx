@@ -4,6 +4,7 @@ import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import {
   LayoutDashboard,
+  Bot,
   Loader2,
   LogOut,
   PlusCircle,
@@ -23,6 +24,7 @@ const NAV = [
   { to: "/admin/restaurants", icon: Store, label: "Restaurants" },
   { to: "/admin/users", icon: Users, label: "Users" },
   { to: "/admin/reviews", icon: Star, label: "Reviews" },
+  { to: "/admin/ai", icon: Bot, label: "AI workspace" },
   { to: "/admin/audit", icon: ScrollText, label: "Audit log" },
   { to: "/admin/settings", icon: Settings, label: "Settings" },
 ];

@@ -1,6 +1,4 @@
-import { useState, useRef, useEffect } from "react";
-import { useAction } from "convex/react";
-import { api } from "@/convex/_generated/api";
+import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,30 +8,12 @@ import {
   Sparkles,
   Send,
   X,
-  MapPin,
   Clock,
-  Users,
   Star,
   ChevronRight,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-
-interface Recommendation {
-  restaurantId?: string;
-  name?: string;
-  cuisine?: string;
-  suggestedTime?: string;
-  reason?: string;
-  matchScore?: number;
-  error?: string;
-  raw?: string;
-}
-
-interface ChatMessage {
-  role: "user" | "assistant";
-  content: string;
-  recommendations?: Recommendation[];
-}
+import { useAiConcierge, type Recommendation } from "@/hooks/use-ai-concierge";
 
 const QUICK_PROMPTS = [
   "Italian for 2 tonight",
@@ -45,55 +25,15 @@ const QUICK_PROMPTS = [
 
 export default function AiConcierge() {
   const [isOpen, setIsOpen] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const messagesEndRef = useRef<HTMLDivElement>(null);
-  const recommendDinner = useAction(api.ai.recommendDinner);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  const { messages, isLoading, messagesEndRef, send } = useAiConcierge();
 
   const handleSend = async (text?: string) => {
     const query = text || input.trim();
     if (!query || isLoading) return;
 
     setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: query }]);
-    setIsLoading(true);
-
-    try {
-      const result = await recommendDinner({ query });
-      const recs = result.recommendations as Recommendation[];
-
-      const hasError = recs.some((r) => r.error);
-      if (hasError) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: "I had trouble finding matches for that. Could you try rephrasing? For example: 'Italian for 2 on Saturday night' or 'Best sushi in Beirut'.",
-          },
-        ]);
-      } else {
-        const summary = `Here are my top picks for "${query}":`;
-        setMessages((prev) => [
-          ...prev,
-          { role: "assistant", content: summary, recommendations: recs },
-        ]);
-      }
-    } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "assistant",
-          content: `Sorry, I couldn't process that request. ${err instanceof Error ? err.message : "Please try again."}`,
-        },
-      ]);
-    } finally {
-      setIsLoading(false);
-    }
+    await send(query);
   };
 
   return (

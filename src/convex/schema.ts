@@ -638,6 +638,52 @@ const schema = defineSchema(
       updatedAt: v.number(),
     })
       .index("by_key", ["key"]),
+
+    // Persisted AI support data. Conversations/messages are deliberately
+    // separate so the admin console can browse threads without duplicating
+    // the customer profile or prompt payload on every row.
+    aiConversations: defineTable({
+      userId: v.id("users"),
+      title: v.optional(v.string()),
+      lastMessageAt: v.number(),
+      messageCount: v.number(),
+      createdAt: v.number(),
+    })
+      .index("by_user", ["userId"])
+      .index("by_last_message", ["lastMessageAt"]),
+
+    aiMessages: defineTable({
+      conversationId: v.id("aiConversations"),
+      userId: v.id("users"),
+      role: v.union(v.literal("user"), v.literal("assistant")),
+      content: v.string(),
+      metadata: v.optional(v.string()),
+      createdAt: v.number(),
+    })
+      .index("by_conversation", ["conversationId", "createdAt"])
+      .index("by_user", ["userId"]),
+
+    // Curated facts and rules injected into the agent context. These are
+    // editable by admins and intentionally versionable through updatedAt.
+    aiKnowledge: defineTable({
+      title: v.string(),
+      category: v.string(),
+      content: v.string(),
+      priority: v.number(),
+      enabled: v.boolean(),
+      updatedBy: v.id("users"),
+      updatedAt: v.number(),
+    }).index("by_enabled_priority", ["enabled", "priority"]),
+
+    aiSemanticRules: defineTable({
+      name: v.string(),
+      description: v.string(),
+      instruction: v.string(),
+      priority: v.number(),
+      enabled: v.boolean(),
+      updatedBy: v.id("users"),
+      updatedAt: v.number(),
+    }).index("by_enabled_priority", ["enabled", "priority"]),
   },
   {
     schemaValidation: true,

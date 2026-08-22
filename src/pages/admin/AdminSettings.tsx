@@ -48,6 +48,13 @@ const META: Record<string, { label: string; group: string; hint: string; secret:
     secret: true,
     placeholder: "Paste the Gemini API key",
   },
+  AI_SYSTEM_PROMPT: {
+    label: "AI system prompt",
+    group: "AI",
+    hint: "Base behavior used by the diner concierge. Customer data, knowledge, and semantic rules are appended at runtime.",
+    secret: false,
+    placeholder: "Describe how Kamix AI should behave…",
+  },
   TWILIO_ENABLED: {
     label: "Twilio enabled",
     group: "SMS",
