@@ -3,7 +3,10 @@ import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
-import { Ban } from "lucide-react";
+import { Ban, Search } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import {
   Table,
   TableBody,
@@ -12,11 +15,52 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { roleBadge, EmptyNote } from "./AdminUI";
+import { roleBadge, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
 import { formatPrice } from "@/lib/format";
+import { filterAdminUsersByPhone } from "@/lib/admin-user-filters";
+import { useMemo, useState } from "react";
+import {
+  useTablePagination,
+  useSort,
+  sortItems,
+} from "@/lib/use-table-pagination";
+
+type UserRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listUsers>>>[number];
+type SortKey = "name" | "role" | "phone" | "bookings" | "orders" | "reviews" | "spend";
+
+function extractValue(row: UserRow, key: SortKey): string | number {
+  switch (key) {
+    case "name": return row.name ?? "";
+    case "role": return row.role ?? "";
+    case "phone": return row.phone ?? "";
+    case "bookings": return row.bookingCount;
+    case "orders": return row.orderCount;
+    case "reviews": return row.reviewCount;
+    case "spend": return row.totalSpendCents;
+  }
+}
 
 export default function AdminUsers() {
   const rows = useQuery(api.adminView.listUsers);
+  const [phoneQuery, setPhoneQuery] = useState("");
+  const { sort, toggleSort } = useSort<SortKey>({ key: "name", direction: "asc" });
+
+  const filteredRows = useMemo(
+    () => filterAdminUsersByPhone(rows ?? [], phoneQuery),
+    [rows, phoneQuery],
+  );
+
+  const sortedRows = useMemo(
+    () => sortItems(filteredRows, sort.key, sort.direction, extractValue),
+    [filteredRows, sort.key, sort.direction],
+  );
+
+  const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
+    items: sortedRows,
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    pageSize: 25,
+  });
 
   if (rows === undefined) {
     return (
@@ -27,32 +71,67 @@ export default function AdminUsers() {
   }
 
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Users</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          All {rows.length} accounts. Select one to see their bookings, orders and interactions.
-        </p>
+    <div className="mx-auto flex max-w-5xl flex-col gap-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Users</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            All {rows.length} accounts. Select one to see their bookings, orders and interactions.
+          </p>
+        </div>
+        <Badge variant="outline" className="w-fit tabular-nums">
+          {filteredRows.length} of {rows.length} shown
+        </Badge>
       </div>
 
       {rows.length === 0 ? (
         <EmptyNote>No users yet.</EmptyNote>
       ) : (
-        <div className="rounded-2xl border border-border/70 bg-card">
+        <>
+          <Card className="gap-4 py-4 shadow-none">
+            <CardHeader className="px-4">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Search className="size-4 text-primary" /> Find a user
+              </CardTitle>
+              <CardDescription>Search by phone number. Spaces, dashes, and parentheses are ignored.</CardDescription>
+            </CardHeader>
+            <CardContent className="px-4">
+              <Field>
+                <FieldLabel htmlFor="user-phone-filter">Phone number</FieldLabel>
+                <Input
+                  id="user-phone-filter"
+                  type="search"
+                  inputMode="tel"
+                  autoComplete="off"
+                  value={phoneQuery}
+                  onChange={(event) => setPhoneQuery(event.target.value)}
+                  placeholder="Search +961 76 683 661"
+                />
+              </Field>
+            </CardContent>
+          </Card>
+
+          <div className="overflow-hidden rounded-xl border bg-card">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>User</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead className="hidden md:table-cell">Contact</TableHead>
-                <TableHead className="hidden sm:table-cell">Bookings</TableHead>
-                <TableHead className="hidden sm:table-cell">Orders</TableHead>
-                <TableHead className="hidden lg:table-cell">Reviews</TableHead>
-                <TableHead className="hidden lg:table-cell">Spend</TableHead>
+                <SortableHead label="User" sortKey="name" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+                <SortableHead label="Role" sortKey="role" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+                <SortableHead label="Contact" sortKey="phone" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
+                <SortableHead label="Bookings" sortKey="bookings" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
+                <SortableHead label="Orders" sortKey="orders" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
+                <SortableHead label="Reviews" sortKey="reviews" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden lg:table-cell" />
+                <SortableHead label="Spend" sortKey="spend" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden lg:table-cell" />
               </TableRow>
             </TableHeader>
             <TableBody>
-              {rows.map((u) => (
+              {pageItems.length === 0 ? (
+                <TableRow>
+                  <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                    No users match that phone number.
+                  </TableCell>
+                </TableRow>
+              ) : pageItems.map((u) => (
                 <TableRow key={u._id}>
                   <TableCell>
                     <Link to={`/admin/users/${u._id}`} className="group block">
@@ -69,6 +148,7 @@ export default function AdminUsers() {
                           owns {u.ownedRestaurants.map((r) => r.name).join(", ")}
                         </p>
                       )}
+                      {u.phone && <p className="text-xs text-muted-foreground md:hidden">{u.phone}</p>}
                     </Link>
                   </TableCell>
                   <TableCell>{roleBadge(u.role)}</TableCell>
@@ -84,7 +164,15 @@ export default function AdminUsers() {
               ))}
             </TableBody>
           </Table>
-        </div>
+          </div>
+          <TablePaginationBar
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            showingCount={pageItems.length}
+            onPageChange={setPage}
+          />
+        </>
       )}
     </div>
   );

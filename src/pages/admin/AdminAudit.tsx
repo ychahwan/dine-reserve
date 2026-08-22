@@ -10,27 +10,59 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { api } from "@/convex/_generated/api";
-import { useMutation, useQuery } from "convex/react";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import { Eraser, Loader2 } from "lucide-react";
-import { useState } from "react";
-import { EmptyNote } from "./AdminUI";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
+import { EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
+import {
+  useTablePagination,
+  useSort,
+  sortItems,
+} from "@/lib/use-table-pagination";
+import type { SortDirection } from "@/lib/use-table-pagination";
+
+type AuditEntry = NonNullable<ReturnType<typeof useQuery<typeof api.admin.auditLog>>>[number];
+
+import { api } from "@/convex/_generated/api";
+
+type SortKey = "action" | "target" | "details" | "when";
+
+function extractValue(row: AuditEntry, key: SortKey): string | number {
+  switch (key) {
+    case "action": return row.action;
+    case "target": return row.targetUserId ? String(row.targetUserId) : "";
+    case "details": return row.details ?? "";
+    case "when": return row.createdAt;
+  }
+}
 
 export default function AdminAudit() {
   const entries = useQuery(api.admin.auditLog);
   const clearAuditLog = useMutation(api.admin.clearAuditLog);
   const [confirmClear, setConfirmClear] = useState(false);
   const [busy, setBusy] = useState(false);
+  const { sort, toggleSort } = useSort<SortKey>({ key: "when", direction: "desc" });
+
+  const sorted = useMemo(
+    () => sortItems(entries ?? [], sort.key, sort.direction, extractValue),
+    [entries, sort.key, sort.direction],
+  );
+
+  const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
+    items: sorted,
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    pageSize: 25,
+  });
 
   const handleClear = async () => {
     if (busy) return;
@@ -61,7 +93,7 @@ export default function AdminAudit() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Record of admin actions (last 50). Clearing it is itself logged.
+            Record of admin actions ({entries.length} total). Clearing it is itself logged.
           </p>
         </div>
         <Button
@@ -77,36 +109,45 @@ export default function AdminAudit() {
       {entries.length === 0 ? (
         <EmptyNote>No admin actions recorded yet.</EmptyNote>
       ) : (
-        <div className="rounded-2xl border border-border/70 bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Action</TableHead>
-                <TableHead className="hidden md:table-cell">Target</TableHead>
-                <TableHead className="hidden sm:table-cell">Details</TableHead>
-                <TableHead>When</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {entries.map((e) => (
-                <TableRow key={e._id}>
-                  <TableCell>
-                    <Badge variant="secondary" className="font-mono text-[11px]">{e.action}</Badge>
-                  </TableCell>
-                  <TableCell className="hidden font-mono text-xs text-muted-foreground md:table-cell">
-                    {e.targetUserId ? String(e.targetUserId).slice(0, 12) + "…" : "—"}
-                  </TableCell>
-                  <TableCell className="hidden max-w-xs truncate text-sm text-muted-foreground sm:table-cell">
-                    {e.details ?? "—"}
-                  </TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {new Date(e.createdAt).toLocaleString()}
-                  </TableCell>
+        <>
+          <div className="rounded-2xl border border-border/70 bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <SortableHead label="Action" sortKey="action" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+                  <SortableHead label="Target" sortKey="target" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
+                  <SortableHead label="Details" sortKey="details" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
+                  <SortableHead label="When" sortKey="when" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </div>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((e) => (
+                  <TableRow key={e._id}>
+                    <TableCell>
+                      <Badge variant="secondary" className="font-mono text-[11px]">{e.action}</Badge>
+                    </TableCell>
+                    <TableCell className="hidden font-mono text-xs text-muted-foreground md:table-cell">
+                      {e.targetUserId ? String(e.targetUserId).slice(0, 12) + "…" : "—"}
+                    </TableCell>
+                    <TableCell className="hidden max-w-xs truncate text-sm text-muted-foreground sm:table-cell">
+                      {e.details ?? "—"}
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                      {new Date(e.createdAt).toLocaleString()}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <TablePaginationBar
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            showingCount={pageItems.length}
+            onPageChange={setPage}
+          />
+        </>
       )}
 
       <AlertDialog open={confirmClear} onOpenChange={(open) => !open && !busy && setConfirmClear(false)}>

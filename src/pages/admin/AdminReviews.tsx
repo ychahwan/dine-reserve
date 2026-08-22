@@ -1,5 +1,3 @@
-import { Spinner } from "@/components/ui/spinner";
-import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import {
   AlertDialog,
@@ -11,68 +9,166 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { api } from "@/convex/_generated/api";
-import { useMutation, useQuery } from "convex/react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectGroup,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Spinner } from "@/components/ui/spinner";
 import {
   Table,
   TableBody,
   TableCell,
-  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Star, Trash2, Loader2, MessageSquareQuote, TrendingUp } from "lucide-react";
-import { useMemo, useState } from "react";
-import { Stars, EmptyNote } from "./AdminUI";
+import { api } from "@/convex/_generated/api";
 import { formatDate } from "@/lib/format";
+import { filterAdminReviews } from "@/lib/admin-review-filters";
+import {
+  useTablePagination,
+  useSort,
+  sortItems,
+} from "@/lib/use-table-pagination";
+import { useMutation, useQuery } from "convex/react";
+import { ArrowUpRight, Loader2, MessageSquareQuote, SlidersHorizontal, Star, Trash2, TrendingUp } from "lucide-react";
+import { useMemo, useState } from "react";
+import { Link } from "react-router";
 import { toast } from "sonner";
-import { cn } from "@/lib/utils";
+import { EmptyNote, SortableHead, Stars, TablePaginationBar } from "./AdminUI";
 
-/** "Maria N." → "MN" for avatars. */
 function initialsOf(name: string) {
   return name
     .split(/\s+/)
     .filter(Boolean)
     .slice(0, 2)
-    .map((w) => w[0]!.toUpperCase())
+    .map((word) => word[0]!.toUpperCase())
     .join("");
 }
 
-const RATING_FILTERS = [0, 5, 4, 3, 2, 1] as const;
+type ReviewRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listReviews>>>[number];
+type SortKey = "restaurant" | "diner" | "rating" | "date";
+
+function extractReviewValue(row: ReviewRow, key: SortKey): string | number {
+  switch (key) {
+    case "restaurant": return row.restaurantName;
+    case "diner": return row.authorName;
+    case "rating": return row.rating;
+    case "date": return row.createdAt;
+  }
+}
 
 export default function AdminReviews() {
   const reviews = useQuery(api.adminView.listReviews);
   const removeReview = useMutation(api.reviews.remove);
-  const [reviewToDelete, setReviewToDelete] = useState<string | null>(null);
+  const [restaurantId, setRestaurantId] = useState("all");
+  const [userId, setUserId] = useState("all");
+  const [rating, setRating] = useState(0);
+  const [selected, setSelected] = useState<Set<string>>(() => new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [filter, setFilter] = useState<number>(0); // 0 = all
+  const { sort, toggleSort } = useSort<SortKey>({ key: "date", direction: "desc" });
 
   const stats = useMemo(() => {
-    if (!reviews || reviews.length === 0) return null;
-    const sum = reviews.reduce((s, r) => s + r.rating, 0);
-    const avg = Math.round((sum / reviews.length) * 10) / 10;
-    const byStar = [0, 0, 0, 0, 0, 0];
-    for (const r of reviews) byStar[r.rating] = (byStar[r.rating] ?? 0) + 1;
-    return { avg, byStar };
+    if (!reviews?.length) return null;
+    const sum = reviews.reduce((total, review) => total + review.rating, 0);
+    return { average: Math.round((sum / reviews.length) * 10) / 10 };
   }, [reviews]);
 
-  const filtered = useMemo(() => {
-    if (!reviews) return [];
-    return filter === 0 ? reviews : reviews.filter((r) => r.rating === filter);
-  }, [reviews, filter]);
+  const restaurantOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const review of reviews ?? []) options.set(review.restaurantId, review.restaurantName);
+    return [...options].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [reviews]);
 
-  const handleDelete = async () => {
-    if (!reviewToDelete || busy) return;
+  const dinerOptions = useMemo(() => {
+    const options = new Map<string, string>();
+    for (const review of reviews ?? []) options.set(review.userId, review.authorName);
+    return [...options].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
+  }, [reviews]);
+
+  const filtered = useMemo(
+    () => filterAdminReviews(reviews ?? [], { restaurantId, userId, rating }),
+    [reviews, restaurantId, userId, rating],
+  );
+
+  const sorted = useMemo(
+    () => sortItems(filtered, sort.key, sort.direction, extractReviewValue),
+    [filtered, sort.key, sort.direction],
+  );
+
+  const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
+    items: sorted,
+    sortKey: sort.key,
+    sortDirection: sort.direction,
+    pageSize: 20,
+  });
+
+  const selectedFilteredCount = filtered.reduce(
+    (count, review) => count + (selected.has(review._id) ? 1 : 0),
+    0,
+  );
+  const allFilteredSelected = filtered.length > 0 && selectedFilteredCount === filtered.length;
+  const selectedReviewIds = useMemo(
+    () => [...selected].filter((id) => reviews?.some((review) => review._id === id)),
+    [reviews, selected],
+  );
+
+  const toggleAllFiltered = () => {
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const review of filtered) {
+        if (allFilteredSelected) next.delete(review._id);
+        else next.add(review._id);
+      }
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (busy || selectedReviewIds.length === 0) return;
     setBusy(true);
-    try {
-      const res = await removeReview({ reviewId: reviewToDelete as never });
-      if (res.deleted) toast.success("Review deleted.");
-      setReviewToDelete(null);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete the review.");
-    } finally {
-      setBusy(false);
+    const deleted: string[] = [];
+    let failed = 0;
+
+    for (const reviewId of selectedReviewIds) {
+      try {
+        const result = await removeReview({ reviewId: reviewId as never });
+        if (result.deleted) deleted.push(reviewId);
+        else failed += 1;
+      } catch {
+        failed += 1;
+      }
     }
+
+    setSelected((current) => {
+      const next = new Set(current);
+      for (const reviewId of deleted) next.delete(reviewId);
+      return next;
+    });
+    setConfirmBulkDelete(false);
+    setBusy(false);
+
+    if (deleted.length > 0) {
+      toast.success(`${deleted.length} review${deleted.length === 1 ? "" : "s"} deleted.`);
+    }
+    if (failed > 0) {
+      toast.error(`${failed} review${failed === 1 ? "" : "s"} could not be deleted.`);
+    }
+  };
+
+  const resetFilters = () => {
+    setRestaurantId("all");
+    setUserId("all");
+    setRating(0);
   };
 
   if (reviews === undefined) {
@@ -83,162 +179,309 @@ export default function AdminReviews() {
     );
   }
 
+  if (reviews.length === 0) {
+    return (
+      <div className="mx-auto flex max-w-6xl flex-col gap-6">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Reviews</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Moderate diner feedback across the platform.</p>
+        </div>
+        <EmptyNote>No reviews yet — diners can rate a visit from My Bookings after it completes.</EmptyNote>
+      </div>
+    );
+  }
+
   return (
-    <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight">Reviews</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Every diner rating across the platform ({reviews.length}).
-        </p>
+    <div className="mx-auto flex max-w-6xl flex-col gap-6">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold tracking-tight">Reviews</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Moderate every diner rating and open the complete review record.
+          </p>
+        </div>
+        <Badge variant="outline" className="w-fit tabular-nums">
+          {filtered.length} of {reviews.length} shown
+        </Badge>
       </div>
 
-      {reviews.length === 0 ? (
-        <EmptyNote>No reviews yet — diners can rate a visit from My Bookings after it completes.</EmptyNote>
-      ) : (
-        <>
-          {/* Summary cards */}
-          <div className="grid gap-3 sm:grid-cols-2">
-            <div className="flex items-center gap-3 rounded-2xl border border-border/70 bg-card p-4">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-amber-500/10 text-amber-500">
-                <TrendingUp className="size-5" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Average rating</p>
-                <p className="text-xl font-bold tracking-tight">
-                  {stats?.avg.toFixed(1)} <span className="text-sm font-normal text-muted-foreground">/ 5</span>
-                </p>
-              </div>
+      <div className="grid grid-cols-3 gap-2 sm:gap-3">
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <TrendingUp className="size-5" />
             </div>
-            <div className="flex items-center gap-3 rounded-2xl border border-border/70 bg-card p-4">
-              <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                <MessageSquareQuote className="size-5" />
-              </div>
-              <div>
-                <p className="text-xs text-muted-foreground">Total reviews</p>
-                <p className="text-xl font-bold tracking-tight">{reviews.length}</p>
-              </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Average rating</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{stats?.average.toFixed(1)} / 5</p>
             </div>
+          </CardContent>
+        </Card>
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <MessageSquareQuote className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Total reviews</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{reviews.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <Star className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Filtered results</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{filtered.length}</p>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="gap-4 py-4 shadow-none">
+        <CardHeader className="px-4">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <SlidersHorizontal className="size-4 text-primary" /> Review filters
+          </CardTitle>
+          <CardDescription>Combine restaurant, diner, and rating filters to narrow the moderation queue.</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4 px-4">
+          <div className="grid gap-3 md:grid-cols-3">
+            <Select value={restaurantId} onValueChange={setRestaurantId}>
+              <SelectTrigger className="w-full" aria-label="Filter by restaurant">
+                <SelectValue placeholder="All restaurants" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All restaurants</SelectItem>
+                  {restaurantOptions.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+
+            <Select value={userId} onValueChange={setUserId}>
+              <SelectTrigger className="w-full" aria-label="Filter by diner">
+                <SelectValue placeholder="All diners" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="all">All diners</SelectItem>
+                  {dinerOptions.map((option) => (
+                    <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
+
+            <Select value={String(rating)} onValueChange={(value) => setRating(Number(value))}>
+              <SelectTrigger className="w-full" aria-label="Filter by rating">
+                <SelectValue placeholder="All ratings" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="0">All ratings</SelectItem>
+                  {[5, 4, 3, 2, 1].map((star) => (
+                    <SelectItem key={star} value={String(star)}>{star} stars</SelectItem>
+                  ))}
+                </SelectGroup>
+              </SelectContent>
+            </Select>
           </div>
 
-          {/* Rating distribution + filter */}
-          <div className="space-y-3 rounded-2xl border border-border/70 bg-card p-4">
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                onClick={() => setFilter(0)}
-                className={cn(
-                  "rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                  filter === 0
-                    ? "bg-primary text-primary-foreground"
-                    : "bg-muted text-muted-foreground hover:bg-muted/70",
-                )}
-              >
-                All
-              </button>
-              {RATING_FILTERS.filter((r) => r > 0).map((star) => (
-                <button
-                  key={star}
-                  onClick={() => setFilter(filter === star ? 0 : star)}
-                  className={cn(
-                    "flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium transition-colors",
-                    filter === star
-                      ? "bg-primary text-primary-foreground"
-                      : "bg-muted text-muted-foreground hover:bg-muted/70",
-                  )}
-                >
-                  <Star className={cn("size-3", filter === star ? "fill-current" : "fill-current text-amber-500")} />
-                  {star}
-                  <span className="opacity-60">{stats ? stats.byStar[star] ?? 0 : 0}</span>
-                </button>
-              ))}
-            </div>
-            {stats && (
-              <div className="space-y-1.5">
-                {[5, 4, 3, 2, 1].map((star) => {
-                  const n = stats.byStar[star] ?? 0;
-                  const pct = (n / reviews.length) * 100;
-                  return (
-                    <div key={star} className="flex items-center gap-2 text-xs">
-                      <span className="w-5 shrink-0 text-right tabular-nums text-muted-foreground">{star}</span>
-                      <Star className="size-3 shrink-0 fill-current text-amber-500" />
-                      <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
-                        <div className="h-full rounded-full bg-amber-500" style={{ width: `${pct}%` }} />
-                      </div>
-                      <span className="w-6 shrink-0 tabular-nums text-muted-foreground">{n}</span>
+          {(restaurantId !== "all" || userId !== "all" || rating !== 0) ? (
+            <Button variant="ghost" size="sm" className="w-fit" onClick={resetFilters}>
+              Clear filters
+            </Button>
+          ) : null}
+
+          <Separator />
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <label className="flex cursor-pointer items-center gap-2 text-sm">
+              <Checkbox
+                aria-label="Select all filtered reviews"
+                checked={allFilteredSelected ? true : selectedFilteredCount > 0 ? "indeterminate" : false}
+                onCheckedChange={toggleAllFiltered}
+                disabled={filtered.length === 0}
+              />
+              <span>
+                Select all filtered
+                <span className="ml-1 text-muted-foreground">({selectedFilteredCount} selected here)</span>
+              </span>
+            </label>
+            <Button
+              variant="destructive"
+              size="sm"
+              disabled={selectedReviewIds.length === 0}
+              onClick={() => setConfirmBulkDelete(true)}
+            >
+              <Trash2 data-icon="inline-start" />
+              Delete selected ({selectedReviewIds.length})
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Desktop table */}
+      <div className="hidden overflow-hidden rounded-xl border bg-card md:block">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10"><span className="sr-only">Select</span></TableHead>
+              <SortableHead label="Restaurant" sortKey="restaurant" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+              <SortableHead label="Diner" sortKey="diner" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+              <SortableHead label="Rating" sortKey="rating" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+              <SortableHead label="Date" sortKey="date" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+              <TableHead className="w-full">Feedback</TableHead>
+              <TableHead className="w-20"><span className="sr-only">Actions</span></TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {pageItems.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  No reviews match these filters.
+                </TableCell>
+              </TableRow>
+            ) : (
+              pageItems.map((review) => (
+                <TableRow key={review._id} data-state={selected.has(review._id) ? "selected" : undefined}>
+                  <TableCell>
+                    <Checkbox
+                      aria-label={`Select review from ${review.authorName} for ${review.restaurantName}`}
+                      checked={selected.has(review._id)}
+                      onCheckedChange={(checked) => {
+                        setSelected((current) => {
+                          const next = new Set(current);
+                          if (checked === true) next.add(review._id);
+                          else next.delete(review._id);
+                          return next;
+                        });
+                      }}
+                    />
+                  </TableCell>
+                  <TableCell className="font-medium">{review.restaurantName}</TableCell>
+                  <TableCell>
+                    <div className="flex items-center gap-2">
+                      <Avatar className="size-7">
+                        <AvatarFallback className="bg-primary/10 text-[10px] font-semibold text-primary">
+                          {initialsOf(review.authorName)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="whitespace-nowrap text-muted-foreground">{review.authorName}</span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Table */}
-          <div className="rounded-2xl border border-border/70 bg-card">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Restaurant</TableHead>
-                  <TableHead>Diner</TableHead>
-                  <TableHead>Rating</TableHead>
-                  <TableHead className="hidden sm:table-cell">Date</TableHead>
-                  <TableHead className="w-full">Feedback</TableHead>
-                  <TableHead className="w-24"></TableHead>
+                  </TableCell>
+                  <TableCell><Stars rating={review.rating} /></TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {formatDate(new Date(review.createdAt).toISOString().slice(0, 10))}
+                  </TableCell>
+                  <TableCell className="max-w-sm">
+                    <p className="line-clamp-2 text-sm text-muted-foreground">
+                      {review.text ?? <span className="italic opacity-60">No comment</span>}
+                    </p>
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Button variant="ghost" size="icon-sm" asChild>
+                      <Link
+                        to={`/admin/reviews/${review._id}`}
+                        aria-label={`View review details for ${review.restaurantName}`}
+                      >
+                        <ArrowUpRight />
+                      </Link>
+                    </Button>
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                      No {filter > 0 ? `${filter}-star ` : ""}reviews match.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  filtered.map((r) => (
-                    <TableRow key={r._id}>
-                      <TableCell className="font-medium">{r.restaurantName}</TableCell>
-                      <TableCell>
-                        <div className="flex items-center gap-2">
-                          <Avatar className="size-7">
-                            <AvatarFallback className="bg-primary/10 text-[10px] font-semibold text-primary">
-                              {initialsOf(r.authorName)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-muted-foreground">{r.authorName}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Stars rating={r.rating} />
-                      </TableCell>
-                      <TableCell className="hidden whitespace-nowrap text-muted-foreground sm:table-cell">
-                        {formatDate(new Date(r.createdAt).toISOString().slice(0, 10))}
-                      </TableCell>
-                      <TableCell className="max-w-xs text-sm text-muted-foreground">
-                        {r.text ?? <span className="italic opacity-60">No comment</span>}
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                          onClick={() => setReviewToDelete(r._id)}
-                        >
-                          <Trash2 className="size-3.5" /> Delete
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </div>
-        </>
-      )}
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
+      {/* Desktop pagination */}
+      <div className="hidden md:block">
+        <TablePaginationBar
+          page={page}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          showingCount={pageItems.length}
+          onPageChange={setPage}
+        />
+      </div>
 
-      <AlertDialog open={!!reviewToDelete} onOpenChange={(open) => !open && !busy && setReviewToDelete(null)}>
-        <AlertDialogContent className="max-w-sm rounded-3xl">
+      {/* Mobile cards */}
+      <div className="flex flex-col gap-3 md:hidden">
+        {pageItems.length === 0 ? (
+          <EmptyNote>No reviews match these filters.</EmptyNote>
+        ) : (
+          pageItems.map((review) => (
+            <Card key={review._id} className="gap-4 py-4 shadow-none" data-state={selected.has(review._id) ? "selected" : undefined}>
+              <CardHeader className="grid grid-cols-[auto_1fr_auto] items-start gap-3 px-4">
+                <Checkbox
+                  className="mt-1"
+                  aria-label={`Select review from ${review.authorName} for ${review.restaurantName}`}
+                  checked={selected.has(review._id)}
+                  onCheckedChange={(checked) => {
+                    setSelected((current) => {
+                      const next = new Set(current);
+                      if (checked === true) next.add(review._id);
+                      else next.delete(review._id);
+                      return next;
+                    });
+                  }}
+                />
+                <div className="min-w-0">
+                  <CardTitle className="truncate text-base">{review.restaurantName}</CardTitle>
+                  <CardDescription className="truncate">{review.authorName}</CardDescription>
+                </div>
+                <Stars rating={review.rating} />
+              </CardHeader>
+              <CardContent className="flex flex-col gap-3 px-4">
+                <p className="line-clamp-3 text-sm leading-6 text-muted-foreground">
+                  {review.text ?? <span className="italic opacity-60">No comment</span>}
+                </p>
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-xs text-muted-foreground">
+                    {formatDate(new Date(review.createdAt).toISOString().slice(0, 10))}
+                  </span>
+                  <Button variant="outline" size="sm" asChild>
+                    <Link
+                      to={`/admin/reviews/${review._id}`}
+                      aria-label={`View review details for ${review.restaurantName}`}
+                    >
+                      View details <ArrowUpRight data-icon="inline-end" />
+                    </Link>
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ))
+        )}
+      </div>
+      {/* Mobile pagination */}
+      <div className="md:hidden">
+        <TablePaginationBar
+          page={page}
+          totalPages={totalPages}
+          totalItems={totalItems}
+          showingCount={pageItems.length}
+          onPageChange={setPage}
+        />
+      </div>
+
+      <AlertDialog
+        open={confirmBulkDelete}
+        onOpenChange={(open) => !busy && setConfirmBulkDelete(open)}
+      >
+        <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Delete this review?</AlertDialogTitle>
+            <AlertDialogTitle>Delete selected reviews?</AlertDialogTitle>
             <AlertDialogDescription>
-              The rating and feedback are removed permanently from the platform. This is audited.
+              {selectedReviewIds.length} selected review{selectedReviewIds.length === 1 ? "" : "s"} will be permanently removed.
+              Loyalty points linked to each review will be reversed, and every admin deletion will be audited.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -246,12 +489,13 @@ export default function AdminReviews() {
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={busy}
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDelete();
+              onClick={(event) => {
+                event.preventDefault();
+                void handleBulkDelete();
               }}
             >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : "Delete review"}
+              {busy ? <Loader2 className="animate-spin" /> : <Trash2 />}
+              Delete selected
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -1,8 +1,11 @@
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Star } from "lucide-react";
+import { TableHead } from "@/components/ui/table";
+import { ArrowDown, ArrowUp, ChevronsLeft, ChevronsRight, ChevronLeft, ChevronRight } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import type { SortDirection } from "@/lib/use-table-pagination";
 
 export function roleBadge(role?: string) {
   switch (role) {
@@ -82,4 +85,104 @@ export function SectionTitle({ children }: { children: React.ReactNode }) {
 
 export function EmptyNote({ children }: { children: React.ReactNode }) {
   return <p className="py-8 text-center text-sm text-muted-foreground">{children}</p>;
+}
+
+/* ─── Sortable column header ──────────────────────────────────────────── */
+
+export function SortableHead({
+  label,
+  sortKey,
+  activeSortKey,
+  direction,
+  onToggle,
+  className,
+}: {
+  label: string;
+  sortKey: string;
+  activeSortKey: string;
+  direction: SortDirection;
+  onToggle: (key: string) => void;
+  className?: string;
+}) {
+  const active = sortKey === activeSortKey;
+  return (
+    <TableHead
+      className={cn("cursor-pointer select-none hover:text-foreground", className)}
+      onClick={() => onToggle(sortKey)}
+    >
+      <span className="inline-flex items-center gap-1">
+        {label}
+        {active ? (
+          direction === "asc" ? (
+            <ArrowUp className="size-3 text-primary" />
+          ) : (
+            <ArrowDown className="size-3 text-primary" />
+          )
+        ) : null}
+      </span>
+    </TableHead>
+  );
+}
+
+/* ─── Pagination bar ─────────────────────────────────────────────────── */
+
+export function TablePaginationBar({
+  page,
+  totalPages,
+  totalItems,
+  showingCount,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  totalItems: number;
+  showingCount: number;
+  onPageChange: (page: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+  return (
+    <div className="flex items-center justify-between gap-3 py-3">
+      <p className="text-xs text-muted-foreground">
+        Page {page + 1} of {totalPages} · {showingCount} of {totalItems} rows
+      </p>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={page === 0}
+          onClick={() => onPageChange(0)}
+          aria-label="First page"
+        >
+          <ChevronsLeft className="size-3.5" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={page === 0}
+          onClick={() => onPageChange(page - 1)}
+          aria-label="Previous page"
+        >
+          <ChevronLeft className="size-3.5" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={page >= totalPages - 1}
+          onClick={() => onPageChange(page + 1)}
+          aria-label="Next page"
+        >
+          <ChevronRight className="size-3.5" />
+        </Button>
+        <Button
+          variant="outline"
+          size="icon-sm"
+          disabled={page >= totalPages - 1}
+          onClick={() => onPageChange(totalPages - 1)}
+          aria-label="Last page"
+        >
+          <ChevronsRight className="size-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
 }
