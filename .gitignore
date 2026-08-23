@@ -7,3 +7,4 @@ android/
 ios/
 apk/
 *.apk.env.render
+.env.render

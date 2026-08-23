@@ -13,6 +13,7 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { useParams, Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertDialog,
@@ -440,8 +441,8 @@ export default function AdminRestaurantDetail() {
                 search={bookingSearch}
                 onSearchChange={setBookingSearch}
                 searchPlaceholder="Search diner, phone, or code…"
-                sortKey={bookingSort.key}
-                sortDirection={bookingSort.direction}
+                sortKey={bookingSort.sort.key}
+                sortDirection={bookingSort.sort.direction}
                 toggleSort={bookingSort.toggleSort}
                 extractValue={(b, k) => {
                   if (k === "when") return `${b.date}T${b.time}`;
@@ -522,8 +523,8 @@ export default function AdminRestaurantDetail() {
                 search={orderSearch}
                 onSearchChange={setOrderSearch}
                 searchPlaceholder="Search diner or item name…"
-                sortKey={orderSort.key}
-                sortDirection={orderSort.direction}
+                sortKey={orderSort.sort.key}
+                sortDirection={orderSort.sort.direction}
                 toggleSort={orderSort.toggleSort}
                 extractValue={(o, k) => {
                   if (k === "diner") return o.userName;
@@ -603,8 +604,8 @@ export default function AdminRestaurantDetail() {
                 search={reviewSearch}
                 onSearchChange={setReviewSearch}
                 searchPlaceholder="Search diner or feedback…"
-                sortKey={reviewSort.key}
-                sortDirection={reviewSort.direction}
+                sortKey={reviewSort.sort.key}
+                sortDirection={reviewSort.sort.direction}
                 toggleSort={reviewSort.toggleSort}
                 extractValue={(r, k) => {
                   if (k === "diner") return r.authorName;
@@ -649,8 +650,8 @@ export default function AdminRestaurantDetail() {
                   search={assistSearch}
                   onSearchChange={setAssistSearch}
                   searchPlaceholder="Search type or note…"
-                  sortKey={assistSort.key}
-                  sortDirection={assistSort.direction}
+                  sortKey={assistSort.sort.key}
+                  sortDirection={assistSort.sort.direction}
                   toggleSort={assistSort.toggleSort}
                   extractValue={(a, k) => {
                     if (k === "type") return a.template;
@@ -691,8 +692,8 @@ export default function AdminRestaurantDetail() {
                   search={menuReqSearch}
                   onSearchChange={setMenuReqSearch}
                   searchPlaceholder="Search name or description…"
-                  sortKey={menuReqSort.key}
-                  sortDirection={menuReqSort.direction}
+                  sortKey={menuReqSort.sort.key}
+                  sortDirection={menuReqSort.sort.direction}
                   toggleSort={menuReqSort.toggleSort}
                   extractValue={(m, k) => {
                     if (k === "name") return m.name;

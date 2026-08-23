@@ -95,7 +95,7 @@ export default function AdminAudit() {
   const { sort, toggleSort } = useSort<SortKey>({ key: "when", direction: "desc" });
 
   // Get unique action values for the filter dropdown
-  const allEntries = useQuery(api.admin.auditLog);
+  const allEntries = useQuery(api.admin.auditLog, {});
   const actionOptions = useMemo(() => {
     if (!allEntries) return [];
     const actions = new Set(allEntries.map((e) => e.action));

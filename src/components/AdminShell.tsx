@@ -23,7 +23,7 @@ import { NavLink, Navigate, Outlet, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 
 /* ── Grouped navigation ── */
-const NAV_GROUPS = [
+const NAV_GROUPS: { heading: string; items: { to: string; end?: boolean; icon: typeof LayoutDashboard; label: string }[] }[] = [
   {
     heading: "Overview",
     items: [
@@ -123,8 +123,8 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 
       {/* User info + sign out */}
       <div className="mt-auto border-t border-border/60 pt-4">
-        <p className="truncate px-3 text-xs font-medium">{user.name ?? "Admin"}</p>
-        <p className="truncate px-3 text-xs text-muted-foreground">{user.phone ?? user.email ?? ""}</p>
+        <p className="truncate px-3 text-xs font-medium">{user?.name ?? "Admin"}</p>
+        <p className="truncate px-3 text-xs text-muted-foreground">{user?.phone ?? user?.email ?? ""}</p>
         <Button
           variant="ghost"
           size="sm"

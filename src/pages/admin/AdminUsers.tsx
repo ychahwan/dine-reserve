@@ -41,7 +41,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-type UserRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listUsers>>[number]>;
+type UserRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listUsers>>>[number];
 type SortKey = "name" | "role" | "phone" | "bookings" | "orders" | "reviews" | "spend";
 
 function extractValue(row: UserRow, key: SortKey): string | number {
