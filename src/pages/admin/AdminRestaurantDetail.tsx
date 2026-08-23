@@ -328,6 +328,20 @@ export default function AdminRestaurantDetail() {
     toast.success(`Exported ${rows.length} reviews.`);
   };
 
+  const handleExportAssists = () => {
+    const headers = ["Type", "Status", "Note", "Resolve time (min)"];
+    const rows = filteredAssists.map((a) => [a.template, a.status, a.note ?? "", a.resolveMs != null ? Math.round(a.resolveMs / 60000) : ""]);
+    exportToCsv(headers, rows, `assists-${restaurant.name}-${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} assist requests.`);
+  };
+
+  const handleExportMenuReqs = () => {
+    const headers = ["Name", "Description", "Status"];
+    const rows = filteredMenuReqs.map((m) => [m.name, m.description ?? "", m.status]);
+    exportToCsv(headers, rows, `menu-requests-${restaurant.name}-${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} menu requests.`);
+  };
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <Link to="/admin/restaurants" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
@@ -578,8 +592,11 @@ export default function AdminRestaurantDetail() {
           <div className="space-y-4">
             {/* Assist requests */}
             <Card className="rounded-2xl border-border/70">
-              <CardHeader className="pb-3">
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="text-base">Assist requests (table pings)</CardTitle>
+                <Button variant="outline" size="sm" onClick={handleExportAssists} disabled={filteredAssists.length === 0}>
+                  <Download className="size-3.5" /> CSV
+                </Button>
               </CardHeader>
               <CardContent className="p-4">
                 <FilteredTable
@@ -617,8 +634,11 @@ export default function AdminRestaurantDetail() {
 
             {/* Menu requests */}
             <Card className="rounded-2xl border-border/70">
-              <CardHeader className="pb-3">
+              <CardHeader className="flex flex-row items-center justify-between pb-3">
                 <CardTitle className="text-base">Menu requests (off-menu)</CardTitle>
+                <Button variant="outline" size="sm" onClick={handleExportMenuReqs} disabled={filteredMenuReqs.length === 0}>
+                  <Download className="size-3.5" /> CSV
+                </Button>
               </CardHeader>
               <CardContent className="p-4">
                 <FilteredTable
