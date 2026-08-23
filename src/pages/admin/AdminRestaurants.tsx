@@ -19,7 +19,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Ban } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Ban, DollarSign, Star, Store, TrendingUp } from "lucide-react";
 import { Stars, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
 import { formatPrice } from "@/lib/format";
 import { useMemo, useState } from "react";
@@ -111,13 +112,71 @@ export default function AdminRestaurants() {
 
   const disabledCount = rows.filter((r) => r.disabled).length;
 
+  // Filter-reactive stats
+  const stats = useMemo(() => {
+    const total = filtered.length;
+    const active = filtered.filter((r) => !r.disabled).length;
+    const disabled = filtered.filter((r) => r.disabled).length;
+    const totalBookings = filtered.reduce((s, r) => s + r.bookingCount, 0);
+    const totalRevenue = filtered.reduce((s, r) => s + r.revenueCents, 0);
+    const avgRating = total > 0 ? filtered.filter((r) => r.rating.count > 0).reduce((s, r) => s + r.rating.avg, 0) / Math.max(1, filtered.filter((r) => r.rating.count > 0).length) : 0;
+    return { total, active, disabled, totalBookings, totalRevenue, avgRating };
+  }, [filtered]);
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Restaurants</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          {rows.length} restaurants total{disabledCount > 0 ? ` · ${disabledCount} disabled` : ""}. Select one to see its full operational detail.
+          {rows.length} restaurants total{filtered.length < rows.length ? ` · ${filtered.length} shown` : ""}. Select one to see its full operational detail.
         </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <Store className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Restaurants</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{stats.total}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <TrendingUp className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Bookings</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{stats.totalBookings.toLocaleString()}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <Star className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Avg rating</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{stats.avgRating > 0 ? stats.avgRating.toFixed(1) : "—"}</p>
+            </div>
+          </CardContent>
+        </Card>
+        <Card className="gap-2 py-3 shadow-none sm:gap-3 sm:py-4">
+          <CardContent className="flex items-center gap-3 px-3 sm:px-4">
+            <div className="hidden size-10 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
+              <DollarSign className="size-5" />
+            </div>
+            <div className="min-w-0">
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Revenue</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{formatPrice(stats.totalRevenue)}</p>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
       {/* Filters */}
