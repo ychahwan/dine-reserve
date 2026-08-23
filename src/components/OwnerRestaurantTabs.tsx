@@ -37,6 +37,7 @@ import {
   Pencil,
   Phone,
   Plus,
+  Download,
   Trash2,
   Users,
   Wand2,
@@ -1081,6 +1082,21 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
     return list;
   }, [customers, search, sortBy]);
 
+  const handleExport = () => {
+    if (!filtered) return;
+    const headers = ["Name", "Phone", "Email", "Total visits", "Total guests", "Last visit", "Statuses"];
+    const rows = filtered.map((c) => [c.name, c.phone ?? "", c.email ?? "", c.totalVisits, c.totalGuests, c.lastVisit, c.statuses.join(", ")]);
+    const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `customers-${new Date().toISOString().slice(0, 10)}.csv`;
+    link.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${filtered.length} customers to CSV.`);
+  };
+
   return (
     <div className="space-y-4 pb-6">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -1104,6 +1120,9 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
               <SelectItem value="lastVisit">Recent</SelectItem>
             </SelectContent>
           </Select>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={!filtered || filtered.length === 0}>
+            <Download className="size-3.5" /> CSV
+          </Button>
         </div>
       </div>
 
