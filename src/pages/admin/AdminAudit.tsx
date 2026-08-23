@@ -80,6 +80,8 @@ function exportToCsv(entries: AuditEntry[]) {
 export default function AdminAudit() {
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const entries = useQuery(api.admin.auditLog, {
     search: search || undefined,
     action: actionFilter || undefined,
@@ -100,9 +102,23 @@ export default function AdminAudit() {
     return Array.from(actions).sort();
   }, [allEntries]);
 
+  // Client-side date range filter
+  const dateFiltered = useMemo(() => {
+    let list = entries ?? [];
+    if (dateFrom) {
+      const from = new Date(dateFrom + "T00:00:00").getTime();
+      list = list.filter((e) => e.createdAt >= from);
+    }
+    if (dateTo) {
+      const to = new Date(dateTo + "T23:59:59").getTime();
+      list = list.filter((e) => e.createdAt <= to);
+    }
+    return list;
+  }, [entries, dateFrom, dateTo]);
+
   const sorted = useMemo(
-    () => sortItems(entries ?? [], sort.key, sort.direction, extractValue),
-    [entries, sort.key, sort.direction],
+    () => sortItems(dateFiltered, sort.key, sort.direction, extractValue),
+    [dateFiltered, sort.key, sort.direction],
   );
 
   const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
@@ -181,7 +197,7 @@ export default function AdminAudit() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {entries.length} entries{search || actionFilter ? " (filtered)" : ""}. Clearing it is itself logged.
+            {entries.length} entries{search || actionFilter || dateFrom || dateTo ? ` (${dateFiltered.length} shown)` : ""}. Clearing it is itself logged.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -228,19 +244,23 @@ export default function AdminAudit() {
             ))}
           </SelectContent>
         </Select>
-        {(search || actionFilter) && (
+        <span className="text-xs text-muted-foreground">From</span>
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground" />
+        <span className="text-xs text-muted-foreground">To</span>
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground" />
+        {(search || actionFilter || dateFrom || dateTo) && (
           <Button
             variant="ghost"
             size="sm"
             className="text-muted-foreground"
-            onClick={() => { setSearch(""); setActionFilter(""); }}
+            onClick={() => { setSearch(""); setActionFilter(""); setDateFrom(""); setDateTo(""); }}
           >
             Clear filters
           </Button>
         )}
       </div>
 
-      {entries.length === 0 && !search && !actionFilter ? (
+      {entries.length === 0 && !search && !actionFilter && !dateFrom && !dateTo ? (
         <EmptyNote>No admin actions recorded yet.</EmptyNote>
       ) : pageItems.length === 0 ? (
         <EmptyNote>No entries match your filters.</EmptyNote>
