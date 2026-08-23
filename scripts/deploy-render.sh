@@ -4,7 +4,7 @@
 #
 #   npm run deploy
 #
-# Reads RENDER_API_KEY and RENDER_PROJECT_ID from .env.render.
+# Reads RENDER_API_KEY and RENDER_SERVICE_ID from .env.render.
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,22 +20,31 @@ if [ -f .env.render ]; then
 fi
 
 [ -n "${RENDER_API_KEY:-}" ] || fail "RENDER_API_KEY not set in .env.render"
-[ -n "${RENDER_PROJECT_ID:-}" ] || fail "RENDER_PROJECT_ID not set in .env.render"
+[ -n "${RENDER_SERVICE_ID:-}" ] || fail "RENDER_SERVICE_ID not set in .env.render"
 
 # Ensure convex is deployed first
 info "Deploying Convex functions…"
 npx convex deploy
 
 # Trigger Render deploy via API
-info "Triggering Render deploy for project ${RENDER_PROJECT_ID}…"
+info "Triggering Render deploy for service ${RENDER_SERVICE_ID}…"
 RESPONSE=$(curl -s -X POST \
-  "https://api.render.com/v1/services?project_id=${RENDER_PROJECT_ID}" \
+  "https://api.render.com/v1/services/${RENDER_SERVICE_ID}/deploys" \
   -H "Authorization: Bearer ${RENDER_API_KEY}" \
   -H "Content-Type: application/json" \
-  2>&1) || true
+  -d '{}' \
+  2>&1)
+
+DEPLOY_ID=$(echo "$RESPONSE" | python3 -c "import sys,json; print(json.load(sys.stdin).get('deploy',{}).get('id',''))" 2>/dev/null || true)
+
+if [ -n "$DEPLOY_ID" ]; then
+  ok "Deploy triggered: ${DEPLOY_ID}"
+else
+  echo "$RESPONSE" | python3 -m json.tool 2>/dev/null || echo "$RESPONSE"
+  fail "Deploy trigger failed."
+fi
 
 echo ""
-ok "Convex deployed. Check Render dashboard for web service status."
-echo ""
-echo "  Render dashboard: https://dashboard.render.com/project/${RENDER_PROJECT_ID}"
+echo "  Dashboard: https://dashboard.render.com/web/${RENDER_SERVICE_ID}"
+echo "  Status:    check the Deploy tab for build progress"
 echo ""
