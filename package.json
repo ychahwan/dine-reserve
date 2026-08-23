@@ -26,8 +26,7 @@
     "convex:up": "docker compose up -d convex",
     "convex:up:build": "docker compose up --build -d convex",
     "convex:down": "docker compose down -v",
-    "seed:activity": "node scripts/seed-activity.mjs",
-    "test:ai": "node --experimental-strip-types scripts/test-ai-hardening.mjs"
+    "stress": "npx convex run seed:stressSeed"
   },
   "dependencies": {
     "@capacitor/core": "^8.5.0",

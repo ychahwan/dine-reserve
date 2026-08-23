@@ -370,7 +370,7 @@ the `adminAuditLog` table and visible in the admin console under **Audit log**.
 | Role | How it's assigned | What it can do |
 |------|-------------------|----------------|
 | **Admin** | Only the admin phone can claim it (`admin.claimPlatformAdmin`) | Register/tag restaurants, disable/delete users & restaurants, delete any review, clear the audit log |
-| **Owner** | Admin creates via *Register restaurant* or *Tag owner* | Manage their restaurant, bookings, menu, orders, insights |
+| **Owner** | Admin creates via *Register restaurant* or *Tag owner* | Manage their restaurant, bookings, menu, orders, insights, Socialize settings |
 | **Customer** | Self-registers via `/auth` (OTP) | Browse, book, order, socialize, review |
 
 ### Moderation actions (admin console → detail pages)
@@ -387,6 +387,69 @@ the `adminAuditLog` table and visible in the admin console under **Audit log**.
   Customers can also delete their own reviews from the restaurant page.
 - **Audit log** (`/admin/audit`): **Clear log** wipes the table; the clearing
   itself is kept as a single auditable entry.
+
+## Socialize & Dine Security Model
+
+The Socialize feature (diner-to-diner gifting and room visibility) has multiple
+security layers to protect against abuse:
+
+### Check-in Gate (Idea #1)
+- Diners **must check in** at the restaurant before toggling visibility
+- `setVisibility` calls `requireCheckedInBooking` — phantom bookings are blocked
+- The visibility switch is disabled in the UI until check-in
+
+### Restaurant Controls (Idea #8)
+- Owners can **enable/disable** Socialize per venue
+- Owners can set a **minimum completed-visit threshold** (0–50) for visibility
+- Owners can **block specific users** from the Socialize room
+- Settings are in the restaurant owner dashboard → Overview → Socialize room
+
+### Soft Gate Progressive Access (Idea #3)
+Three tiers tied to the real-world dining journey:
+
+| Tier | Trigger | Access |
+|------|---------|--------|
+| **Booked** | Booking confirmed | Can only pre-set visibility preference |
+| **Checked in** | Diner confirms arrival | See first names, send gifts, place orders |
+| **Seated** | 15+ min after check-in | Full profiles, Taste Twins matching |
+
+The tier is promoted lazily by `visibleDiners` when it detects `checkedInAt > 15min`.
+
+## Stress Testing
+
+Run a heavy seed to test the app with 100k users and 1000 restaurants:
+
+```bash
+npm run stress    # or: npx convex run seed:stressSeed
+```
+
+This creates:
+- 1,000 restaurant owner accounts
+- 99,000 diner accounts
+- 1,000 restaurants with sections, menus, and gift catalogs
+- ~10,000 bookings across the restaurants
+- ~5,000 dine-in orders
+- ~2,000 reviews
+
+**Warning:** This is a heavy operation. Only run on a test deployment.
+
+## Mobile Builds
+
+### Android APK
+```bash
+npm run build                          # Build web app
+npx cap sync                           # Sync with Capacitor
+cd android && ./gradlew assembleDebug  # Build debug APK
+# APK at: android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+### iOS (macOS + Xcode only)
+```bash
+npm run build
+npx cap sync
+npx cap open ios                        # Opens Xcode
+# Product → Archive to build release
+```
 
 ## Common Convex Mistakes To Avoid
 
