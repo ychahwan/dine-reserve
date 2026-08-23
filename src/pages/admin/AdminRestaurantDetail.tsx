@@ -194,22 +194,22 @@ export default function AdminRestaurantDetail() {
   const [bookingStatus, setBookingStatus] = useState("all");
   const [bookingDateFrom, setBookingDateFrom] = useState("");
   const [bookingDateTo, setBookingDateTo] = useState("");
-  const [bookingSort, setBookingSort] = useSort<"when" | "diner" | "party" | "status">({ key: "when", direction: "desc" });
+  const bookingSort = useSort<"when" | "diner" | "party" | "status">({ key: "when", direction: "desc" });
 
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatus, setOrderStatus] = useState("all");
   const [orderDateFrom, setOrderDateFrom] = useState("");
   const [orderDateTo, setOrderDateTo] = useState("");
-  const [orderSort, setOrderSort] = useSort<"diner" | "total" | "status">({ key: "total", direction: "desc" });
+  const orderSort = useSort<"diner" | "total" | "status">({ key: "total", direction: "desc" });
 
   const [reviewSearch, setReviewSearch] = useState("");
-  const [reviewSort, setReviewSort] = useSort<"diner" | "rating" | "when">({ key: "when", direction: "desc" });
+  const reviewSort = useSort<"diner" | "rating" | "when">({ key: "when", direction: "desc" });
 
   const [assistSearch, setAssistSearch] = useState("");
-  const [assistSort, setAssistSort] = useSort<"type" | "status" | "time">({ key: "time", direction: "desc" });
+  const assistSort = useSort<"type" | "status" | "time">({ key: "time", direction: "desc" });
 
   const [menuReqSearch, setMenuReqSearch] = useState("");
-  const [menuReqSort, setMenuReqSort] = useSort<"name" | "status">({ key: "name", direction: "asc" });
+  const menuReqSort = useSort<"name" | "status">({ key: "name", direction: "asc" });
 
   const handleSetDisabled = async (disabled: boolean) => {
     if (!id || modBusy) return;
