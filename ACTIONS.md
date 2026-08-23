@@ -33,8 +33,8 @@
 ## Progress
 | Phase | Status |
 |-------|--------|
-| 1. Deploy & Fix | 🔄 In progress |
-| 2. Cleanup | ⏳ Pending |
-| 3. Mobile | ⏳ Pending |
-| 4. Stress Seed | ⏳ Pending |
-| 5. README | ⏳ Pending |
+| 1. Deploy & Fix | ✅ Done |
+| 2. Cleanup | ✅ Done |
+| 3. Mobile | ⏳ Needs local build env |
+| 4. Stress Seed | ✅ Done |
+| 5. README | ✅ Done |
