@@ -208,14 +208,12 @@ export const myPresence = query({
     const myPresence = presences.find((p) => p.userId === userId);
     let viewerTier: "booked" | "checked_in" | "seated" = "booked";
     if (myPresence) {
-      const tier = myPresence.accessTier ?? (myPresence.visible ? "checked_in" : "booked");
-      if (tier === "checked_in") {
-        // Find the viewer's booking to check checkedInAt
+      const tier = myPresence.accessTier ?? (myPresence.visible ? "checked_in" : "booked");        if (tier === "checked_in") {
+        // Compute tier on-the-fly without writing to DB (queries can't write).
+        // The DB is promoted lazily on the next setVisibility call.
         const myBooking = await safeGet<Doc<"bookings">>(ctx, myPresence.bookingId);
         if (myBooking?.checkedInAt && Date.now() - myBooking.checkedInAt >= SEATED_THRESHOLD_MS) {
           viewerTier = "seated";
-          // Promote in the DB (fire-and-forget, don't block the query)
-          await ctx.db.patch(myPresence._id, { accessTier: "seated", tierUpdatedAt: Date.now() });
         } else {
           viewerTier = "checked_in";
         }
@@ -440,12 +438,21 @@ export const setVisibility = mutation({
       .query("dinerPresence")
       .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
       .first();
+    // Determine the appropriate access tier for this mutation (write context).
+    const SEATED_THRESHOLD_MS = 15 * 60 * 1000;
+    let newTier: "checked_in" | "seated" | undefined;
+    if (visible && booking.checkedInAt && now - booking.checkedInAt >= SEATED_THRESHOLD_MS) {
+      newTier = "seated"; // already checked in 15+ min ago
+    } else if (visible) {
+      newTier = "checked_in";
+    }
+
     if (existing) {
       const patch: Record<string, unknown> = { updatedAt: now };
       if (existing.visible !== visible) patch.visible = visible;
-      // Soft gate: promote to "checked_in" tier on first visibility
-      if (visible && !existing.accessTier) {
-        patch.accessTier = "checked_in";
+      // Soft gate: promote tier if needed (checked_in → seated, or first set)
+      if (newTier && existing.accessTier !== newTier) {
+        patch.accessTier = newTier;
         patch.tierUpdatedAt = now;
       }
       if (Object.keys(patch).length > 1) {
@@ -458,8 +465,8 @@ export const setVisibility = mutation({
       restaurantId: booking.restaurantId,
       userId,
       visible,
-      accessTier: visible ? "checked_in" : undefined,
-      tierUpdatedAt: visible ? now : undefined,
+      accessTier: newTier,
+      tierUpdatedAt: newTier ? now : undefined,
       updatedAt: now,
     });
     return await ctx.db.get(id);
