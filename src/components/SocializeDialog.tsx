@@ -141,6 +141,11 @@ export function SocializeDialog({
 
   const myPresence = presences?.find((p) => p.bookingId === booking?._id);
   const visible = myPresence?.visible ?? false;
+  const checkedIn = !!booking?.checkedInAt;
+
+  // Soft gate: derive viewer's access tier from presence data
+  const viewerTier = (myPresence?.accessTier as "booked" | "checked_in" | "seated" | undefined)
+    ?? (visible ? "checked_in" : "booked");
 
   const gifts = (catalog ?? []) as GiftLike[];
   const openCount = (diners ?? []).length;
@@ -248,8 +253,17 @@ export function SocializeDialog({
               <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground">
                 <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
                 <span>
-                  Set your visibility now so you're ready on the day. Other diners will only see you
-                  when your booking date arrives.
+                  Socialize is available on the day of your visit. Check in when you arrive to go
+                  visible and start connecting with other diners.
+                </span>
+              </div>
+            )}
+            {isToday && !checkedIn && (
+              <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300">
+                <Sparkles className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  Check in at the restaurant to go visible. This ensures only real diners appear in
+                  the Socialize room.
                 </span>
               </div>
             )}
@@ -267,14 +281,16 @@ export function SocializeDialog({
                     {visible ? "Visible in the room" : "Invisible right now"}
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                    {visible
-                      ? "Other diners here can see you and send you a drink or dessert."
-                      : "No one here can see you — and you won't receive gifts."}
+                    {!checkedIn
+                      ? "Check in at the restaurant to enable visibility."
+                      : visible
+                        ? "Other diners here can see you and send you a drink or dessert."
+                        : "No one here can see you — and you won't receive gifts."}
                   </p>
                 </div>
                 <Switch
                   checked={visible}
-                  disabled={busy === "visibility"}
+                  disabled={busy === "visibility" || !checkedIn}
                   onCheckedChange={handleToggleVisible}
                   aria-label="Toggle Socialize visibility"
                 />
@@ -291,7 +307,7 @@ export function SocializeDialog({
             </div>
 
             {/* Taste Twins — diners whose preferences match yours */}
-            {(twins ?? []).length > 0 && (
+            {(twins ?? []).length > 0 && viewerTier === "seated" && (
               <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-primary">
                   <Sparkles className="size-3.5" /> Your taste twins
@@ -324,6 +340,17 @@ export function SocializeDialog({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+
+            {/* Tier indicator */}
+            {checkedIn && viewerTier === "checked_in" && (
+              <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground">
+                <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
+                <span>
+                  You're seeing first names. Stay seated for 15 minutes to unlock full profiles
+                  and Taste Twins matching.
+                </span>
               </div>
             )}
 

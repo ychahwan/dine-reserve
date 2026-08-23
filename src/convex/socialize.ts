@@ -196,10 +196,36 @@ export const myPresence = query({
       if (!attending) return [];
     }
 
+    // Load all presences at this restaurant (including the viewer's own)
     const presences = await ctx.db
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
       .collect();
+
+    // Soft gate (Idea #3): determine the viewer's access tier.
+    // Lazily promote "checked_in" → "seated" if checked in >15 min ago.
+    const SEATED_THRESHOLD_MS = 15 * 60 * 1000;
+    const myPresence = presences.find((p) => p.userId === userId);
+    let viewerTier: "booked" | "checked_in" | "seated" = "booked";
+    if (myPresence) {
+      const tier = myPresence.accessTier ?? (myPresence.visible ? "checked_in" : "booked");
+      if (tier === "checked_in") {
+        // Find the viewer's booking to check checkedInAt
+        const myBooking = await safeGet<Doc<"bookings">>(ctx, myPresence.bookingId);
+        if (myBooking?.checkedInAt && Date.now() - myBooking.checkedInAt >= SEATED_THRESHOLD_MS) {
+          viewerTier = "seated";
+          // Promote in the DB (fire-and-forget, don't block the query)
+          await ctx.db.patch(myPresence._id, { accessTier: "seated", tierUpdatedAt: Date.now() });
+        } else {
+          viewerTier = "checked_in";
+        }
+      } else {
+        viewerTier = tier;
+      }
+    } else if (isOwner) {
+      viewerTier = "seated"; // owners see full data
+    }
+
     let visible = presences.filter(
       (p) => p.visible && p.userId !== userId,
     );
@@ -245,11 +271,35 @@ export const myPresence = query({
         if (!booking || booking.status !== "confirmed" || booking.date !== today) return null;
         // MinVisits: hide diners below the threshold
         if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits) return null;
+
+        // Soft gate (Idea #3): return different data based on viewer's tier.
+        const name = users[i]?.name ?? "Guest";
+        const firstName = name.split(" ")[0] ?? name;
+
+        if (viewerTier === "booked") {
+          // Pre-check-in: show nothing — viewer can't see the room yet
+          return null;
+        }
+
+        if (viewerTier === "checked_in") {
+          // Just arrived: names only, no photos, no preferences
+          return {
+            _id: p._id,
+            userId: p.userId,
+            updatedAt: p.updatedAt,
+            name: firstName,
+            image: undefined,
+            checkedIn: !!booking.checkedInAt,
+            booking: { time: booking.time },
+          };
+        }
+
+        // Seated tier: full profiles
         return {
           _id: p._id,
           userId: p.userId,
           updatedAt: p.updatedAt,
-          name: users[i]?.name ?? "Guest",
+          name,
           image: users[i]?.image ?? undefined,
           checkedIn: !!booking.checkedInAt,
           booking: {
@@ -294,6 +344,15 @@ export const tasteTwins = query({
       );
       if (!attending) return [];
     }
+
+    // Soft gate (Idea #3): Taste Twins only available at "seated" tier.
+    const viewerPresences = await ctx.db
+      .query("dinerPresence")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .collect();
+    const viewerPresence = viewerPresences.find((p) => p.restaurantId === restaurantId);
+    const viewerTier = viewerPresence?.accessTier ?? (viewerPresence?.visible ? "checked_in" : "booked");
+    if (viewerTier !== "seated" && !isOwner) return [];
 
     const me = await safeGet<Doc<"users">>(ctx, userId);
     const myPrefs = me?.prefs;
@@ -376,13 +435,21 @@ export const setVisibility = mutation({
     if (userId === null) throw new Error("Please sign in.");
     const booking = await requireCheckedInBooking(ctx, userId, bookingId);
 
+    const now = Date.now();
     const existing = await ctx.db
       .query("dinerPresence")
       .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
       .first();
     if (existing) {
-      if (existing.visible !== visible) {
-        await ctx.db.patch(existing._id, { visible, updatedAt: Date.now() });
+      const patch: Record<string, unknown> = { updatedAt: now };
+      if (existing.visible !== visible) patch.visible = visible;
+      // Soft gate: promote to "checked_in" tier on first visibility
+      if (visible && !existing.accessTier) {
+        patch.accessTier = "checked_in";
+        patch.tierUpdatedAt = now;
+      }
+      if (Object.keys(patch).length > 1) {
+        await ctx.db.patch(existing._id, patch);
       }
       return await ctx.db.get(existing._id);
     }
@@ -391,7 +458,9 @@ export const setVisibility = mutation({
       restaurantId: booking.restaurantId,
       userId,
       visible,
-      updatedAt: Date.now(),
+      accessTier: visible ? "checked_in" : undefined,
+      tierUpdatedAt: visible ? now : undefined,
+      updatedAt: now,
     });
     return await ctx.db.get(id);
   },

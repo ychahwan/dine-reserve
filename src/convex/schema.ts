@@ -515,6 +515,10 @@ const schema = defineSchema(
       userId: v.id("users"),
       visible: v.boolean(),
       updatedAt: v.number(),
+      // Soft gate (Idea #3): progressive access tiers.
+      // "booked" = pre-set only, "checked_in" = names visible, "seated" = full profiles + Taste Twins
+      accessTier: v.optional(v.union(v.literal("booked"), v.literal("checked_in"), v.literal("seated"))),
+      tierUpdatedAt: v.optional(v.number()),
     })
       .index("by_restaurant", ["restaurantId"])
       .index("by_booking", ["bookingId"])
