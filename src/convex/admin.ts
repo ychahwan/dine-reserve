@@ -397,6 +397,64 @@ export const setUserDisabled = mutation({
 });
 
 /**
+ * Admin-only: create a new user account with phone, name, and temp password.
+ * Creates both the user doc and the password auth account.
+ */
+export const createUser = mutation({
+  args: {
+    phone: v.string(),
+    name: v.string(),
+    role: v.optional(v.union(v.literal("customer"), v.literal("owner"))),
+    tempPassword: v.string(),
+  },
+  handler: async (ctx, { phone, name, role, tempPassword }) => {
+    const { userId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "createUser",
+      userId,
+      limit: 30,
+      windowMs: 60 * 60_000,
+    });
+    if (tempPassword.length < 8) {
+      throw new Error("Temporary password must be at least 8 characters.");
+    }
+    const cleanPhone = normalizePhone(phone);
+    if (!cleanPhone || cleanPhone.length < 8 || !/^\+\d+$/.test(cleanPhone)) {
+      throw new Error("Enter a valid phone number (e.g. +961 71 123 456).");
+    }
+    const cleanName = name.trim().slice(0, 80);
+    if (!cleanName) throw new Error("Name is required.");
+
+    const { user } = await createAccount(ctx as never, {
+      provider: "password",
+      account: { id: cleanPhone, secret: tempPassword },
+      profile: {
+        email: cleanPhone,
+        phone: cleanPhone,
+        name: cleanName,
+      },
+      shouldLinkViaEmail: false,
+      shouldLinkViaPhone: true,
+    });
+
+    await ctx.db.patch(user._id, {
+      role: role ?? "customer",
+      onboarded: true,
+      mustChangePassword: true,
+      name: cleanName,
+      phone: cleanPhone,
+    });
+
+    await logAdminAction(ctx, userId, "createUser", {
+      targetUserId: user._id as unknown as string,
+      details: JSON.stringify({ phone: cleanPhone, name: cleanName, role: role ?? "customer" }),
+    });
+
+    return await ctx.db.get(user._id);
+  },
+});
+
+/**
  * Admin-only: bulk delete multiple users (GDPR-style erasure).
  * Skips admins and users who own restaurants. Returns counts.
  */

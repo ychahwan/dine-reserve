@@ -4,10 +4,17 @@ import { useMutation, useQuery } from "convex/react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Ban, Search, Trash2, Users } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Ban, Plus, Search, Trash2, UserPlus } from "lucide-react";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -18,7 +25,6 @@ import {
 } from "@/components/ui/table";
 import { roleBadge, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
 import { formatPrice } from "@/lib/format";
-import { filterAdminUsersByPhone } from "@/lib/admin-user-filters";
 import { useMemo, useState } from "react";
 import {
   useTablePagination,
@@ -52,19 +58,51 @@ function extractValue(row: UserRow, key: SortKey): string | number {
 
 export default function AdminUsers() {
   const rows = useQuery(api.adminView.listUsers);
-  const [phoneQuery, setPhoneQuery] = useState("");
-  const { sort, toggleSort } = useSort<SortKey>({ key: "name", direction: "asc" });
   const bulkDelete = useMutation(api.admin.bulkDeleteUsers);
+  const createUser = useMutation(api.admin.createUser);
+
+  // Filters
+  const [nameQuery, setNameQuery] = useState("");
+  const [phoneQuery, setPhoneQuery] = useState("");
+  const [roleFilter, setRoleFilter] = useState<string>("all");
+
+  const { sort, toggleSort } = useSort<SortKey>({ key: "name", direction: "asc" });
 
   // Selection state
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const filteredRows = useMemo(
-    () => filterAdminUsersByPhone(rows ?? [], phoneQuery),
-    [rows, phoneQuery],
-  );
+  // Add user dialog
+  const [addOpen, setAddOpen] = useState(false);
+  const [addPhone, setAddPhone] = useState("");
+  const [addName, setAddName] = useState("");
+  const [addRole, setAddRole] = useState<"customer" | "owner">("customer");
+  const [addPassword, setAddPassword] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+
+  // Filtering
+  const filteredRows = useMemo(() => {
+    let list = rows ?? [];
+
+    if (nameQuery.trim()) {
+      const q = nameQuery.trim().toLowerCase();
+      list = list.filter((u) => (u.name ?? "").toLowerCase().includes(q));
+    }
+
+    if (phoneQuery.trim()) {
+      const digits = phoneQuery.replace(/\D/g, "");
+      if (digits) {
+        list = list.filter((u) => (u.phone ?? "").replace(/\D/g, "").includes(digits));
+      }
+    }
+
+    if (roleFilter !== "all") {
+      list = list.filter((u) => u.role === roleFilter);
+    }
+
+    return list;
+  }, [rows, nameQuery, phoneQuery, roleFilter]);
 
   const sortedRows = useMemo(
     () => sortItems(filteredRows, sort.key, sort.direction, extractValue),
@@ -129,6 +167,31 @@ export default function AdminUsers() {
     }
   };
 
+  const handleAddUser = async () => {
+    if (!addPhone.trim() || !addName.trim() || !addPassword.trim() || addBusy) return;
+    setAddBusy(true);
+    try {
+      await createUser({
+        phone: addPhone.trim(),
+        name: addName.trim(),
+        role: addRole,
+        tempPassword: addPassword.trim(),
+      });
+      toast.success(`User "${addName.trim()}" created. They must set a new password on first login.`);
+      setAddOpen(false);
+      setAddPhone("");
+      setAddName("");
+      setAddRole("customer");
+      setAddPassword("");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not create user.");
+    } finally {
+      setAddBusy(false);
+    }
+  };
+
+  const hasFilters = nameQuery || phoneQuery || roleFilter !== "all";
+
   if (rows === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -143,10 +206,14 @@ export default function AdminUsers() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Users</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            All {rows.length} accounts. Select one to see their bookings, orders and interactions.
+            {filteredRows.length} of {rows.length} accounts
+            {hasFilters ? " (filtered)" : ""}. Select one to see their bookings, orders and interactions.
           </p>
         </div>
         <div className="flex items-center gap-2">
+          <Button size="sm" onClick={() => setAddOpen(true)}>
+            <UserPlus className="size-3.5" /> Add user
+          </Button>
           {someSelected && (
             <Button
               variant="destructive"
@@ -157,9 +224,6 @@ export default function AdminUsers() {
               <Trash2 className="size-3.5" /> Delete ({selected.size})
             </Button>
           )}
-          <Badge variant="outline" className="w-fit tabular-nums">
-            {filteredRows.length} of {rows.length} shown
-          </Badge>
         </div>
       </div>
 
@@ -167,29 +231,66 @@ export default function AdminUsers() {
         <EmptyNote>No users yet.</EmptyNote>
       ) : (
         <>
+          {/* Filters */}
           <Card className="gap-4 py-4 shadow-none">
             <CardHeader className="px-4">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Search className="size-4 text-primary" /> Find a user
               </CardTitle>
-              <CardDescription>Search by phone number. Spaces, dashes, and parentheses are ignored.</CardDescription>
+              <CardDescription>Search by name, phone, or filter by role.</CardDescription>
             </CardHeader>
             <CardContent className="px-4">
-              <Field>
-                <FieldLabel htmlFor="user-phone-filter">Phone number</FieldLabel>
-                <Input
-                  id="user-phone-filter"
-                  type="search"
-                  inputMode="tel"
-                  autoComplete="off"
-                  value={phoneQuery}
-                  onChange={(event) => setPhoneQuery(event.target.value)}
-                  placeholder="Search +961 76 683 661"
-                />
-              </Field>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor="user-name-filter" className="text-xs">Name</Label>
+                  <Input
+                    id="user-name-filter"
+                    type="search"
+                    autoComplete="off"
+                    value={nameQuery}
+                    onChange={(e) => setNameQuery(e.target.value)}
+                    placeholder="Search by name…"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor="user-phone-filter" className="text-xs">Phone</Label>
+                  <Input
+                    id="user-phone-filter"
+                    type="search"
+                    inputMode="tel"
+                    autoComplete="off"
+                    value={phoneQuery}
+                    onChange={(e) => setPhoneQuery(e.target.value)}
+                    placeholder="+961 76 683 661"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Role</Label>
+                  <Select value={roleFilter} onValueChange={setRoleFilter}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="All roles" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All roles</SelectItem>
+                      <SelectItem value="admin">Admin</SelectItem>
+                      <SelectItem value="owner">Owner</SelectItem>
+                      <SelectItem value="customer">Diner</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              {hasFilters && (
+                <button
+                  className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  onClick={() => { setNameQuery(""); setPhoneQuery(""); setRoleFilter("all"); }}
+                >
+                  Clear filters
+                </button>
+              )}
             </CardContent>
           </Card>
 
+          {/* Table */}
           <div className="overflow-hidden rounded-xl border bg-card">
           <Table>
             <TableHeader>
@@ -216,7 +317,7 @@ export default function AdminUsers() {
               {pageItems.length === 0 ? (
                 <TableRow>
                   <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                    No users match that phone number.
+                    {hasFilters ? "No users match your filters." : "No users yet."}
                   </TableCell>
                 </TableRow>
               ) : pageItems.map((u) => (
@@ -290,6 +391,77 @@ export default function AdminUsers() {
             <Button variant="destructive" onClick={handleBulkDelete} disabled={busy}>
               {busy ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
               Delete {selected.size} user{selected.size === 1 ? "" : "s"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Add user dialog */}
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <UserPlus className="size-5 text-primary" /> Add new user
+            </DialogTitle>
+            <DialogDescription>
+              Create a new account. The user will need to set a new password on first login.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-1.5">
+              <Label htmlFor="add-phone">Phone number *</Label>
+              <Input
+                id="add-phone"
+                type="tel"
+                inputMode="tel"
+                value={addPhone}
+                onChange={(e) => setAddPhone(e.target.value)}
+                placeholder="+961 71 123 456"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-name">Name *</Label>
+              <Input
+                id="add-name"
+                value={addName}
+                onChange={(e) => setAddName(e.target.value)}
+                placeholder="Full name"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Role</Label>
+              <Select value={addRole} onValueChange={(v) => setAddRole(v as "customer" | "owner")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="customer">Diner</SelectItem>
+                  <SelectItem value="owner">Restaurant owner</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="add-password">Temporary password *</Label>
+              <Input
+                id="add-password"
+                type="password"
+                value={addPassword}
+                onChange={(e) => setAddPassword(e.target.value)}
+                placeholder="Min 8 characters"
+              />
+              <p className="text-[11px] text-muted-foreground">User must change this on first login.</p>
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={addBusy}>
+              Cancel
+            </Button>
+            <Button
+              onClick={handleAddUser}
+              disabled={!addPhone.trim() || !addName.trim() || addPassword.trim().length < 8 || addBusy}
+            >
+              {addBusy ? <Spinner className="size-4" /> : <UserPlus className="size-4" />}
+              Create user
             </Button>
           </DialogFooter>
         </DialogContent>
