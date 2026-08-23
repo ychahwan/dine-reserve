@@ -179,10 +179,14 @@ export default function AdminRestaurantDetail() {
   // Tab filter state
   const [bookingSearch, setBookingSearch] = useState("");
   const [bookingStatus, setBookingStatus] = useState("all");
+  const [bookingDateFrom, setBookingDateFrom] = useState("");
+  const [bookingDateTo, setBookingDateTo] = useState("");
   const [bookingSort, setBookingSort] = useSort<"when" | "diner" | "party" | "status">({ key: "when", direction: "desc" });
 
   const [orderSearch, setOrderSearch] = useState("");
   const [orderStatus, setOrderStatus] = useState("all");
+  const [orderDateFrom, setOrderDateFrom] = useState("");
+  const [orderDateTo, setOrderDateTo] = useState("");
   const [orderSort, setOrderSort] = useSort<"diner" | "total" | "status">({ key: "total", direction: "desc" });
 
   const [reviewSearch, setReviewSearch] = useState("");
@@ -237,8 +241,10 @@ export default function AdminRestaurantDetail() {
       );
     }
     if (bookingStatus !== "all") list = list.filter((b) => b.status === bookingStatus);
+    if (bookingDateFrom) list = list.filter((b) => b.date >= bookingDateFrom);
+    if (bookingDateTo) list = list.filter((b) => b.date <= bookingDateTo);
     return list;
-  }, [data?.bookings, bookingSearch, bookingStatus]);
+  }, [data?.bookings, bookingSearch, bookingStatus, bookingDateFrom, bookingDateTo]);
 
   const filteredOrders = useMemo(() => {
     let list = data?.orders ?? [];
@@ -249,8 +255,17 @@ export default function AdminRestaurantDetail() {
       );
     }
     if (orderStatus !== "all") list = list.filter((o) => o.status === orderStatus);
+    // Orders have createdAt (ms timestamp) — filter by date range
+    if (orderDateFrom) {
+      const from = new Date(orderDateFrom + "T00:00:00").getTime();
+      list = list.filter((o) => o.createdAt >= from);
+    }
+    if (orderDateTo) {
+      const to = new Date(orderDateTo + "T23:59:59").getTime();
+      list = list.filter((o) => o.createdAt <= to);
+    }
     return list;
-  }, [data?.orders, orderSearch, orderStatus]);
+  }, [data?.orders, orderSearch, orderStatus, orderDateFrom, orderDateTo]);
 
   const filteredReviews = useMemo(() => {
     let list = data?.reviews ?? [];
@@ -388,7 +403,7 @@ export default function AdminRestaurantDetail() {
           <Card className="rounded-2xl border-border/70">
             <CardContent className="p-4">
               <div className="mb-3 flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">{filteredBookings.length} bookings{bookingSearch || bookingStatus !== "all" ? " (filtered)" : ""}</p>
+                <p className="text-xs text-muted-foreground">{filteredBookings.length} bookings{bookingSearch || bookingStatus !== "all" || bookingDateFrom || bookingDateTo ? " (filtered)" : ""}</p>
                 <Button variant="outline" size="sm" onClick={handleExportBookings} disabled={filteredBookings.length === 0}>
                   <Download className="size-3.5" /> CSV
                 </Button>
@@ -427,16 +442,22 @@ export default function AdminRestaurantDetail() {
                 )}
                 emptyText="No bookings."
                 filters={
-                  <Select value={bookingStatus} onValueChange={setBookingStatus}>
-                    <SelectTrigger className="h-8 w-auto rounded-full text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="no_show">No-show</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <>
+                    <Select value={bookingStatus} onValueChange={setBookingStatus}>
+                      <SelectTrigger className="h-8 w-auto rounded-full text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All statuses</SelectItem>
+                        <SelectItem value="confirmed">Confirmed</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="no_show">No-show</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-xs text-muted-foreground">From</span>
+                    <input type="date" value={bookingDateFrom} onChange={(e) => setBookingDateFrom(e.target.value)} className="h-8 rounded-full border border-border bg-card px-2 text-xs text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">To</span>
+                    <input type="date" value={bookingDateTo} onChange={(e) => setBookingDateTo(e.target.value)} className="h-8 rounded-full border border-border bg-card px-2 text-xs text-muted-foreground" />
+                  </>
                 }
               />
             </CardContent>
@@ -448,7 +469,7 @@ export default function AdminRestaurantDetail() {
           <Card className="rounded-2xl border-border/70">
             <CardContent className="p-4">
               <div className="mb-3 flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">{filteredOrders.length} orders{orderSearch || orderStatus !== "all" ? " (filtered)" : ""}</p>
+                <p className="text-xs text-muted-foreground">{filteredOrders.length} orders{orderSearch || orderStatus !== "all" || orderDateFrom || orderDateTo ? " (filtered)" : ""}</p>
                 <Button variant="outline" size="sm" onClick={handleExportOrders} disabled={filteredOrders.length === 0}>
                   <Download className="size-3.5" /> CSV
                 </Button>
@@ -485,17 +506,23 @@ export default function AdminRestaurantDetail() {
                 )}
                 emptyText="No dine-in orders."
                 filters={
-                  <Select value={orderStatus} onValueChange={setOrderStatus}>
-                    <SelectTrigger className="h-8 w-auto rounded-full text-xs"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All statuses</SelectItem>
-                      <SelectItem value="open">Open</SelectItem>
-                      <SelectItem value="preparing">Preparing</SelectItem>
-                      <SelectItem value="served">Served</SelectItem>
-                      <SelectItem value="completed">Completed</SelectItem>
-                      <SelectItem value="cancelled">Cancelled</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  <>
+                    <Select value={orderStatus} onValueChange={setOrderStatus}>
+                      <SelectTrigger className="h-8 w-auto rounded-full text-xs"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All statuses</SelectItem>
+                        <SelectItem value="open">Open</SelectItem>
+                        <SelectItem value="preparing">Preparing</SelectItem>
+                        <SelectItem value="served">Served</SelectItem>
+                        <SelectItem value="completed">Completed</SelectItem>
+                        <SelectItem value="cancelled">Cancelled</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <span className="text-xs text-muted-foreground">From</span>
+                    <input type="date" value={orderDateFrom} onChange={(e) => setOrderDateFrom(e.target.value)} className="h-8 rounded-full border border-border bg-card px-2 text-xs text-muted-foreground" />
+                    <span className="text-xs text-muted-foreground">To</span>
+                    <input type="date" value={orderDateTo} onChange={(e) => setOrderDateTo(e.target.value)} className="h-8 rounded-full border border-border bg-card px-2 text-xs text-muted-foreground" />
+                  </>
                 }
               />
             </CardContent>
