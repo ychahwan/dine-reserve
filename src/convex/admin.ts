@@ -397,6 +397,43 @@ export const setUserDisabled = mutation({
 });
 
 /**
+ * Admin-only: bulk delete multiple users (GDPR-style erasure).
+ * Skips admins and users who own restaurants. Returns counts.
+ */
+export const bulkDeleteUsers = mutation({
+  args: { userIds: v.array(v.id("users")) },
+  handler: async (ctx, { userIds }) => {
+    const { userId: adminUserId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "bulkDeleteUsers",
+      userId: adminUserId,
+      limit: 10,
+      windowMs: 60 * 60_000,
+    });
+    const limited = userIds.slice(0, 50);
+    let deleted = 0;
+    const skipped: { id: string; reason: string }[] = [];
+    for (const userId of limited) {
+      if (userId === adminUserId) { skipped.push({ id: userId, reason: "self" }); continue; }
+      const target = await ctx.db.get(userId);
+      if (!target) { skipped.push({ id: userId, reason: "not_found" }); continue; }
+      if (target.role === "admin") { skipped.push({ id: userId, reason: "admin" }); continue; }
+      const owned = await ctx.db
+        .query("restaurants")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .collect();
+      if (owned.length > 0) { skipped.push({ id: userId, reason: "owns_restaurants" }); continue; }
+      await cascadeDeleteUser(ctx, userId);
+      deleted++;
+    }
+    await logAdminAction(ctx, adminUserId, "bulkDeleteUsers", {
+      details: JSON.stringify({ requested: userIds.length, deleted, skipped: skipped.length }),
+    });
+    return { deleted, skipped };
+  },
+});
+
+/**
  * Admin-only: permanently delete a user and all their data (GDPR-style
  * erasure). Cascades: reviews, bookings (+ their dine orders, assist
  * requests, notifications, presence, gifts), waitlist, dine-in history,

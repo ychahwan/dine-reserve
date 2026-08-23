@@ -1,9 +1,10 @@
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/convex/_generated/api";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
-import { Ban, Search } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Ban, Search, Trash2, Users } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
@@ -24,8 +25,17 @@ import {
   useSort,
   sortItems,
 } from "@/lib/use-table-pagination";
+import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
-type UserRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listUsers>>>[number];
+type UserRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listUsers>>[number]>;
 type SortKey = "name" | "role" | "phone" | "bookings" | "orders" | "reviews" | "spend";
 
 function extractValue(row: UserRow, key: SortKey): string | number {
@@ -44,6 +54,12 @@ export default function AdminUsers() {
   const rows = useQuery(api.adminView.listUsers);
   const [phoneQuery, setPhoneQuery] = useState("");
   const { sort, toggleSort } = useSort<SortKey>({ key: "name", direction: "asc" });
+  const bulkDelete = useMutation(api.admin.bulkDeleteUsers);
+
+  // Selection state
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
 
   const filteredRows = useMemo(
     () => filterAdminUsersByPhone(rows ?? [], phoneQuery),
@@ -62,6 +78,57 @@ export default function AdminUsers() {
     pageSize: 25,
   });
 
+  // Selection helpers
+  const allPageSelected = pageItems.length > 0 && pageItems.every((u) => selected.has(u._id));
+  const someSelected = selected.size > 0;
+
+  const toggleSelectAll = () => {
+    if (allPageSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const u of pageItems) next.delete(u._id);
+        return next;
+      });
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        for (const u of pageItems) next.add(u._id);
+        return next;
+      });
+    }
+  };
+
+  const toggleRow = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    if (selected.size === 0 || busy) return;
+    setBusy(true);
+    try {
+      const ids = Array.from(selected) as never[];
+      const res = await bulkDelete({ userIds: ids });
+      if (res.deleted > 0) {
+        toast.success(`Deleted ${res.deleted} user${res.deleted === 1 ? "" : "s"}.`);
+      }
+      if (res.skipped.length > 0) {
+        const reasons = res.skipped.map((s) => s.reason).join(", ");
+        toast.warning(`Skipped ${res.skipped.length} user(s): ${reasons}`);
+      }
+      setSelected(new Set());
+      setConfirmBulkDelete(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Bulk delete failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
   if (rows === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -79,9 +146,21 @@ export default function AdminUsers() {
             All {rows.length} accounts. Select one to see their bookings, orders and interactions.
           </p>
         </div>
-        <Badge variant="outline" className="w-fit tabular-nums">
-          {filteredRows.length} of {rows.length} shown
-        </Badge>
+        <div className="flex items-center gap-2">
+          {someSelected && (
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setConfirmBulkDelete(true)}
+              disabled={busy}
+            >
+              <Trash2 className="size-3.5" /> Delete ({selected.size})
+            </Button>
+          )}
+          <Badge variant="outline" className="w-fit tabular-nums">
+            {filteredRows.length} of {rows.length} shown
+          </Badge>
+        </div>
       </div>
 
       {rows.length === 0 ? (
@@ -115,6 +194,15 @@ export default function AdminUsers() {
           <Table>
             <TableHeader>
               <TableRow>
+                <TableHead className="w-10">
+                  <input
+                    type="checkbox"
+                    checked={allPageSelected}
+                    onChange={toggleSelectAll}
+                    className="size-4 rounded border-border accent-primary cursor-pointer"
+                    aria-label="Select all on this page"
+                  />
+                </TableHead>
                 <SortableHead label="User" sortKey="name" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
                 <SortableHead label="Role" sortKey="role" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
                 <SortableHead label="Contact" sortKey="phone" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
@@ -127,12 +215,21 @@ export default function AdminUsers() {
             <TableBody>
               {pageItems.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-sm text-muted-foreground">
+                  <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
                     No users match that phone number.
                   </TableCell>
                 </TableRow>
               ) : pageItems.map((u) => (
-                <TableRow key={u._id}>
+                <TableRow key={u._id} className={selected.has(u._id) ? "bg-primary/5" : undefined}>
+                  <TableCell>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(u._id)}
+                      onChange={() => toggleRow(u._id)}
+                      className="size-4 rounded border-border accent-primary cursor-pointer"
+                      aria-label={`Select ${u.name ?? "user"}`}
+                    />
+                  </TableCell>
                   <TableCell>
                     <Link to={`/admin/users/${u._id}`} className="group block">
                       <p className="flex items-center gap-2 font-medium group-hover:text-primary">
@@ -174,6 +271,29 @@ export default function AdminUsers() {
           />
         </>
       )}
+
+      {/* Bulk delete confirmation dialog */}
+      <Dialog open={confirmBulkDelete} onOpenChange={setConfirmBulkDelete}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Trash2 className="size-5 text-destructive" /> Delete {selected.size} user{selected.size === 1 ? "" : "s"}?
+            </DialogTitle>
+            <DialogDescription>
+              This will permanently delete all data for the selected users (bookings, orders, reviews, loyalty, auth accounts). Users who own restaurants will be skipped.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmBulkDelete(false)} disabled={busy}>
+              Cancel
+            </Button>
+            <Button variant="destructive" onClick={handleBulkDelete} disabled={busy}>
+              {busy ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
+              Delete {selected.size} user{selected.size === 1 ? "" : "s"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
