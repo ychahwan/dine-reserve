@@ -494,6 +494,26 @@ export const setCancellationPolicy = mutation({
     parseOrThrow(cancellationPolicySchema, hours);
     await ctx.db.patch(restaurantId, {
       cancellationPolicyHours: hours === 0 ? undefined : hours,
+    });    return await ctx.db.get(restaurantId);
+  },
+});
+
+/** Owner-only: update Socialize room settings for this restaurant. */
+export const updateSocializeSettings = mutation({
+  args: {
+    restaurantId: v.id("restaurants"),
+    enabled: v.boolean(),
+    minVisits: v.number(),
+    blockedUserIds: v.array(v.id("users")),
+  },
+  handler: async (ctx, { restaurantId, enabled, minVisits, blockedUserIds }) => {
+    await requireOwner(ctx, restaurantId);
+    await ctx.db.patch(restaurantId, {
+      socialize: {
+        enabled,
+        minVisits: Math.max(0, Math.min(50, Math.floor(minVisits))),
+        blockedUserIds: blockedUserIds.slice(0, 200),
+      },
     });
     return await ctx.db.get(restaurantId);
   },

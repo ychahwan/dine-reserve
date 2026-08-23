@@ -64,6 +64,22 @@ async function requireActiveBooking(
   return booking;
 }
 
+/**
+ * Like requireActiveBooking but also requires the diner to have checked in.
+ * Used by setVisibility so phantom bookings can't access the Socialize room.
+ */
+async function requireCheckedInBooking(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  bookingId: Id<"bookings">,
+) {
+  const booking = await requireActiveBooking(ctx, userId, bookingId);
+  if (!booking.checkedInAt) {
+    throw new Error("Please check in at the restaurant before going visible.");
+  }
+  return booking;
+}
+
 /** Load a booking that belongs to the caller, is confirmed, and is today. */
 async function requireActiveTodayBooking(
   ctx: MutationCtx,
@@ -141,8 +157,7 @@ export const myPresence = query({
  * Only confirmed bookings for today appear, so the room never shows stale
  * or past visits. The caller's own presence is excluded (they already know
  * they're here).
- */
-export const visibleDiners = query({
+ */export const visibleDiners = query({
   args: { restaurantId: v.id("restaurants"), clientDate: v.optional(v.string()) },
   handler: async (ctx, { restaurantId, clientDate }) => {
     const userId = await getAuthUserId(ctx);
@@ -160,6 +175,15 @@ export const visibleDiners = query({
     // from enumerating diner identities at an arbitrary restaurant.
     const restaurant = await ctx.db.get(restaurantId);
     const isOwner = !!restaurant && restaurant.ownerId === userId;
+
+    // Restaurant-side controls (Idea #8): if Socialize is disabled at this
+    // venue, return an empty room. Owners can still see settings.
+    const socializeSettings = restaurant?.socialize;
+    if (socializeSettings && !socializeSettings.enabled && !isOwner) return [];
+
+    // Block list: if the caller is blocked by this restaurant, they see nothing.
+    if (socializeSettings?.blockedUserIds?.includes(userId as never) && !isOwner) return [];
+
     if (!isOwner) {
       const myBookings = await ctx.db
         .query("bookings")
@@ -167,9 +191,7 @@ export const visibleDiners = query({
         .collect();
       const attending = myBookings.some(
         (b) =>
-          b.restaurantId === restaurantId &&
-          b.status === "confirmed" &&
-          b.date === today,
+          b.restaurantId === restaurantId && b.status === "confirmed" && b.date === today,
       );
       if (!attending) return [];
     }
@@ -178,18 +200,51 @@ export const visibleDiners = query({
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
       .collect();
-    const visible = presences.filter(
+    let visible = presences.filter(
       (p) => p.visible && p.userId !== userId,
     );
+
+    // Block list: hide blocked users from the room.
+    if (socializeSettings?.blockedUserIds?.length) {
+      const blocked = new Set(socializeSettings.blockedUserIds);
+      visible = visible.filter((p) => !blocked.has(p.userId as never));
+    }
     const [users, bookings] = await Promise.all([
       Promise.all(visible.map((p) => safeGet<Doc<"users">>(ctx, p.userId))),
       Promise.all(visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId))),
     ]);
+
+    // MinVisits filter (Idea #8): if the restaurant requires N completed
+    // visits, count each visible diner's completed bookings and hide those
+    // who don't meet the threshold.
+    const minVisits = socializeSettings?.minVisits ?? 0;
+    let visitCounts: Map<string, number> | null = null;
+    if (minVisits > 0) {
+      const visibleUserIds = [...new Set(visible.map((p) => p.userId))];
+      const allBookings = await Promise.all(
+        visibleUserIds.map((uid) =>
+          ctx.db
+            .query("bookings")
+            .withIndex("by_user", (q) => q.eq("userId", uid as never))
+            .collect(),
+        ),
+      );
+      visitCounts = new Map();
+      visibleUserIds.forEach((uid, i) => {
+        const completed = allBookings[i]!.filter(
+          (b) => b.status === "completed" && b.restaurantId === restaurantId,
+        ).length;
+        visitCounts!.set(uid, completed);
+      });
+    }
+
     return visible
       .map((p, i) => {
         const booking = bookings[i];
         // presence without a live confirmed booking today is not shown
         if (!booking || booking.status !== "confirmed" || booking.date !== today) return null;
+        // MinVisits: hide diners below the threshold
+        if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits) return null;
         return {
           _id: p._id,
           userId: p.userId,
@@ -319,7 +374,7 @@ export const setVisibility = mutation({
   handler: async (ctx, { bookingId, visible }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
-    const booking = await requireActiveBooking(ctx, userId, bookingId);
+    const booking = await requireCheckedInBooking(ctx, userId, bookingId);
 
     const existing = await ctx.db
       .query("dinerPresence")

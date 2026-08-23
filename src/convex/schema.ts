@@ -220,6 +220,14 @@ const schema = defineSchema(
       // are hidden from search/explore, treated as closed for availability,
       // and refuse new bookings — the owner can still see them.
       disabled: v.optional(v.boolean()),
+      // Socialize room controls (Idea #8): the owner decides whether the
+      // Socialize feature is active at this venue, sets a minimum completed-
+      // visit threshold for visibility, and can block specific users.
+      socialize: v.optional(v.object({
+        enabled: v.boolean(),
+        minVisits: v.number(), // 0 = any confirmed diner, N = need N+ completed visits
+        blockedUserIds: v.array(v.id("users")),
+      })),
       createdAt: v.number(),
     })
       .index("by_owner", ["ownerId"])

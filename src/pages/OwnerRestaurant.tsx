@@ -33,6 +33,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Spinner } from "@/components/ui/spinner";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
@@ -285,6 +286,7 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
   const data = useQuery(api.restaurants.get, { id: restaurantId as never });
   const update = useMutation(api.restaurants.update);
   const setCancellationPolicy = useMutation(api.restaurants.setCancellationPolicy);
+  const updateSocialize = useMutation(api.restaurants.updateSocializeSettings);
 
   const [form, setForm] = useState({
     name: "",
@@ -300,6 +302,8 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
     inside: true, outside: false, bar: false, smoking: false, parking: false, liveMusic: false, soloFriendly: false,
   });
   const [policyHours, setPolicyHours] = useState(0);
+  const [socEnabled, setSocEnabled] = useState(true);
+  const [socMinVisits, setSocMinVisits] = useState(0);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -326,6 +330,8 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
       soloFriendly: r.features.soloFriendly ?? false,
     });
     setPolicyHours(r.cancellationPolicyHours ?? 0);
+    setSocEnabled(r.socialize?.enabled ?? true);
+    setSocMinVisits(r.socialize?.minVisits ?? 0);
   }, [data]);
 
   const totalCapacity = (data?.sections ?? []).reduce((sum, s) => sum + s.capacity, 0);
@@ -362,6 +368,12 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
         },
       });
       await setCancellationPolicy({ restaurantId: restaurantId as never, hours: policyHours });
+      await updateSocialize({
+        restaurantId: restaurantId as never,
+        enabled: socEnabled,
+        minVisits: socMinVisits,
+        blockedUserIds: (data?.restaurant.socialize?.blockedUserIds ?? []) as never[],
+      });
       toast.success("Restaurant updated");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save changes.");
@@ -473,6 +485,46 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
               <p className="mt-1.5 text-xs text-muted-foreground">
                 Shown to diners before they book and when they cancel — helps cut no-shows.
               </p>
+            </div>
+
+            {/* Socialize settings */}
+            <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
+              <Label className="flex items-center gap-1.5">
+                <Users className="size-3.5 text-primary" /> Socialize room
+              </Label>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Control who can see each other in the Socialize room at your venue.
+              </p>
+              <div className="mt-3 space-y-3">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium">Enable Socialize</p>
+                    <p className="text-xs text-muted-foreground">Diners can go visible and send gifts to each other.</p>
+                  </div>
+                  <Switch checked={socEnabled} onCheckedChange={setSocEnabled} />
+                </div>
+                {socEnabled && (
+                  <div className="space-y-1.5">
+                    <Label className="text-xs">Minimum completed visits to be visible</Label>
+                    <div className="flex items-center gap-2">
+                      <Input
+                        type="number"
+                        min={0}
+                        max={50}
+                        value={socMinVisits}
+                        onChange={(e) => setSocMinVisits(Math.max(0, Math.min(50, Number(e.target.value))))}
+                        className="h-8 w-20 rounded-lg text-sm"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {socMinVisits === 0 ? "Any confirmed diner" : `${socMinVisits}+ completed visit${socMinVisits === 1 ? "" : "s"}`}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Set to 0 so any checked-in diner can be visible. Higher values restrict the room to returning customers.
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
 
             {error && (
