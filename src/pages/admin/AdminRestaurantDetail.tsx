@@ -165,6 +165,19 @@ type ReviewRow = Detail["reviews"][number];
 type AssistRow = Detail["assists"][number];
 type MenuReqRow = Detail["menuRequests"][number];
 
+// ── Date presets ──
+
+function dateKey(d: Date) {
+  return d.toISOString().slice(0, 10);
+}
+
+const DATE_PRESETS = [
+  { label: "Today", getRange: () => ({ from: dateKey(new Date()), to: dateKey(new Date()) }) },
+  { label: "Last 7 days", getRange: () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 6); return { from: dateKey(from), to: dateKey(to) }; } },
+  { label: "This month", getRange: () => { const now = new Date(); return { from: dateKey(new Date(now.getFullYear(), now.getMonth(), 1)), to: dateKey(now) }; } },
+  { label: "Last 30 days", getRange: () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 29); return { from: dateKey(from), to: dateKey(to) }; } },
+];
+
 // ── Main component ──
 
 export default function AdminRestaurantDetail() {
@@ -467,6 +480,22 @@ export default function AdminRestaurantDetail() {
                         <SelectItem value="cancelled">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
+                    {DATE_PRESETS.map((p) => {
+                      const r = p.getRange();
+                      const active = bookingDateFrom === r.from && bookingDateTo === r.to;
+                      return (
+                        <button
+                          key={p.label}
+                          onClick={() => { setBookingDateFrom(r.from); setBookingDateTo(r.to); }}
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                            active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
                     <span className="text-xs text-muted-foreground">From</span>
                     <input type="date" value={bookingDateFrom} onChange={(e) => setBookingDateFrom(e.target.value)} className="h-8 rounded-full border border-border bg-card px-2 text-xs text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">To</span>
@@ -532,6 +561,22 @@ export default function AdminRestaurantDetail() {
                         <SelectItem value="cancelled">Cancelled</SelectItem>
                       </SelectContent>
                     </Select>
+                    {DATE_PRESETS.map((p) => {
+                      const r = p.getRange();
+                      const active = orderDateFrom === r.from && orderDateTo === r.to;
+                      return (
+                        <button
+                          key={p.label}
+                          onClick={() => { setOrderDateFrom(r.from); setOrderDateTo(r.to); }}
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors",
+                            active ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {p.label}
+                        </button>
+                      );
+                    })}
                     <span className="text-xs text-muted-foreground">From</span>
                     <input type="date" value={orderDateFrom} onChange={(e) => setOrderDateFrom(e.target.value)} className="h-8 rounded-full border border-border bg-card px-2 text-xs text-muted-foreground" />
                     <span className="text-xs text-muted-foreground">To</span>
