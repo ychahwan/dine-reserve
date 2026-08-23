@@ -1018,6 +1018,7 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
 // ---------------------------------------------------------------------------
 
 type CustomerSummary = {
+  userId: string;
   name: string;
   phone?: string;
   email?: string;
@@ -1031,8 +1032,13 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
   const bookings = useQuery(api.bookings.byRestaurant, {
     restaurantId: restaurantId as never,
   });
+  const restaurant = useQuery(api.restaurants.get, { id: restaurantId as never });
+  const updateSocialize = useMutation(api.restaurants.updateSocializeSettings);
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"visits" | "name" | "lastVisit">("visits");
+  const [blocking, setBlocking] = useState<string | null>(null);
+
+  const blockedIds = new Set((restaurant?.restaurant.socialize?.blockedUserIds ?? []) as string[]);
 
   const customers = useMemo(() => {
     if (!bookings) return undefined;
@@ -1049,6 +1055,7 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
         if (b.email && !existing.email) existing.email = b.email;
       } else {
         map.set(key, {
+          userId: b.userId,
           name: b.name,
           phone: b.phone,
           email: b.email,
@@ -1081,6 +1088,27 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
     });
     return list;
   }, [customers, search, sortBy]);
+
+  const handleToggleBlock = async (userId: string) => {
+    if (blocking) return;
+    setBlocking(userId);
+    try {
+      const current = Array.from(blockedIds);
+      const isBlocked = blockedIds.has(userId);
+      const next = isBlocked ? current.filter((id) => id !== userId) : [...current, userId];
+      await updateSocialize({
+        restaurantId: restaurantId as never,
+        enabled: restaurant?.restaurant.socialize?.enabled ?? true,
+        minVisits: restaurant?.restaurant.socialize?.minVisits ?? 0,
+        blockedUserIds: next as never[],
+      });
+      toast.success(isBlocked ? "User unblocked" : "User blocked from Socialize");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update block list.");
+    } finally {
+      setBlocking(null);
+    }
+  };
 
   const handleExport = () => {
     if (!filtered) return;
@@ -1137,10 +1165,15 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
       ) : (
         <div className="space-y-2">
           {filtered.map((c) => (
-            <Card key={c.phone ?? c.name} className="rounded-2xl border-border/70 p-4 shadow-sm">
+            <Card key={c.phone ?? c.name} className={cn("rounded-2xl border-border/70 p-4 shadow-sm", blockedIds.has(c.userId) && "opacity-60")}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <p className="font-semibold">{c.name}</p>
+                  <p className="flex items-center gap-2 font-semibold">
+                    {c.name}
+                    {blockedIds.has(c.userId) && (
+                      <Badge className="bg-destructive/10 text-destructive text-[10px]">Blocked</Badge>
+                    )}
+                  </p>
                   <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
                     {c.phone && <span className="flex items-center gap-1"><Phone className="size-3" /> {c.phone}</span>}
                     {c.email && <span>{c.email}</span>}
@@ -1151,6 +1184,20 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
                     <p className="text-sm font-semibold text-primary">{c.totalVisits}</p>
                     <p className="text-[10px] text-muted-foreground">visit{c.totalVisits === 1 ? "" : "s"}</p>
                   </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={cn(
+                      "text-xs",
+                      blockedIds.has(c.userId)
+                        ? "text-primary hover:text-primary"
+                        : "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                    )}
+                    disabled={blocking === c.userId}
+                    onClick={() => handleToggleBlock(c.userId)}
+                  >
+                    {blockedIds.has(c.userId) ? "Unblock" : "Block"}
+                  </Button>
                 </div>
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
