@@ -102,17 +102,7 @@ export default function AdminRestaurants() {
     pageSize: 25,
   });
 
-  if (rows === undefined) {
-    return (
-      <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
-        <Spinner className="size-4" /> Loading restaurants…
-      </div>
-    );
-  }
-
-  const disabledCount = rows.filter((r) => r.disabled).length;
-
-  // Filter-reactive stats
+  // Filter-reactive stats (must be before any early return — React hooks rule)
   const stats = useMemo(() => {
     const total = filtered.length;
     const active = filtered.filter((r) => !r.disabled).length;
@@ -122,6 +112,16 @@ export default function AdminRestaurants() {
     const avgRating = total > 0 ? filtered.filter((r) => r.rating.count > 0).reduce((s, r) => s + r.rating.avg, 0) / Math.max(1, filtered.filter((r) => r.rating.count > 0).length) : 0;
     return { total, active, disabled, totalBookings, totalRevenue, avgRating };
   }, [filtered]);
+
+  if (rows === undefined) {
+    return (
+      <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
+        <Spinner className="size-4" /> Loading restaurants…
+      </div>
+    );
+  }
+
+  const disabledCount = rows.filter((r) => r.disabled).length;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
