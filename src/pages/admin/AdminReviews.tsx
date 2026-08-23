@@ -80,12 +80,6 @@ export default function AdminReviews() {
   const [busy, setBusy] = useState(false);
   const { sort, toggleSort } = useSort<SortKey>({ key: "date", direction: "desc" });
 
-  const stats = useMemo(() => {
-    if (!filtered.length) return null;
-    const sum = filtered.reduce((total, review) => total + review.rating, 0);
-    return { average: Math.round((sum / filtered.length) * 10) / 10 };
-  }, [filtered]);
-
   const restaurantOptions = useMemo(() => {
     const options = new Map<string, string>();
     for (const review of reviews ?? []) options.set(review.restaurantId, review.restaurantName);
@@ -104,6 +98,12 @@ export default function AdminReviews() {
     const query = searchText.trim().toLowerCase();
     return byFilters.filter((r) => r.text?.toLowerCase().includes(query) || r.authorName.toLowerCase().includes(query) || r.restaurantName.toLowerCase().includes(query));
   }, [reviews, restaurantId, userId, rating, searchText]);
+
+  const stats = useMemo(() => {
+    if (!filtered.length) return null;
+    const sum = filtered.reduce((total, review) => total + review.rating, 0);
+    return { average: Math.round((sum / filtered.length) * 10) / 10 };
+  }, [filtered]);
 
   const sorted = useMemo(
     () => sortItems(filtered, sort.key, sort.direction, extractReviewValue),
