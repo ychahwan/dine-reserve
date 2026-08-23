@@ -27,7 +27,7 @@ export function OwnerShell({
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-2xl flex-col bg-background">
+    <div className="mx-auto flex min-h-dvh w-full max-w-2xl flex-col bg-background lg:max-w-4xl xl:max-w-5xl">
       <header className="sticky top-0 z-30 border-b border-border/60 bg-background/90 backdrop-blur-md">
         <div className="flex h-14 items-center gap-2 px-4">
           {onBack && (

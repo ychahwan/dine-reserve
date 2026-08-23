@@ -1,5 +1,14 @@
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { useParams, Link } from "react-router";
@@ -24,11 +33,139 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Ban, Loader2, MapPin, Phone, ShieldCheck, Star, Store, Trash2 } from "lucide-react";
-import { useState } from "react";
-import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote } from "./AdminUI";
+import { ArrowLeft, Ban, Download, Loader2, MapPin, Phone, ShieldCheck, Star, Store, Trash2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
 import { toast } from "sonner";
+import {
+  useTablePagination,
+  useSort,
+  sortItems,
+} from "@/lib/use-table-pagination";
+import type { SortDirection } from "@/lib/use-table-pagination";
+
+// ── Reusable tab-panel wrapper with search + sort + pagination ──
+
+function FilteredTable<T extends Record<string, unknown>, SK extends string>({
+  items,
+  search,
+  onSearchChange,
+  searchPlaceholder,
+  sortKey,
+  sortDirection,
+  toggleSort,
+  columns,
+  renderRow,
+  emptyText,
+  extractValue,
+  filters,
+}: {
+  items: T[];
+  search: string;
+  onSearchChange: (v: string) => void;
+  searchPlaceholder: string;
+  sortKey: SK;
+  sortDirection: SortDirection;
+  toggleSort: (key: SK) => void;
+  columns: { label: string; sortKey?: SK; className?: string; headClassName?: string }[];
+  renderRow: (item: T, idx: number) => React.ReactNode;
+  emptyText: string;
+  extractValue: (row: T, key: SK) => string | number;
+  filters?: React.ReactNode;
+}) {
+  const sorted = useMemo(
+    () => sortItems(items, sortKey, sortDirection, extractValue),
+    [items, sortKey, sortDirection, extractValue],
+  );
+
+  const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
+    items: sorted,
+    sortKey,
+    sortDirection,
+    pageSize: 15,
+  });
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+        <Input
+          placeholder={searchPlaceholder}
+          value={search}
+          onChange={(e) => onSearchChange(e.target.value)}
+          className="h-8 w-full sm:max-w-xs rounded-full text-xs"
+        />
+        {filters}
+      </div>
+      {items.length === 0 ? (
+        <EmptyNote>{emptyText}</EmptyNote>
+      ) : pageItems.length === 0 ? (
+        <EmptyNote>No results match your filters.</EmptyNote>
+      ) : (
+        <>
+          <div className="rounded-2xl border border-border/70 bg-card">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  {columns.map((col) => (
+                    <TableHead key={col.label} className={col.headClassName}>
+                      {col.sortKey ? (
+                        <SortableHead
+                          label={col.label}
+                          sortKey={col.sortKey}
+                          activeSortKey={sortKey}
+                          direction={sortDirection}
+                          onToggle={toggleSort}
+                        />
+                      ) : (
+                        col.label
+                      )}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {pageItems.map((item, i) => renderRow(item, i))}
+              </TableBody>
+            </Table>
+          </div>
+          <TablePaginationBar
+            page={page}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            showingCount={pageItems.length}
+            onPageChange={setPage}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+
+/** Export rows to a CSV file and trigger download. */
+function exportToCsv(headers: string[], rows: (string | number)[][], filename: string) {
+  const csv = [headers, ...rows]
+    .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+// ── Types ──
+
+type Detail = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.restaurantDetail>>>;
+type BookingRow = Detail["bookings"][number];
+type OrderRow = Detail["orders"][number];
+type ReviewRow = Detail["reviews"][number];
+type AssistRow = Detail["assists"][number];
+type MenuReqRow = Detail["menuRequests"][number];
+
+// ── Main component ──
 
 export default function AdminRestaurantDetail() {
   const { id } = useParams();
@@ -38,6 +175,24 @@ export default function AdminRestaurantDetail() {
   const [modBusy, setModBusy] = useState(false);
   const [modError, setModError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Tab filter state
+  const [bookingSearch, setBookingSearch] = useState("");
+  const [bookingStatus, setBookingStatus] = useState("all");
+  const [bookingSort, setBookingSort] = useSort<"when" | "diner" | "party" | "status">({ key: "when", direction: "desc" });
+
+  const [orderSearch, setOrderSearch] = useState("");
+  const [orderStatus, setOrderStatus] = useState("all");
+  const [orderSort, setOrderSort] = useSort<"diner" | "total" | "status">({ key: "total", direction: "desc" });
+
+  const [reviewSearch, setReviewSearch] = useState("");
+  const [reviewSort, setReviewSort] = useSort<"diner" | "rating" | "when">({ key: "when", direction: "desc" });
+
+  const [assistSearch, setAssistSearch] = useState("");
+  const [assistSort, setAssistSort] = useSort<"type" | "status" | "time">({ key: "time", direction: "desc" });
+
+  const [menuReqSearch, setMenuReqSearch] = useState("");
+  const [menuReqSort, setMenuReqSort] = useSort<"name" | "status">({ key: "name", direction: "asc" });
 
   const handleSetDisabled = async (disabled: boolean) => {
     if (!id || modBusy) return;
@@ -71,6 +226,61 @@ export default function AdminRestaurantDetail() {
     }
   };
 
+  // ── Filtered data ──
+
+  const filteredBookings = useMemo(() => {
+    let list = data?.bookings ?? [];
+    if (bookingSearch.trim()) {
+      const q = bookingSearch.trim().toLowerCase();
+      list = list.filter(
+        (b) => b.userName.toLowerCase().includes(q) || b.phone?.includes(q) || b.code?.toLowerCase().includes(q),
+      );
+    }
+    if (bookingStatus !== "all") list = list.filter((b) => b.status === bookingStatus);
+    return list;
+  }, [data?.bookings, bookingSearch, bookingStatus]);
+
+  const filteredOrders = useMemo(() => {
+    let list = data?.orders ?? [];
+    if (orderSearch.trim()) {
+      const q = orderSearch.trim().toLowerCase();
+      list = list.filter(
+        (o) => o.userName.toLowerCase().includes(q) || o.items.some((it) => it.name.toLowerCase().includes(q)),
+      );
+    }
+    if (orderStatus !== "all") list = list.filter((o) => o.status === orderStatus);
+    return list;
+  }, [data?.orders, orderSearch, orderStatus]);
+
+  const filteredReviews = useMemo(() => {
+    let list = data?.reviews ?? [];
+    if (reviewSearch.trim()) {
+      const q = reviewSearch.trim().toLowerCase();
+      list = list.filter(
+        (r) => r.authorName.toLowerCase().includes(q) || r.text?.toLowerCase().includes(q),
+      );
+    }
+    return list;
+  }, [data?.reviews, reviewSearch]);
+
+  const filteredAssists = useMemo(() => {
+    let list = data?.assists ?? [];
+    if (assistSearch.trim()) {
+      const q = assistSearch.trim().toLowerCase();
+      list = list.filter((a) => a.template.toLowerCase().includes(q) || a.note?.toLowerCase().includes(q));
+    }
+    return list;
+  }, [data?.assists, assistSearch]);
+
+  const filteredMenuReqs = useMemo(() => {
+    let list = data?.menuRequests ?? [];
+    if (menuReqSearch.trim()) {
+      const q = menuReqSearch.trim().toLowerCase();
+      list = list.filter((m) => m.name.toLowerCase().includes(q) || m.description?.toLowerCase().includes(q));
+    }
+    return list;
+  }, [data?.menuRequests, menuReqSearch]);
+
   if (data === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -81,6 +291,27 @@ export default function AdminRestaurantDetail() {
   if (data === null) return <EmptyNote>Restaurant not found.</EmptyNote>;
 
   const { restaurant, owner, rating } = data;
+
+  const handleExportBookings = () => {
+    const headers = ["Diner", "Phone", "Date", "Time", "Party", "Status", "Code"];
+    const rows = filteredBookings.map((b) => [b.userName, b.phone ?? "", b.date, b.time, b.partySize, b.status, b.code ?? ""]);
+    exportToCsv(headers, rows, `bookings-${restaurant.name}-${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} bookings.`);
+  };
+
+  const handleExportOrders = () => {
+    const headers = ["Diner", "Items", "Total", "Status"];
+    const rows = filteredOrders.map((o) => [o.userName, o.items.map((it) => `${it.quantity}× ${it.name}`).join(", "), formatPrice(o.totalCents), o.status]);
+    exportToCsv(headers, rows, `orders-${restaurant.name}-${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} orders.`);
+  };
+
+  const handleExportReviews = () => {
+    const headers = ["Diner", "Rating", "Date", "Feedback"];
+    const rows = filteredReviews.map((r) => [r.authorName, r.rating, new Date(r.createdAt).toLocaleDateString(), r.text ?? ""]);
+    exportToCsv(headers, rows, `reviews-${restaurant.name}-${new Date().toISOString().slice(0, 10)}.csv`);
+    toast.success(`Exported ${rows.length} reviews.`);
+  };
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -123,7 +354,7 @@ export default function AdminRestaurantDetail() {
         </CardContent>
       </Card>
 
-      {/* Moderation: disable / delete */}
+      {/* Moderation */}
       <Card className="rounded-2xl border-border/70">
         <CardHeader className="pb-3">
           <CardTitle className="flex items-center gap-2 text-base">
@@ -131,30 +362,15 @@ export default function AdminRestaurantDetail() {
           </CardTitle>
         </CardHeader>
         <CardContent className="flex flex-wrap items-center gap-3">
-          <Button
-            variant={restaurant.disabled ? "outline" : "destructive"}
-            disabled={modBusy}
-            onClick={() => handleSetDisabled(!restaurant.disabled)}
-          >
+          <Button variant={restaurant.disabled ? "outline" : "destructive"} disabled={modBusy} onClick={() => handleSetDisabled(!restaurant.disabled)}>
             {modBusy ? <Loader2 className="size-4 animate-spin" /> : restaurant.disabled ? <Store className="size-4" /> : <Ban className="size-4" />}
             {restaurant.disabled ? "Re-enable restaurant" : "Disable restaurant"}
           </Button>
-          <Button
-            variant="outline"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            disabled={modBusy}
-            onClick={() => setConfirmDelete(true)}
-          >
+          <Button variant="outline" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={modBusy} onClick={() => setConfirmDelete(true)}>
             <Trash2 className="size-4" /> Delete restaurant permanently
           </Button>
-          {restaurant.disabled && (
-            <p className="text-xs text-muted-foreground">
-              Hidden from Explore and new bookings until re-enabled. The owner can still see it.
-            </p>
-          )}
-          {modError && (
-            <p className="w-full rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{modError}</p>
-          )}
+          {restaurant.disabled && <p className="text-xs text-muted-foreground">Hidden from Explore and new bookings until re-enabled.</p>}
+          {modError && <p className="w-full rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{modError}</p>}
         </CardContent>
       </Card>
 
@@ -167,157 +383,250 @@ export default function AdminRestaurantDetail() {
           <TabsTrigger value="setup">Setup</TabsTrigger>
         </TabsList>
 
+        {/* ── Bookings ── */}
         <TabsContent value="bookings">
           <Card className="rounded-2xl border-border/70">
-            <CardContent className="p-0">
-              {data.bookings.length === 0 ? <EmptyNote>No bookings.</EmptyNote> : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Diner</TableHead>
-                      <TableHead>When</TableHead>
-                      <TableHead>Party</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.bookings.map((b) => (
-                      <TableRow key={b._id}>
-                        <TableCell><span className="font-medium">{b.userName}</span><p className="text-xs text-muted-foreground">{b.phone}</p></TableCell>
-                        <TableCell>{formatDate(b.date)} · {formatTime(b.time)}</TableCell>
-                        <TableCell>{b.partySize}</TableCell>
-                        <TableCell>{bookingStatusBadge(b.status)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+            <CardContent className="p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">{filteredBookings.length} bookings{bookingSearch || bookingStatus !== "all" ? " (filtered)" : ""}</p>
+                <Button variant="outline" size="sm" onClick={handleExportBookings} disabled={filteredBookings.length === 0}>
+                  <Download className="size-3.5" /> CSV
+                </Button>
+              </div>
+              <FilteredTable
+                items={filteredBookings}
+                search={bookingSearch}
+                onSearchChange={setBookingSearch}
+                searchPlaceholder="Search diner, phone, or code…"
+                sortKey={bookingSort.key}
+                sortDirection={bookingSort.direction}
+                toggleSort={bookingSort.toggleSort}
+                extractValue={(b, k) => {
+                  if (k === "when") return `${b.date}T${b.time}`;
+                  if (k === "diner") return b.userName;
+                  if (k === "party") return b.partySize;
+                  if (k === "status") return b.status;
+                  return 0;
+                }}
+                columns={[
+                  { label: "Diner", sortKey: "diner" },
+                  { label: "When", sortKey: "when" },
+                  { label: "Party", sortKey: "party", className: "hidden sm:table-cell", headClassName: "hidden sm:table-cell" },
+                  { label: "Status", sortKey: "status" },
+                ]}
+                renderRow={(b) => (
+                  <TableRow key={b._id}>
+                    <TableCell>
+                      <span className="font-medium">{b.userName}</span>
+                      <p className="text-xs text-muted-foreground">{b.phone}</p>
+                    </TableCell>
+                    <TableCell className="whitespace-nowrap text-xs">{formatDate(b.date)} · {formatTime(b.time)}</TableCell>
+                    <TableCell className="hidden sm:table-cell">{b.partySize}</TableCell>
+                    <TableCell>{bookingStatusBadge(b.status)}</TableCell>
+                  </TableRow>
+                )}
+                emptyText="No bookings."
+                filters={
+                  <Select value={bookingStatus} onValueChange={setBookingStatus}>
+                    <SelectTrigger className="h-8 w-auto rounded-full text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="confirmed">Confirmed</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="no_show">No-show</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                }
+              />
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Orders ── */}
         <TabsContent value="orders">
           <Card className="rounded-2xl border-border/70">
-            <CardContent className="p-0">
-              {data.orders.length === 0 ? <EmptyNote>No dine-in orders.</EmptyNote> : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Diner</TableHead>
-                      <TableHead>Items</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Status</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.orders.map((o) => (
-                      <TableRow key={o._id}>
-                        <TableCell className="font-medium">{o.userName}</TableCell>
-                        <TableCell className="max-w-xs text-sm text-muted-foreground">
-                          {o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}
-                        </TableCell>
-                        <TableCell>{formatPrice(o.totalCents)}</TableCell>
-                        <TableCell>{orderStatusBadge(o.status)}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+            <CardContent className="p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">{filteredOrders.length} orders{orderSearch || orderStatus !== "all" ? " (filtered)" : ""}</p>
+                <Button variant="outline" size="sm" onClick={handleExportOrders} disabled={filteredOrders.length === 0}>
+                  <Download className="size-3.5" /> CSV
+                </Button>
+              </div>
+              <FilteredTable
+                items={filteredOrders}
+                search={orderSearch}
+                onSearchChange={setOrderSearch}
+                searchPlaceholder="Search diner or item name…"
+                sortKey={orderSort.key}
+                sortDirection={orderSort.direction}
+                toggleSort={orderSort.toggleSort}
+                extractValue={(o, k) => {
+                  if (k === "diner") return o.userName;
+                  if (k === "total") return o.totalCents;
+                  if (k === "status") return o.status;
+                  return 0;
+                }}
+                columns={[
+                  { label: "Diner", sortKey: "diner" },
+                  { label: "Items", className: "max-w-xs" },
+                  { label: "Total", sortKey: "total", headClassName: "text-right", className: "text-right" },
+                  { label: "Status", sortKey: "status" },
+                ]}
+                renderRow={(o) => (
+                  <TableRow key={o._id}>
+                    <TableCell className="font-medium">{o.userName}</TableCell>
+                    <TableCell className="max-w-xs truncate text-xs text-muted-foreground">
+                      {o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}
+                    </TableCell>
+                    <TableCell className="text-right">{formatPrice(o.totalCents)}</TableCell>
+                    <TableCell>{orderStatusBadge(o.status)}</TableCell>
+                  </TableRow>
+                )}
+                emptyText="No dine-in orders."
+                filters={
+                  <Select value={orderStatus} onValueChange={setOrderStatus}>
+                    <SelectTrigger className="h-8 w-auto rounded-full text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="open">Open</SelectItem>
+                      <SelectItem value="preparing">Preparing</SelectItem>
+                      <SelectItem value="served">Served</SelectItem>
+                      <SelectItem value="completed">Completed</SelectItem>
+                      <SelectItem value="cancelled">Cancelled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                }
+              />
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Reviews ── */}
         <TabsContent value="reviews">
           <Card className="rounded-2xl border-border/70">
-            <CardContent className="p-0">
-              {data.reviews.length === 0 ? <EmptyNote>No reviews yet.</EmptyNote> : (
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Diner</TableHead>
-                      <TableHead>Rating</TableHead>
-                      <TableHead>When</TableHead>
-                      <TableHead className="w-full">Feedback</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {data.reviews.map((r) => (
-                      <TableRow key={r._id}>
-                        <TableCell className="font-medium">{r.authorName}</TableCell>
-                        <TableCell><Stars rating={r.rating} /></TableCell>
-                        <TableCell className="whitespace-nowrap text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</TableCell>
-                        <TableCell className="max-w-xs text-sm text-muted-foreground">{r.text ?? "—"}</TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              )}
+            <CardContent className="p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <p className="text-xs text-muted-foreground">{filteredReviews.length} reviews{reviewSearch ? " (filtered)" : ""}</p>
+                <Button variant="outline" size="sm" onClick={handleExportReviews} disabled={filteredReviews.length === 0}>
+                  <Download className="size-3.5" /> CSV
+                </Button>
+              </div>
+              <FilteredTable
+                items={filteredReviews}
+                search={reviewSearch}
+                onSearchChange={setReviewSearch}
+                searchPlaceholder="Search diner or feedback…"
+                sortKey={reviewSort.key}
+                sortDirection={reviewSort.direction}
+                toggleSort={reviewSort.toggleSort}
+                extractValue={(r, k) => {
+                  if (k === "diner") return r.authorName;
+                  if (k === "rating") return r.rating;
+                  if (k === "when") return r.createdAt;
+                  return 0;
+                }}
+                columns={[
+                  { label: "Diner", sortKey: "diner" },
+                  { label: "Rating", sortKey: "rating" },
+                  { label: "When", sortKey: "when", className: "hidden sm:table-cell", headClassName: "hidden sm:table-cell" },
+                  { label: "Feedback" },
+                ]}
+                renderRow={(r) => (
+                  <TableRow key={r._id}>
+                    <TableCell className="font-medium">{r.authorName}</TableCell>
+                    <TableCell><Stars rating={r.rating} /></TableCell>
+                    <TableCell className="hidden whitespace-nowrap text-xs text-muted-foreground sm:table-cell">{new Date(r.createdAt).toLocaleDateString()}</TableCell>
+                    <TableCell className="max-w-xs truncate text-xs text-muted-foreground">{r.text ?? "—"}</TableCell>
+                  </TableRow>
+                )}
+                emptyText="No reviews yet."
+              />
             </CardContent>
           </Card>
         </TabsContent>
 
+        {/* ── Requests ── */}
         <TabsContent value="requests">
           <div className="space-y-4">
+            {/* Assist requests */}
             <Card className="rounded-2xl border-border/70">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Assist requests (table pings)</CardTitle>
               </CardHeader>
-              <CardContent className="p-0">
-                {data.assists.length === 0 ? <EmptyNote>No assist requests.</EmptyNote> : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Type</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Time to resolve</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.assists.map((a) => (
-                        <TableRow key={a._id}>
-                          <TableCell className="font-medium">{a.template}</TableCell>
-                          <TableCell>{a.status}</TableCell>
-                          <TableCell className="text-muted-foreground">
-                            {a.resolveMs != null ? `${Math.round(a.resolveMs / 60000)} min` : "—"}
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+              <CardContent className="p-4">
+                <FilteredTable
+                  items={filteredAssists}
+                  search={assistSearch}
+                  onSearchChange={setAssistSearch}
+                  searchPlaceholder="Search type or note…"
+                  sortKey={assistSort.key}
+                  sortDirection={assistSort.direction}
+                  toggleSort={assistSort.toggleSort}
+                  extractValue={(a, k) => {
+                    if (k === "type") return a.template;
+                    if (k === "status") return a.status;
+                    if (k === "time") return a.createdAt;
+                    return 0;
+                  }}
+                  columns={[
+                    { label: "Type", sortKey: "type" },
+                    { label: "Status", sortKey: "status" },
+                    { label: "Time to resolve", sortKey: "time" },
+                  ]}
+                  renderRow={(a) => (
+                    <TableRow key={a._id}>
+                      <TableCell className="font-medium">{a.template}</TableCell>
+                      <TableCell><Badge variant="secondary">{a.status}</Badge></TableCell>
+                      <TableCell className="text-muted-foreground">
+                        {a.resolveMs != null ? `${Math.round(a.resolveMs / 60000)} min` : "—"}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                  emptyText="No assist requests."
+                />
               </CardContent>
             </Card>
 
+            {/* Menu requests */}
             <Card className="rounded-2xl border-border/70">
               <CardHeader className="pb-3">
                 <CardTitle className="text-base">Menu requests (off-menu)</CardTitle>
               </CardHeader>
-              <CardContent className="p-0">
-                {data.menuRequests.length === 0 ? <EmptyNote>No menu requests.</EmptyNote> : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Name</TableHead>
-                        <TableHead>Description</TableHead>
-                        <TableHead>Status</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {data.menuRequests.map((m) => (
-                        <TableRow key={m._id}>
-                          <TableCell className="font-medium">{m.name}</TableCell>
-                          <TableCell className="max-w-xs text-sm text-muted-foreground">{m.description ?? "—"}</TableCell>
-                          <TableCell><Badge variant="secondary">{m.status}</Badge></TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+              <CardContent className="p-4">
+                <FilteredTable
+                  items={filteredMenuReqs}
+                  search={menuReqSearch}
+                  onSearchChange={setMenuReqSearch}
+                  searchPlaceholder="Search name or description…"
+                  sortKey={menuReqSort.key}
+                  sortDirection={menuReqSort.direction}
+                  toggleSort={menuReqSort.toggleSort}
+                  extractValue={(m, k) => {
+                    if (k === "name") return m.name;
+                    if (k === "status") return m.status;
+                    return 0;
+                  }}
+                  columns={[
+                    { label: "Name", sortKey: "name" },
+                    { label: "Description" },
+                    { label: "Status", sortKey: "status" },
+                  ]}
+                  renderRow={(m) => (
+                    <TableRow key={m._id}>
+                      <TableCell className="font-medium">{m.name}</TableCell>
+                      <TableCell className="max-w-xs truncate text-xs text-muted-foreground">{m.description ?? "—"}</TableCell>
+                      <TableCell><Badge variant="secondary">{m.status}</Badge></TableCell>
+                    </TableRow>
+                  )}
+                  emptyText="No menu requests."
+                />
               </CardContent>
             </Card>
           </div>
         </TabsContent>
 
+        {/* ── Setup ── */}
         <TabsContent value="setup">
           <Card className="rounded-2xl border-border/70">
             <CardContent className="p-5">
@@ -361,10 +670,7 @@ export default function AdminRestaurantDetail() {
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={modBusy}
-              onClick={(e) => {
-                e.preventDefault();
-                void handleDelete();
-              }}
+              onClick={(e) => { e.preventDefault(); void handleDelete(); }}
             >
               {modBusy ? <Loader2 className="size-4 animate-spin" /> : "Delete restaurant"}
             </AlertDialogAction>

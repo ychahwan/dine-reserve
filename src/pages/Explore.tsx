@@ -183,7 +183,7 @@ export default function Explore() {
             <CalendarDays className="size-4 text-primary" />
             <p className="text-sm font-semibold">{t("explore.whenDining")}</p>
           </div>
-          <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+          <div className="no-scrollbar horizontal-rail mt-3 flex gap-2 overflow-x-auto pb-1">
             <button
               onClick={() => setQuickDate(null)}
               className={cn(
@@ -259,7 +259,7 @@ export default function Explore() {
         </div>
 
         {/* Filters — cuisine chips from real data */}
-        <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+        <div className="no-scrollbar horizontal-rail mt-3 flex gap-2 overflow-x-auto pb-1">
           {cuisines.slice(0, 8).map((c) => (
             <button
               key={c}
@@ -275,7 +275,7 @@ export default function Explore() {
             </button>
           ))}
         </div>
-        <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
+        <div className="no-scrollbar horizontal-rail mt-2 flex gap-2 overflow-x-auto pb-1">
           {SEAT_KEYS.map((s) => (
             <button
               key={s.key}
@@ -431,7 +431,7 @@ export default function Explore() {
             <h2 className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-widest text-muted-foreground">
               <Sparkles className="size-3.5 text-primary" /> {t("explore.freshKitchens")}
             </h2>
-            <div className="no-scrollbar mt-3 flex gap-2.5 overflow-x-auto pb-1">
+            <div className="no-scrollbar horizontal-rail mt-3 flex gap-2.5 overflow-x-auto pb-1">
               {(stories ?? []).slice(0, 12).map((s) => (
                 <Link
                   key={s._id}

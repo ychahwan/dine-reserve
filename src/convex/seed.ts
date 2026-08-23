@@ -5,6 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { ensureSlotsForDate } from "./availability";
 import { applyDemoRules } from "./demoRules";
 import { safeGet } from "./helpers";
+import { DEFAULT_AI_KNOWLEDGE, DEFAULT_AI_SEMANTIC_RULES, DEFAULT_AI_SYSTEM_PROMPT } from "./aiPolicy";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -580,6 +581,17 @@ async function runSeed(ctx: MutationCtx) {
     text: "Candle-lit room, perfect cacio e pepe and the terrace was lovely. We'll be back.",
     createdAt: now - 1000 * 60 * 60 * 24 * 2,
   });
+
+  // A fresh environment starts with a governed semantic layer instead of an
+  // empty prompt. Admins can review and modify these records in AI Workspace.
+  for (const entry of DEFAULT_AI_KNOWLEDGE) {
+    await ctx.db.insert("aiKnowledge", { ...entry, updatedBy: ownerMarco, updatedAt: now });
+  }
+  for (const entry of DEFAULT_AI_SEMANTIC_RULES) {
+    await ctx.db.insert("aiSemanticRules", { ...entry, updatedBy: ownerMarco, updatedAt: now });
+  }
+  await ctx.db.insert("appSettings", { key: "AI_SYSTEM_PROMPT", value: DEFAULT_AI_SYSTEM_PROMPT, updatedBy: ownerMarco, updatedAt: now });
+  await ctx.db.insert("appSettings", { key: "AI_MODEL", value: "gemini-3.7-flash", updatedBy: ownerMarco, updatedAt: now });
   await ctx.db.insert("reviews", {
     restaurantId: sakura,
     userId: leo,
@@ -1082,6 +1094,11 @@ const ALL_TABLES = [
   "giftDeliveries",
   "stories",
   "loyaltyLedger",
+  "aiMessages",
+  "aiConversations",
+  "aiKnowledge",
+  "aiSemanticRules",
+  "appSettings",
 ] as const;
 
 /** Deletes every row from every app table — the data, not the schema. */

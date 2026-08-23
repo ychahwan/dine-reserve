@@ -288,6 +288,7 @@
     "leaveWaitlist": "Quitter la liste d'attente",
     "upcoming": "À venir",
     "past": "Passées",
+    "bookingCode": "Code de réservation",
     "checkedIn": "Enregistré",
     "statusConfirmed": "Confirmé",
     "statusCompleted": "Terminé",
@@ -435,7 +436,12 @@
     "bookedToast": "Table réservée — confirmation envoyée !",
     "reviewCount_one": "1 avis",
     "reviewCount_other": "{{count}} avis",
-    "verifiedVisit": "Visite vérifiée"
+    "verifiedVisit": "Visite vérifiée",
+    "allReviews": "Tous",
+    "sortReviews": "Trier les avis",
+    "sortNewest": "Plus récents",
+    "sortHighest": "Meilleurs",
+    "sortLowest": "Moins bons"
   },
   "lang": {
     "label": "Langue",

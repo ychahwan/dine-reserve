@@ -52,6 +52,18 @@ async function isOwnerOf(
   return !!restaurant && restaurant.ownerId === userId;
 }
 
+/** Load a confirmed booking that belongs to the caller (no date restriction). */
+async function requireActiveBooking(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  bookingId: Id<"bookings">,
+) {
+  const booking = await ctx.db.get(bookingId);
+  if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
+  if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
+  return booking;
+}
+
 /** Load a booking that belongs to the caller, is confirmed, and is today. */
 async function requireActiveTodayBooking(
   ctx: MutationCtx,
@@ -59,9 +71,7 @@ async function requireActiveTodayBooking(
   bookingId: Id<"bookings">,
   clientDate?: string,
 ) {
-  const booking = await ctx.db.get(bookingId);
-  if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
-  if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
+  const booking = await requireActiveBooking(ctx, userId, bookingId);
   if (booking.date !== resolveTodayKey(clientDate)) {
     throw new Error("Socialize is available on the day of your booking.");
   }
@@ -306,10 +316,10 @@ export const setVisibility = mutation({
     visible: v.boolean(),
     clientDate: v.optional(v.string()),
   },
-  handler: async (ctx, { bookingId, visible, clientDate }) => {
+  handler: async (ctx, { bookingId, visible }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
-    const booking = await requireActiveTodayBooking(ctx, userId, bookingId, clientDate);
+    const booking = await requireActiveBooking(ctx, userId, bookingId);
 
     const existing = await ctx.db
       .query("dinerPresence")

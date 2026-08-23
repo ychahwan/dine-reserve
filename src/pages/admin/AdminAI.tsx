@@ -6,7 +6,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Spinner } from "@/components/ui/spinner";
 import { useMutation, useQuery } from "convex/react";
-import { Bot, Check, ChevronRight, Database, MessageSquare, Plus, Save, Trash2, Workflow } from "lucide-react";
+import { Bot, Check, ChevronRight, Database, MessageSquare, Plus, RefreshCw, Save, Trash2, Workflow } from "lucide-react";
 import { useState } from "react";
 import type React from "react";
 import { toast } from "sonner";
@@ -27,6 +27,7 @@ export default function AdminAI() {
   const deleteKnowledge = useMutation(api.adminAi.deleteKnowledge);
   const saveRule = useMutation(api.adminAi.saveRule);
   const deleteRule = useMutation(api.adminAi.deleteRule);
+  const installDefaults = useMutation(api.adminAi.installDefaults);
   const [knowledgeDraft, setKnowledgeDraft] = useState<Draft | null>(null);
   const [ruleDraft, setRuleDraft] = useState<RuleDraft | null>(null);
   const [busy, setBusy] = useState(false);
@@ -50,9 +51,10 @@ export default function AdminAI() {
 
   return (
     <div className="mx-auto max-w-7xl space-y-6">
-      <div>
-        <div className="flex items-center gap-2"><Bot className="size-5 text-primary" /><h1 className="text-2xl font-bold tracking-tight">AI workspace</h1></div>
-        <p className="mt-1 text-sm text-muted-foreground">Review customer conversations and manage the agent’s prompt, knowledge, and semantic behavior.</p>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div><div className="flex items-center gap-2"><Bot className="size-5 text-primary" /><h1 className="text-2xl font-bold tracking-tight">AI workspace</h1></div>
+        <p className="mt-1 text-sm text-muted-foreground">Review customer conversations and manage the agent’s prompt, knowledge, and semantic behavior.</p></div>
+        <Button variant="outline" disabled={busy} onClick={async () => { setBusy(true); try { const result = await installDefaults({}); toast.success(`Installed ${result.knowledgeAdded} knowledge entries and ${result.rulesAdded} rules.`); } catch (error) { toast.error(error instanceof Error ? error.message : "Could not install defaults."); } finally { setBusy(false); } }}><RefreshCw className="size-4" /> Restore defaults</Button>
       </div>
 
       <section className="grid gap-4 lg:grid-cols-[330px_1fr]">

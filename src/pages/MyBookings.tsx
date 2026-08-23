@@ -576,15 +576,20 @@ export default function MyBookings() {
                             )}
                           </div>
                         </div>
-                        <div className="flex items-center justify-between border-t border-border/60 bg-muted/30 px-4 py-2.5">
-                          <span className="font-mono text-xs font-semibold tracking-widest text-primary">
-                            {b.code}
-                          </span>
-                          <div className="flex flex-wrap items-center justify-end gap-1">
+                        <div className="border-t border-border/60 bg-muted/30 px-3 py-3 sm:px-4">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                              {t("bookings.bookingCode")}
+                            </span>
+                            <span className="font-mono text-xs font-semibold tracking-widest text-primary">
+                              {b.code}
+                            </span>
+                          </div>
+                          <div className="mt-2 grid grid-cols-2 gap-1.5 sm:flex sm:flex-wrap sm:items-center sm:justify-end">
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 text-emerald-700 hover:bg-emerald-600/10 hover:text-emerald-700 dark:text-emerald-400"
+                              className="h-9 w-full justify-start text-emerald-700 hover:bg-emerald-600/10 hover:text-emerald-700 sm:h-8 sm:w-auto dark:text-emerald-400"
                               asChild
                               title="Share on WhatsApp"
                             >
@@ -609,7 +614,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              className="h-9 w-full justify-start hover:bg-primary/10 hover:text-primary sm:h-8 sm:w-auto"
                               title="Invite friends to this booking"
                               onClick={() => setInviteBookingId(b._id)}
                             >
@@ -618,7 +623,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              className="h-9 w-full justify-start hover:bg-primary/10 hover:text-primary sm:h-8 sm:w-auto"
                               title="See who's dining and send a gift"
                               onClick={() => setSocializeBookingId(b._id)}
                             >
@@ -627,7 +632,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              className="h-9 w-full justify-start hover:bg-primary/10 hover:text-primary sm:h-8 sm:w-auto"
                               title="Order, ping the team, view your bill"
                               onClick={() => setDineBookingId(b._id)}
                             >
@@ -636,7 +641,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              className="h-9 w-full justify-start hover:bg-primary/10 hover:text-primary sm:h-8 sm:w-auto"
                               title="Notify the restaurant"
                               onClick={() => {
                                 setNotifyError(null);
@@ -650,7 +655,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 hover:bg-primary/10 hover:text-primary"
+                              className="h-9 w-full justify-start hover:bg-primary/10 hover:text-primary sm:h-8 sm:w-auto"
                               title="Print or save a receipt with QR code"
                               onClick={() => setReceiptBookingId(b._id)}
                             >
@@ -659,7 +664,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 text-amber-700 hover:bg-amber-500/10 hover:text-amber-700 dark:text-amber-400"
+                              className="h-9 w-full justify-start text-amber-700 hover:bg-amber-500/10 hover:text-amber-700 sm:h-8 sm:w-auto dark:text-amber-400"
                               title="Release the table back to other diners"
                               disabled={busyId === b._id}
                               onClick={() => {
@@ -672,7 +677,7 @@ export default function MyBookings() {
                             <Button
                               variant="ghost"
                               size="sm"
-                              className="h-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              className="h-9 w-full justify-start text-destructive hover:bg-destructive/10 hover:text-destructive sm:h-8 sm:w-auto"
                               disabled={busyId === b._id}
                               onClick={() => {
                                 setCancelError(null);

@@ -666,6 +666,7 @@ const schema = defineSchema(
     // Curated facts and rules injected into the agent context. These are
     // editable by admins and intentionally versionable through updatedAt.
     aiKnowledge: defineTable({
+      key: v.optional(v.string()),
       title: v.string(),
       category: v.string(),
       content: v.string(),
@@ -673,9 +674,10 @@ const schema = defineSchema(
       enabled: v.boolean(),
       updatedBy: v.id("users"),
       updatedAt: v.number(),
-    }).index("by_enabled_priority", ["enabled", "priority"]),
+    }).index("by_enabled_priority", ["enabled", "priority"]).index("by_key", ["key"]),
 
     aiSemanticRules: defineTable({
+      key: v.optional(v.string()),
       name: v.string(),
       description: v.string(),
       instruction: v.string(),
@@ -683,7 +685,7 @@ const schema = defineSchema(
       enabled: v.boolean(),
       updatedBy: v.id("users"),
       updatedAt: v.number(),
-    }).index("by_enabled_priority", ["enabled", "priority"]),
+    }).index("by_enabled_priority", ["enabled", "priority"]).index("by_key", ["key"]),
   },
   {
     schemaValidation: true,

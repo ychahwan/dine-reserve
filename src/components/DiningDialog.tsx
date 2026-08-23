@@ -431,7 +431,7 @@ export function DiningDialog({
           ) : null)}
 
         {/* Tabs */}
-        <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
+        <div className="no-scrollbar horizontal-rail mt-2 flex gap-2 overflow-x-auto pb-1">
           {[
             { key: "order" as const, label: "Order", icon: ShoppingBag, count: orders?.length },
             { key: "assist" as const, label: "Ask the team", icon: Hand, count: (assists ?? []).filter((a) => a.status === "open").length },

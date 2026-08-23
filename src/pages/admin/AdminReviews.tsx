@@ -13,6 +13,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -40,7 +41,7 @@ import {
   sortItems,
 } from "@/lib/use-table-pagination";
 import { useMutation, useQuery } from "convex/react";
-import { ArrowUpRight, Loader2, MessageSquareQuote, SlidersHorizontal, Star, Trash2, TrendingUp } from "lucide-react";
+import { ArrowUpRight, Loader2, MessageSquareQuote, Search, SlidersHorizontal, Star, Trash2, TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Link } from "react-router";
 import { toast } from "sonner";
@@ -73,6 +74,7 @@ export default function AdminReviews() {
   const [restaurantId, setRestaurantId] = useState("all");
   const [userId, setUserId] = useState("all");
   const [rating, setRating] = useState(0);
+  const [searchText, setSearchText] = useState("");
   const [selected, setSelected] = useState<Set<string>>(() => new Set());
   const [confirmBulkDelete, setConfirmBulkDelete] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -96,10 +98,12 @@ export default function AdminReviews() {
     return [...options].map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name));
   }, [reviews]);
 
-  const filtered = useMemo(
-    () => filterAdminReviews(reviews ?? [], { restaurantId, userId, rating }),
-    [reviews, restaurantId, userId, rating],
-  );
+  const filtered = useMemo(() => {
+    const byFilters = filterAdminReviews(reviews ?? [], { restaurantId, userId, rating });
+    if (!searchText.trim()) return byFilters;
+    const query = searchText.trim().toLowerCase();
+    return byFilters.filter((r) => r.text?.toLowerCase().includes(query) || r.authorName.toLowerCase().includes(query) || r.restaurantName.toLowerCase().includes(query));
+  }, [reviews, restaurantId, userId, rating, searchText]);
 
   const sorted = useMemo(
     () => sortItems(filtered, sort.key, sort.direction, extractReviewValue),
@@ -170,6 +174,7 @@ export default function AdminReviews() {
     setRestaurantId("all");
     setUserId("all");
     setRating(0);
+    setSearchText("");
   };
 
   if (reviews === undefined) {
@@ -294,7 +299,17 @@ export default function AdminReviews() {
             </Select>
           </div>
 
-          {(restaurantId !== "all" || userId !== "all" || rating !== 0) ? (
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search review text, diner, or restaurant…"
+              className="pl-9"
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+          </div>
+
+          {(restaurantId !== "all" || userId !== "all" || rating !== 0 || searchText) ? (
             <Button variant="ghost" size="sm" className="w-fit" onClick={resetFilters}>
               Clear filters
             </Button>

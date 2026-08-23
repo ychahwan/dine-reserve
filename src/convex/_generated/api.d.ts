@@ -12,6 +12,7 @@ import type * as admin from "../admin.js";
 import type * as adminAi from "../adminAi.js";
 import type * as adminView from "../adminView.js";
 import type * as ai from "../ai.js";
+import type * as aiPolicy from "../aiPolicy.js";
 import type * as analytics from "../analytics.js";
 import type * as auth from "../auth.js";
 import type * as auth_passwordAuth from "../auth/passwordAuth.js";
@@ -55,6 +56,7 @@ declare const fullApi: ApiFromModules<{
   adminAi: typeof adminAi;
   adminView: typeof adminView;
   ai: typeof ai;
+  aiPolicy: typeof aiPolicy;
   analytics: typeof analytics;
   auth: typeof auth;
   "auth/passwordAuth": typeof auth_passwordAuth;

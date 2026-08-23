@@ -3,6 +3,8 @@
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
+@import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap');
+
 /* DO NOT CHANGE */
 @theme inline {
   --radius-sm: calc(var(--radius) - 4px);
@@ -45,6 +47,25 @@
 /* CHANGE VALUES FOR THEME */
 :root {
   --radius: 0.875rem;
+
+  /* Typography */
+  --font-ui: 'Alexandria', system-ui, sans-serif;
+  --font-display: 'Fraunces', Georgia, serif;
+
+  /* Hospitality accent colors */
+  --color-terracotta: oklch(0.60 0.14 45);
+  --color-terracotta-light: oklch(0.92 0.04 45);
+  --color-gold: oklch(0.72 0.14 80);
+  --color-gold-light: oklch(0.94 0.04 80);
+  --color-forest: oklch(0.35 0.09 162);
+
+  /* Radius hierarchy */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-pill: 9999px;
   --background: oklch(0.985 0.004 106);
   --foreground: oklch(0.185 0.02 156);
   --card: oklch(1 0 0);
@@ -128,6 +149,7 @@
 /* Modern theme flourishes */
 html {
   scroll-behavior: smooth;
+  min-height: 100dvh;
 }
 
 ::selection {
@@ -143,26 +165,69 @@ html {
   background-size: 22px 22px;
 }
 
+/* ---------- Typography ---------- */
+body, input, textarea, select, button {
+  font-family: var(--font-ui);
+}
+
+h1, h2, h3 {
+  font-family: var(--font-display);
+  font-optical-sizing: auto;
+}
+
+/* Raise minimum readable text size for metadata */
+.text-\[9px\],
+.text-\[10px\],
+.text-\[11px\] {
+  font-size: 12px;
+}
+
+/* ---------- Radius utility classes ---------- */
+.radius-input { border-radius: var(--radius-sm); }
+.radius-row { border-radius: var(--radius-md); }
+.radius-card { border-radius: var(--radius-xl); }
+.radius-sheet { border-radius: var(--radius-2xl); }
+
+/* ---------- Accessibility ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+
 /* Horizontal "rail" scrollers (date strips, filter chips, menu tabs):
    hide the scrollbar entirely so swiping feels like a native carousel
-   instead of showing the default scrollbar ("scrollball"). */
+   instead of showing the default scrollbar ("scrollball").
+
+   NOTE: Only apply to explicit .horizontal-rail / .no-scrollbar elements.
+   General .overflow-x-auto should keep the default scrollbar so overflow
+   in tables and admin navigation is discoverable. */
 .no-scrollbar,
-.overflow-x-auto {
+.horizontal-rail {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .no-scrollbar::-webkit-scrollbar,
-.overflow-x-auto::-webkit-scrollbar {
+.horizontal-rail::-webkit-scrollbar {
   display: none;
 }
 
 /* Rails settle cleanly when swiped (proximity snapping) with smooth
    momentum scrolling on touch devices. */
-.overflow-x-auto {
+.horizontal-rail {
   scroll-snap-type: x proximity;
   -webkit-overflow-scrolling: touch;
 }
-.overflow-x-auto > *,
+.horizontal-rail > *,
 .no-scrollbar > * {
   scroll-snap-align: start;
+}
+
+/* Keep overflow-x-auto scrollable but snap-friendly */
+.overflow-x-auto {
+  -webkit-overflow-scrolling: touch;
 }

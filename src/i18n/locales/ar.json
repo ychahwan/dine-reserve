@@ -288,6 +288,7 @@
     "leaveWaitlist": "مغادرة قائمة الانتظار",
     "upcoming": "القادمة",
     "past": "السابقة",
+    "bookingCode": "رمز الحجز",
     "checkedIn": "تم تسجيل الوصول",
     "statusConfirmed": "مؤكد",
     "statusCompleted": "مكتمل",
@@ -435,7 +436,12 @@
     "bookedToast": "تم حجز الطاولة — تم إرسال التأكيد!",
     "reviewCount_one": "تقييم واحد",
     "reviewCount_other": "{{count}} تقييم",
-    "verifiedVisit": "زيارة موثقة"
+    "verifiedVisit": "زيارة موثقة",
+    "allReviews": "الكل",
+    "sortReviews": "ترتيب التقييمات",
+    "sortNewest": "الأحدث",
+    "sortHighest": "الأعلى",
+    "sortLowest": "الأدنى"
   },
   "lang": {
     "label": "اللغة",

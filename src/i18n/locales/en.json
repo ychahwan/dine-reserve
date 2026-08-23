@@ -288,6 +288,7 @@
     "leaveWaitlist": "Leave waitlist",
     "upcoming": "Upcoming",
     "past": "Past",
+    "bookingCode": "Booking code",
     "checkedIn": "Checked in",
     "statusConfirmed": "Confirmed",
     "statusCompleted": "Completed",
@@ -435,7 +436,12 @@
     "bookedToast": "Table booked — confirmation sent!",
     "reviewCount_one": "1 review",
     "reviewCount_other": "{{count}} reviews",
-    "verifiedVisit": "Verified visit"
+    "verifiedVisit": "Verified visit",
+    "allReviews": "All",
+    "sortReviews": "Sort reviews",
+    "sortNewest": "Newest",
+    "sortHighest": "Highest",
+    "sortLowest": "Lowest"
   },
   "lang": {
     "label": "Language",

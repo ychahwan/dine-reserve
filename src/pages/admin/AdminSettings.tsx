@@ -55,6 +55,13 @@ const META: Record<string, { label: string; group: string; hint: string; secret:
     secret: false,
     placeholder: "Describe how Kamix AI should behave…",
   },
+  AI_MODEL: {
+    label: "AI model",
+    group: "AI agent",
+    hint: "Stable Gemini model used by the concierge and owner advisor.",
+    secret: false,
+    placeholder: "gemini-3.7-flash",
+  },
   TWILIO_ENABLED: {
     label: "Twilio enabled",
     group: "SMS",

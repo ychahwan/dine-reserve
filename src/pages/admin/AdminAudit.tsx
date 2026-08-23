@@ -1,5 +1,14 @@
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,7 +27,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
-import { Eraser, Loader2 } from "lucide-react";
+import { Download, Eraser, Loader2, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { toast } from "sonner";
@@ -45,12 +54,51 @@ function extractValue(row: AuditEntry, key: SortKey): string | number {
   }
 }
 
+/** Export rows to a CSV file and trigger download. */
+function exportToCsv(entries: AuditEntry[]) {
+  const headers = ["Action", "Target User ID", "Details", "Timestamp"];
+  const rows = entries.map((e) => [
+    e.action,
+    e.targetUserId ?? "",
+    e.details ?? "",
+    new Date(e.createdAt).toISOString(),
+  ]);
+  const csv = [headers, ...rows]
+    .map((row) =>
+      row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+    )
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 export default function AdminAudit() {
-  const entries = useQuery(api.admin.auditLog);
+  const [search, setSearch] = useState("");
+  const [actionFilter, setActionFilter] = useState<string>("");
+  const entries = useQuery(api.admin.auditLog, {
+    search: search || undefined,
+    action: actionFilter || undefined,
+  });
   const clearAuditLog = useMutation(api.admin.clearAuditLog);
+  const deleteEntries = useMutation(api.admin.deleteAuditEntries);
   const [confirmClear, setConfirmClear] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const { sort, toggleSort } = useSort<SortKey>({ key: "when", direction: "desc" });
+
+  // Get unique action values for the filter dropdown
+  const allEntries = useQuery(api.admin.auditLog);
+  const actionOptions = useMemo(() => {
+    if (!allEntries) return [];
+    const actions = new Set(allEntries.map((e) => e.action));
+    return Array.from(actions).sort();
+  }, [allEntries]);
 
   const sorted = useMemo(
     () => sortItems(entries ?? [], sort.key, sort.direction, extractValue),
@@ -63,6 +111,38 @@ export default function AdminAudit() {
     sortDirection: sort.direction,
     pageSize: 25,
   });
+
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selected.size === pageItems.length) {
+      setSelected(new Set());
+    } else {
+      setSelected(new Set(pageItems.map((e) => e._id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (busy || selected.size === 0) return;
+    setBusy(true);
+    try {
+      const res = await deleteEntries({ ids: Array.from(selected) as never[] });
+      toast.success(`${res.deleted} entries deleted.`);
+      setSelected(new Set());
+      setConfirmDelete(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not delete entries.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const handleClear = async () => {
     if (busy) return;
@@ -79,7 +159,15 @@ export default function AdminAudit() {
     }
   };
 
-  if (entries === undefined) {
+  const handleExport = () => {
+    const toExport = selected.size > 0
+      ? sorted.filter((e) => selected.has(e._id))
+      : sorted;
+    exportToCsv(toExport);
+    toast.success(`Exported ${toExport.length} entries to CSV.`);
+  };
+
+  if (entries === undefined || allEntries === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
         <Spinner className="size-4" /> Loading audit log…
@@ -93,27 +181,82 @@ export default function AdminAudit() {
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Record of admin actions ({entries.length} total). Clearing it is itself logged.
+            {entries.length} entries{search || actionFilter ? " (filtered)" : ""}. Clearing it is itself logged.
           </p>
         </div>
-        <Button
-          variant="outline"
-          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-          disabled={entries?.length === 0 || busy}
-          onClick={() => setConfirmClear(true)}
-        >
-          <Eraser className="size-4" /> Clear log
-        </Button>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <Button
+              variant="outline"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={busy}
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="size-4" /> Delete ({selected.size})
+            </Button>
+          )}
+          <Button variant="outline" onClick={handleExport} disabled={entries.length === 0}>
+            <Download className="size-4" /> Export CSV
+          </Button>
+          <Button
+            variant="outline"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+            disabled={entries?.length === 0 || busy}
+            onClick={() => setConfirmClear(true)}
+          >
+            <Eraser className="size-4" /> Clear log
+          </Button>
+        </div>
       </div>
 
-      {entries.length === 0 ? (
+      {/* Filters */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Input
+          placeholder="Search action, details, or target…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-9 w-full sm:max-w-xs rounded-full text-sm"
+        />
+        <Select value={actionFilter} onValueChange={(v) => setActionFilter(v === "all" ? "" : v)}>
+          <SelectTrigger className="h-9 w-full sm:w-auto rounded-full text-sm">
+            <SelectValue placeholder="All actions" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All actions</SelectItem>
+            {actionOptions.map((a) => (
+              <SelectItem key={a} value={a}>{a}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {(search || actionFilter) && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="text-muted-foreground"
+            onClick={() => { setSearch(""); setActionFilter(""); }}
+          >
+            Clear filters
+          </Button>
+        )}
+      </div>
+
+      {entries.length === 0 && !search && !actionFilter ? (
         <EmptyNote>No admin actions recorded yet.</EmptyNote>
+      ) : pageItems.length === 0 ? (
+        <EmptyNote>No entries match your filters.</EmptyNote>
       ) : (
         <>
           <div className="rounded-2xl border border-border/70 bg-card">
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableCell className="w-10">
+                    <Checkbox
+                      checked={selected.size === pageItems.length && pageItems.length > 0}
+                      onCheckedChange={toggleSelectAll}
+                      aria-label="Select all"
+                    />
+                  </TableCell>
                   <SortableHead label="Action" sortKey="action" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
                   <SortableHead label="Target" sortKey="target" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
                   <SortableHead label="Details" sortKey="details" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
@@ -122,9 +265,16 @@ export default function AdminAudit() {
               </TableHeader>
               <TableBody>
                 {pageItems.map((e) => (
-                  <TableRow key={e._id}>
+                  <TableRow key={e._id} className={selected.has(e._id) ? "bg-muted/50" : ""}>
                     <TableCell>
-                      <Badge variant="secondary" className="font-mono text-[11px]">{e.action}</Badge>
+                      <Checkbox
+                        checked={selected.has(e._id)}
+                        onCheckedChange={() => toggleSelect(e._id)}
+                        aria-label={`Select ${e.action}`}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant="secondary" className="font-mono text-xs">{e.action}</Badge>
                     </TableCell>
                     <TableCell className="hidden font-mono text-xs text-muted-foreground md:table-cell">
                       {e.targetUserId ? String(e.targetUserId).slice(0, 12) + "…" : "—"}
@@ -132,7 +282,7 @@ export default function AdminAudit() {
                     <TableCell className="hidden max-w-xs truncate text-sm text-muted-foreground sm:table-cell">
                       {e.details ?? "—"}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap text-muted-foreground">
+                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">
                       {new Date(e.createdAt).toLocaleString()}
                     </TableCell>
                   </TableRow>
@@ -150,6 +300,29 @@ export default function AdminAudit() {
         </>
       )}
 
+      {/* Bulk delete confirmation */}
+      <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && !busy && setConfirmDelete(false)}>
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">Delete {selected.size} entries?</AlertDialogTitle>
+            <AlertDialogDescription>
+              These entries will be permanently removed. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={busy}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={busy}
+              onClick={(e) => { e.preventDefault(); void handleBulkDelete(); }}
+            >
+              {busy ? <Loader2 className="size-4 animate-spin" /> : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Clear all confirmation */}
       <AlertDialog open={confirmClear} onOpenChange={(open) => !open && !busy && setConfirmClear(false)}>
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
@@ -164,10 +337,7 @@ export default function AdminAudit() {
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={busy}
-              onClick={(e) => {
-                e.preventDefault();
-                void handleClear();
-              }}
+              onClick={(e) => { e.preventDefault(); void handleClear(); }}
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : "Clear audit log"}
             </AlertDialogAction>

@@ -101,19 +101,35 @@ export const isAdmin = query({
   },
 });
 
-/** Admin-only: view recent admin audit log entries (last 50). */
+/** Admin-only: view admin audit log entries with optional filtering. */
 export const auditLog = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    search: v.optional(v.string()),
+    action: v.optional(v.string()),
+  },
+  handler: async (ctx, { search, action }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     const user = await ctx.db.get(userId);
     if (user?.role !== "admin") return [];
-    return await ctx.db
+    let entries = await ctx.db
       .query("adminAuditLog")
       .withIndex("by_admin", (q) => q.eq("adminUserId", userId))
       .order("desc")
-      .take(50);
+      .take(500);
+    if (action) {
+      entries = entries.filter((e) => e.action === action);
+    }
+    if (search) {
+      const q = search.toLowerCase();
+      entries = entries.filter(
+        (e) =>
+          e.action.toLowerCase().includes(q) ||
+          (e.details && e.details.toLowerCase().includes(q)) ||
+          (e.targetUserId && String(e.targetUserId).toLowerCase().includes(q)),
+      );
+    }
+    return entries;
   },
 });
 
@@ -499,6 +515,30 @@ export const clearAuditLog = mutation({
       createdAt: Date.now(),
     });
     return { cleared: all.length };
+  },
+});
+
+/**
+ * Admin-only: delete specific audit log entries by ID (bulk delete).
+ */
+export const deleteAuditEntries = mutation({
+  args: { ids: v.array(v.id("adminAuditLog")) },
+  handler: async (ctx, { ids }) => {
+    const { userId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "deleteAuditEntries",
+      userId,
+      limit: 30,
+      windowMs: 60 * 60_000,
+    });
+    for (const id of ids) await ctx.db.delete(id);
+    await ctx.db.insert("adminAuditLog", {
+      adminUserId: userId,
+      action: "deleteAuditEntries",
+      details: JSON.stringify({ deletedIds: ids.length }),
+      createdAt: Date.now(),
+    });
+    return { deleted: ids.length };
   },
 });
 

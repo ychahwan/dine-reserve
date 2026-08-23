@@ -38,6 +38,7 @@ import {
   Phone,
   Plus,
   Trash2,
+  Users,
   Wand2,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
@@ -424,7 +425,7 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
         <p className="mb-2 flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
           <CalendarDays className="size-3.5" /> What diners will see
         </p>
-        <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+        <div className="no-scrollbar horizontal-rail flex gap-2 overflow-x-auto pb-1">
           {(week?.days ?? []).map((d, i) => (
             <button
               key={d.date}
@@ -652,7 +653,7 @@ export function AvailabilityTab({ restaurantId }: { restaurantId: string }) {
         Tap a time to close or reopen it.
       </p>
 
-      <div className="no-scrollbar flex gap-2 overflow-x-auto pb-1">
+      <div className="no-scrollbar horizontal-rail flex gap-2 overflow-x-auto pb-1">
         {days.map((d) => (
           <button
             key={d}
@@ -778,8 +779,11 @@ export function AvailabilityTab({ restaurantId }: { restaurantId: string }) {
 // ---------------------------------------------------------------------------
 
 export function BookingsTab({ restaurantId }: { restaurantId: string }) {
-  // default to All so a booking made for any date is visible right away
-  const [scope, setScope] = useState<"today" | "all">("all");
+  const [scope, setScope] = useState<"today" | "week" | "all">("all");
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"date" | "name" | "status">("date");
+  const [dateFilter, setDateFilter] = useState(""); // YYYY-MM-DD or empty
+
   const bookings = useQuery(api.bookings.byRestaurant, {
     restaurantId: restaurantId as never,
     date: scope === "today" ? today() : undefined,
@@ -803,26 +807,100 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
     }
   };
 
+  // Client-side search and filter
+  const filtered = useMemo(() => {
+    let list = bookings ?? [];
+
+    // Date filter (specific date)
+    if (dateFilter) {
+      list = list.filter((b) => b.date === dateFilter);
+    }
+
+    // Week filter
+    if (scope === "week") {
+      const now = new Date();
+      const weekStart = new Date(now);
+      weekStart.setDate(now.getDate() - now.getDay());
+      const weekEnd = new Date(weekStart);
+      weekEnd.setDate(weekStart.getDate() + 6);
+      const startKey = weekStart.toISOString().slice(0, 10);
+      const endKey = weekEnd.toISOString().slice(0, 10);
+      list = list.filter((b) => b.date >= startKey && b.date <= endKey);
+    }
+
+    // Search by name, code, or phone
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (b) =>
+          b.name.toLowerCase().includes(q) ||
+          b.code.toLowerCase().includes(q) ||
+          (b.phone && b.phone.includes(q)),
+      );
+    }
+
+    // Sort
+    list = [...list].sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "status") {
+        const order = { confirmed: 0, completed: 1, no_show: 2, cancelled: 3 };
+        return (order[a.status] ?? 4) - (order[b.status] ?? 4);
+      }
+      // default: by date+time
+      return `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`);
+    });
+
+    return list;
+  }, [bookings, scope, search, sortBy, dateFilter]);
+
   return (
     <div className="space-y-4 pb-6">
-      <div className="flex gap-2">
-        {[
-          { key: "today" as const, label: "Today" },
-          { key: "all" as const, label: "All" },
-        ].map((t) => (
-          <button
-            key={t.key}
-            onClick={() => setScope(t.key)}
-            className={cn(
-              "rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors",
-              scope === t.key
-                ? "border-primary bg-primary text-primary-foreground"
-                : "border-border bg-card text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {t.label}
-          </button>
-        ))}
+      {/* Filters row */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-wrap gap-2">
+          {[
+            { key: "today" as const, label: "Today" },
+            { key: "week" as const, label: "This week" },
+            { key: "all" as const, label: "All" },
+          ].map((t) => (
+            <button
+              key={t.key}
+              onClick={() => { setScope(t.key); setDateFilter(""); }}
+              className={cn(
+                "rounded-full border px-3.5 py-1.5 text-xs font-medium transition-colors",
+                scope === t.key && !dateFilter
+                  ? "border-primary bg-primary text-primary-foreground"
+                  : "border-border bg-card text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+          <input
+            type="date"
+            value={dateFilter}
+            onChange={(e) => { setDateFilter(e.target.value); setScope("all"); }}
+            className="h-8 rounded-full border border-border bg-card px-3 text-xs text-muted-foreground"
+          />
+        </div>
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Search name, code, or phone…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-48 rounded-full text-xs"
+          />
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+            <SelectTrigger className="h-8 w-auto rounded-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="date">Sort by date</SelectItem>
+              <SelectItem value="name">Sort by name</SelectItem>
+              <SelectItem value="status">Sort by status</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Waitlist */}
@@ -869,13 +947,13 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
         <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
           <Spinner className="size-4" /> Loading…
         </div>
-      ) : bookings.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
-          {scope === "today" ? "No bookings for today yet." : "No bookings yet."}
+          {search || dateFilter ? "No bookings match your search." : scope === "today" ? "No bookings for today yet." : "No bookings yet."}
         </div>
       ) : (
         <div className="space-y-2">
-          {bookings.map((b) => (
+          {filtered.map((b) => (
             <Card key={b._id} className="rounded-2xl border-border/70 p-4 shadow-sm">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
@@ -924,6 +1002,151 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
                   <Button size="sm" variant="outline" disabled={busyId === b._id} onClick={() => setStatus(b._id, "confirmed")}>
                     Reinstate
                   </Button>
+                )}
+              </div>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Customers: aggregated diner list from all bookings
+// ---------------------------------------------------------------------------
+
+type CustomerSummary = {
+  name: string;
+  phone?: string;
+  email?: string;
+  totalVisits: number;
+  totalGuests: number;
+  lastVisit: string;
+  statuses: string[];
+};
+
+export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
+  const bookings = useQuery(api.bookings.byRestaurant, {
+    restaurantId: restaurantId as never,
+  });
+  const [search, setSearch] = useState("");
+  const [sortBy, setSortBy] = useState<"visits" | "name" | "lastVisit">("visits");
+
+  const customers = useMemo(() => {
+    if (!bookings) return undefined;
+    const map = new Map<string, CustomerSummary>();
+    for (const b of bookings) {
+      const key = b.phone ?? b.name; // group by phone if available, else name
+      const existing = map.get(key);
+      if (existing) {
+        existing.totalVisits++;
+        existing.totalGuests += b.partySize;
+        if (b.date > existing.lastVisit) existing.lastVisit = b.date;
+        if (!existing.statuses.includes(b.status)) existing.statuses.push(b.status);
+        if (b.phone && !existing.phone) existing.phone = b.phone;
+        if (b.email && !existing.email) existing.email = b.email;
+      } else {
+        map.set(key, {
+          name: b.name,
+          phone: b.phone,
+          email: b.email,
+          totalVisits: 1,
+          totalGuests: b.partySize,
+          lastVisit: b.date,
+          statuses: [b.status],
+        });
+      }
+    }
+    return Array.from(map.values());
+  }, [bookings]);
+
+  const filtered = useMemo(() => {
+    if (!customers) return undefined;
+    let list = customers;
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (c) =>
+          c.name.toLowerCase().includes(q) ||
+          (c.phone && c.phone.includes(q)) ||
+          (c.email && c.email.toLowerCase().includes(q)),
+      );
+    }
+    list = [...list].sort((a, b) => {
+      if (sortBy === "name") return a.name.localeCompare(b.name);
+      if (sortBy === "lastVisit") return b.lastVisit.localeCompare(a.lastVisit);
+      return b.totalVisits - a.totalVisits;
+    });
+    return list;
+  }, [customers, search, sortBy]);
+
+  return (
+    <div className="space-y-4 pb-6">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-sm text-muted-foreground">
+          {customers ? `${customers.length} unique customer${customers.length === 1 ? "" : "s"} across ${bookings?.length ?? 0} bookings.` : "Loading…"}
+        </p>
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Search name, phone, or email…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="h-8 w-56 rounded-full text-xs"
+          />
+          <Select value={sortBy} onValueChange={(v) => setSortBy(v as typeof sortBy)}>
+            <SelectTrigger className="h-8 w-auto rounded-full text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="visits">Most visits</SelectItem>
+              <SelectItem value="name">Alphabetical</SelectItem>
+              <SelectItem value="lastVisit">Recent</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      {filtered === undefined ? (
+        <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
+          <Spinner className="size-4" /> Loading…
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          {search ? "No customers match your search." : "No customers yet."}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {filtered.map((c) => (
+            <Card key={c.phone ?? c.name} className="rounded-2xl border-border/70 p-4 shadow-sm">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="font-semibold">{c.name}</p>
+                  <p className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                    {c.phone && <span className="flex items-center gap-1"><Phone className="size-3" /> {c.phone}</span>}
+                    {c.email && <span>{c.email}</span>}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <div className="text-right">
+                    <p className="text-sm font-semibold text-primary">{c.totalVisits}</p>
+                    <p className="text-[10px] text-muted-foreground">visit{c.totalVisits === 1 ? "" : "s"}</p>
+                  </div>
+                </div>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span className="flex items-center gap-1"><Users className="size-3" /> {c.totalGuests} total guests</span>
+                <span>·</span>
+                <span>Last: {formatDate(c.lastVisit)}</span>
+                {c.statuses.length > 1 && (
+                  <>
+                    <span>·</span>
+                    <span className="flex items-center gap-1">
+                      {c.statuses.map((s) => (
+                        <Badge key={s} variant="secondary" className="text-[10px]">{s}</Badge>
+                      ))}
+                    </span>
+                  </>
                 )}
               </div>
             </Card>

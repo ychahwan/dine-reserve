@@ -39,7 +39,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
   }
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col bg-background">
+    <div className="mx-auto flex min-h-dvh w-full max-w-md flex-col bg-background lg:max-w-lg xl:max-w-xl">
       {/* Header */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-border/60 bg-background/90 px-4 backdrop-blur-md">
         <Link to="/explore" className="flex items-center gap-2">
@@ -55,7 +55,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
               <Bell className="size-4.5" />
             </span>
             {unread !== undefined && unread > 0 && (
-              <span className="absolute right-0.5 top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9px] font-bold leading-4 text-primary-foreground">
+              <span className="absolute right-0.5 top-0.5 flex min-w-4 items-center justify-center rounded-full bg-primary px-1 text-xs font-bold leading-4 text-primary-foreground">
                 {unread > 9 ? "9+" : unread}
               </span>
             )}
@@ -76,7 +76,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
       <main className="flex-1 pb-24">{children}</main>
 
       {/* Bottom nav */}
-      <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-md border-t border-border/60 bg-background/95 backdrop-blur-md">
+      <nav className="fixed inset-x-0 bottom-0 z-30 mx-auto w-full max-w-md border-t border-border/60 bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-md lg:max-w-lg xl:max-w-xl">
         <div className="grid grid-cols-3">
           {TAB_KEYS.map((tab) => (
             <NavLink
@@ -85,7 +85,7 @@ export function CustomerShell({ children }: { children: ReactNode }) {
               end={tab.to === "/explore"}
               className={({ isActive }) =>
                 cn(
-                  "flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium transition-colors",
+                  "flex flex-col items-center gap-1 py-2.5 text-xs font-medium transition-colors",
                   isActive ? "text-primary" : "text-muted-foreground hover:text-foreground",
                 )
               }

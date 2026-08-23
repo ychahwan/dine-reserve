@@ -1,6 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
+import { DEFAULT_AI_KNOWLEDGE, DEFAULT_AI_SEMANTIC_RULES } from "./aiPolicy";
 
 async function requireAdmin(ctx: QueryCtx | MutationCtx) {
   const userId = await getAuthUserId(ctx);
@@ -15,15 +16,15 @@ export const overview = query({
   handler: async (ctx) => {
     await requireAdmin(ctx);
     const [conversations, messages, knowledge, rules] = await Promise.all([
-      ctx.db.query("aiConversations").collect(),
-      ctx.db.query("aiMessages").collect(),
-      ctx.db.query("aiKnowledge").collect(),
-      ctx.db.query("aiSemanticRules").collect(),
+      ctx.db.query("aiConversations").withIndex("by_last_message").order("desc").take(250),
+      ctx.db.query("aiMessages").order("desc").take(5000),
+      ctx.db.query("aiKnowledge").take(250),
+      ctx.db.query("aiSemanticRules").take(250),
     ]);
     const users = await Promise.all([...new Set(conversations.map((c) => c.userId))].map((id) => ctx.db.get(id)));
     const names = new Map(users.filter(Boolean).map((u) => [u!._id, u!.name ?? u!.phone ?? "Customer"]));
     return {
-      conversations: conversations.sort((a, b) => b.lastMessageAt - a.lastMessageAt).map((c) => ({
+      conversations: conversations.map((c) => ({
         ...c,
         customerName: names.get(c.userId) ?? "Customer",
       })),
@@ -90,4 +91,22 @@ export const saveRule = mutation({
 export const deleteRule = mutation({
   args: { id: v.id("aiSemanticRules") },
   handler: async (ctx, { id }) => { await requireAdmin(ctx); await ctx.db.delete(id); return { ok: true }; },
+});
+
+export const installDefaults = mutation({
+  args: {},
+  handler: async (ctx) => {
+    const { userId } = await requireAdmin(ctx);
+    let knowledgeAdded = 0;
+    let rulesAdded = 0;
+    for (const entry of DEFAULT_AI_KNOWLEDGE) {
+      const existing = await ctx.db.query("aiKnowledge").withIndex("by_key", (q) => q.eq("key", entry.key)).first();
+      if (!existing) { await ctx.db.insert("aiKnowledge", { ...entry, updatedBy: userId, updatedAt: Date.now() }); knowledgeAdded++; }
+    }
+    for (const entry of DEFAULT_AI_SEMANTIC_RULES) {
+      const existing = await ctx.db.query("aiSemanticRules").withIndex("by_key", (q) => q.eq("key", entry.key)).first();
+      if (!existing) { await ctx.db.insert("aiSemanticRules", { ...entry, updatedBy: userId, updatedAt: Date.now() }); rulesAdded++; }
+    }
+    return { knowledgeAdded, rulesAdded };
+  },
 });

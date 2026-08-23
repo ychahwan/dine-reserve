@@ -1,4 +1,12 @@
 import { Spinner } from "@/components/ui/spinner";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { Link } from "react-router";
@@ -14,7 +22,7 @@ import { Badge } from "@/components/ui/badge";
 import { Ban } from "lucide-react";
 import { Stars, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
 import { formatPrice } from "@/lib/format";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import {
   useTablePagination,
   useSort,
@@ -37,11 +45,53 @@ function extractValue(row: Row, key: SortKey): string | number {
 
 export default function AdminRestaurants() {
   const rows = useQuery(api.adminView.listRestaurants);
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "disabled">("all");
+  const [cityFilter, setCityFilter] = useState("all");
   const { sort, toggleSort } = useSort<SortKey>({ key: "name", direction: "asc" });
 
+  // Extract unique cities for the filter dropdown
+  const cities = useMemo(() => {
+    if (!rows) return [];
+    const set = new Set(rows.map((r) => r.city).filter(Boolean));
+    return Array.from(set).sort();
+  }, [rows]);
+
+  const filtered = useMemo(() => {
+    let list = rows ?? [];
+
+    // Search by name, cuisine, city, owner name, or owner phone
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(
+        (r) =>
+          r.name.toLowerCase().includes(q) ||
+          r.cuisine.toLowerCase().includes(q) ||
+          r.city.toLowerCase().includes(q) ||
+          (r.neighborhood && r.neighborhood.toLowerCase().includes(q)) ||
+          (r.ownerName && r.ownerName.toLowerCase().includes(q)) ||
+          (r.ownerPhone && r.ownerPhone.includes(q)),
+      );
+    }
+
+    // Status filter
+    if (statusFilter === "disabled") {
+      list = list.filter((r) => r.disabled);
+    } else if (statusFilter === "active") {
+      list = list.filter((r) => !r.disabled);
+    }
+
+    // City filter
+    if (cityFilter !== "all") {
+      list = list.filter((r) => r.city === cityFilter);
+    }
+
+    return list;
+  }, [rows, search, statusFilter, cityFilter]);
+
   const sortedRows = useMemo(
-    () => sortItems(rows ?? [], sort.key, sort.direction, extractValue),
-    [rows, sort.key, sort.direction],
+    () => sortItems(filtered, sort.key, sort.direction, extractValue),
+    [filtered, sort.key, sort.direction],
   );
 
   const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
@@ -59,17 +109,64 @@ export default function AdminRestaurants() {
     );
   }
 
+  const disabledCount = rows.filter((r) => r.disabled).length;
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-bold tracking-tight">Restaurants</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          All {rows.length} restaurants on the platform. Select one to see its full operational detail.
+          {rows.length} restaurants total{disabledCount > 0 ? ` · ${disabledCount} disabled` : ""}. Select one to see its full operational detail.
         </p>
+      </div>
+
+      {/* Filters */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+        <Input
+          placeholder="Search name, cuisine, city, or owner…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="h-9 w-full sm:max-w-xs rounded-full text-sm"
+        />
+        <div className="flex gap-2">
+          <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as typeof statusFilter)}>
+            <SelectTrigger className="h-9 w-auto rounded-full text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="active">Active only</SelectItem>
+              <SelectItem value="disabled">Disabled only</SelectItem>
+            </SelectContent>
+          </Select>
+          {cities.length > 1 && (
+            <Select value={cityFilter} onValueChange={setCityFilter}>
+              <SelectTrigger className="h-9 w-auto rounded-full text-sm">
+                <SelectValue placeholder="All cities" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All cities</SelectItem>
+                {cities.map((c) => (
+                  <SelectItem key={c} value={c}>{c}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+        </div>
+        {(search || statusFilter !== "all" || cityFilter !== "all") && (
+          <button
+            className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+            onClick={() => { setSearch(""); setStatusFilter("all"); setCityFilter("all"); }}
+          >
+            Clear filters
+          </button>
+        )}
       </div>
 
       {rows.length === 0 ? (
         <EmptyNote>No restaurants yet.</EmptyNote>
+      ) : pageItems.length === 0 ? (
+        <EmptyNote>No restaurants match your filters.</EmptyNote>
       ) : (
         <>
           <div className="rounded-2xl border border-border/70 bg-card">
@@ -98,7 +195,7 @@ export default function AdminRestaurants() {
                           )}
                         </p>
                         <p className="text-xs text-muted-foreground">
-                          {r.cuisine} · {r.city}
+                          {r.cuisine} · {r.city}{r.neighborhood ? `, ${r.neighborhood}` : ""}
                         </p>
                       </Link>
                     </TableCell>

@@ -150,10 +150,10 @@ export function SocializeDialog({
     if (!booking || busy) return;
     setBusy("visibility");
     try {
-      await setVisibility({ bookingId: booking._id as never, visible: !visible, clientDate: today() });
+      await setVisibility({ bookingId: booking._id as never, visible: !visible });
       toast.success(
         visible
-          ? "You're now invisible — diners here won't see you or send gifts."
+          ? "You're now invisible — diners won't see you or send gifts."
           : "You're visible — diners at this restaurant can see you and send you something.",
       );
     } catch (err) {
@@ -208,9 +208,9 @@ export function SocializeDialog({
         ) : (
           <>
             {/* Tabs */}
-        <div className="no-scrollbar mt-2 flex gap-2 overflow-x-auto pb-1">
+        <div className="no-scrollbar horizontal-rail mt-2 flex gap-2 overflow-x-auto pb-1">
           {[
-            { key: "room" as const, label: "Who's dining", icon: Users, count: isToday ? openCount : 0 },
+            { key: "room" as const, label: "Who's dining", icon: Users, count: openCount },
             { key: "gifts" as const, label: "Gifts", icon: Gift, count: pendingReceived },
           ].map((t) => (
             <button
@@ -245,11 +245,11 @@ export function SocializeDialog({
         {tab === "room" && (
           <div className="space-y-4">
             {!isToday && (
-              <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/10 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300">
-                <Sparkles className="mt-0.5 size-3.5 shrink-0" />
+              <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground">
+                <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
                 <span>
-                  Socialize goes live on the day of your visit. On the day, appear here to see who
-                  else is dining and let them find you.
+                  Set your visibility now so you're ready on the day. Other diners will only see you
+                  when your booking date arrives.
                 </span>
               </div>
             )}
@@ -274,7 +274,7 @@ export function SocializeDialog({
                 </div>
                 <Switch
                   checked={visible}
-                  disabled={!isToday || busy === "visibility"}
+                  disabled={busy === "visibility"}
                   onCheckedChange={handleToggleVisible}
                   aria-label="Toggle Socialize visibility"
                 />

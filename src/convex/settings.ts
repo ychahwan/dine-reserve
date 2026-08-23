@@ -24,6 +24,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 export const SETTING_KEYS = [
   "GEMINI_API_KEY",
   "AI_SYSTEM_PROMPT",
+  "AI_MODEL",
   "TWILIO_ENABLED",
   "TWILIO_ACCOUNT_SID",
   "TWILIO_AUTH_TOKEN",

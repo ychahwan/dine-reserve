@@ -2,7 +2,7 @@ import { OwnerShell } from "@/components/OwnerShell";
 import { OwnerMenuTab } from "@/components/OwnerMenuTab";
 import { OwnerNotificationsTab } from "@/components/OwnerNotificationsTab";
 import { OwnerInsightsTab } from "@/components/OwnerInsightsTab";
-import { AvailabilityTab, BookingsTab, SlotRulesTab } from "@/components/OwnerRestaurantTabs";
+import { AvailabilityTab, BookingsTab, OwnerCustomersTab, SlotRulesTab } from "@/components/OwnerRestaurantTabs";
 import {
   DiningTabCount,
   OwnerAssistsTab,
@@ -183,6 +183,7 @@ export default function OwnerRestaurant() {
             { key: "availability", label: "Availability" },
             { key: "menu", label: "Menu" },
             { key: "bookings", label: "Bookings" },
+            { key: "customers", label: "Customers" },
             { key: "orders", label: "Orders", badge: "orders" as const },
             { key: "requests", label: "Requests", badge: "assists" as const },
             { key: "menuideas", label: "Menu ideas", badge: "menuRequests" as const },
@@ -229,6 +230,9 @@ export default function OwnerRestaurant() {
         </TabsContent>
         <TabsContent value="bookings" className="mt-5">
           <BookingsTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="customers" className="mt-5">
+          <OwnerCustomersTab restaurantId={r._id} />
         </TabsContent>
         <TabsContent value="orders" className="mt-5">
           <OwnerOrdersTab restaurantId={r._id} />

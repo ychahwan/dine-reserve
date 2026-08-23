@@ -21,7 +21,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
+  ArrowDownAZ,
   ArrowLeft,
+  ArrowUpAZ,
+  ArrowUpDown,
   BellRing,
   CalendarDays,
   Check,
@@ -147,6 +150,8 @@ export default function RestaurantDetail() {
   const [seatPref, setSeatPref] = useState<SeatPref | null>(validSeat);
   const [nonSmoking, setNonSmoking] = useState(searchParams.get("nonSmoking") === "1");
   const [menuTab, setMenuTab] = useState<string>("overview");
+  const [reviewRatingFilter, setReviewRatingFilter] = useState(0);
+  const [reviewSort, setReviewSort] = useState<"newest" | "highest" | "lowest">("newest");
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [occasion, setOccasion] = useState<string | null>(null);
@@ -251,6 +256,15 @@ export default function RestaurantDetail() {
   }, [availability, seatPref, nonSmoking, partySize]);
 
   const selectedSection = availability?.sections.find((s) => s._id === selectedSlot?.sectionId);
+
+  const filteredReviews = useMemo(() => {
+    if (!reviewsData?.reviews) return [];
+    let list = reviewsData.reviews;
+    if (reviewRatingFilter > 0) list = list.filter((r) => r.rating === reviewRatingFilter);
+    if (reviewSort === "newest") return list;
+    if (reviewSort === "highest") return [...list].sort((a, b) => b.rating - a.rating || b.createdAt - a.createdAt);
+    return [...list].sort((a, b) => a.rating - b.rating || b.createdAt - a.createdAt);
+  }, [reviewsData, reviewRatingFilter, reviewSort]);
 
   // MUST stay above the `if (!data)` early return — hooks cannot be called
   // conditionally. Grouping a few dozen menu items is cheap, so a plain call
@@ -506,7 +520,7 @@ export default function RestaurantDetail() {
         {/* Stories (Idea #8) */}
         {(stories ?? []).length > 0 && (
           <div className="px-4 pt-4">
-            <div className="no-scrollbar flex gap-2.5 overflow-x-auto pb-1">
+            <div className="no-scrollbar horizontal-rail flex gap-2.5 overflow-x-auto pb-1">
               {(stories ?? []).map((s) => (
                 <div
                   key={s._id}
@@ -537,7 +551,7 @@ export default function RestaurantDetail() {
           {/* Date strip — collapsed into a chip when the date already came
               over from Explore; "Change date" re-opens it. */}
           {showDateStrip ? (
-            <div className="no-scrollbar mt-4 flex gap-2 overflow-x-auto pb-1">
+            <div className="no-scrollbar horizontal-rail mt-4 flex gap-2 overflow-x-auto pb-1">
               {days.map((d) => (
                 <button
                   key={d}
@@ -776,7 +790,7 @@ export default function RestaurantDetail() {
             </p>
           ) : (
             <>
-              <div className="no-scrollbar mt-3 flex gap-2 overflow-x-auto pb-1">
+              <div className="no-scrollbar horizontal-rail mt-3 flex gap-2 overflow-x-auto pb-1">
                 <button
                   onClick={() => setMenuTab("overview")}
                   className={cn(
@@ -938,9 +952,49 @@ export default function RestaurantDetail() {
                 </div>
               </div>
 
+              {/* Review filter chips + sort */}
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <div className="no-scrollbar horizontal-rail flex gap-1.5 overflow-x-auto pb-1">
+                  {[0, 5, 4, 3, 2, 1].map((star) => (
+                    <button
+                      key={star}
+                      onClick={() => setReviewRatingFilter(star)}
+                      className={cn(
+                        "flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-xs font-medium transition-colors",
+                        reviewRatingFilter === star
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-card text-muted-foreground hover:text-foreground",
+                      )}
+                    >
+                      {star === 0 ? (
+                        t("detail.allReviews")
+                      ) : (
+                        <>
+                          {star}<Star className="size-3 fill-current" />
+                        </>
+                      )}
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={() => setReviewSort((s) => (s === "newest" ? "highest" : s === "highest" ? "lowest" : "newest"))}
+                  className="flex shrink-0 items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
+                  aria-label={t("detail.sortReviews")}
+                >
+                  {reviewSort === "newest" ? (
+                    <ArrowUpDown className="size-3" />
+                  ) : reviewSort === "highest" ? (
+                    <ArrowDownAZ className="size-3" />
+                  ) : (
+                    <ArrowUpAZ className="size-3" />
+                  )}
+                  {t(`detail.sort${reviewSort.charAt(0).toUpperCase() + reviewSort.slice(1)}`)}
+                </button>
+              </div>
+
               {/* Review cards */}
               <div className="mt-3 space-y-2">
-                {reviewsData.reviews.map((rev) => (
+                {filteredReviews.map((rev) => (
                   <div key={rev._id} className="rounded-xl border border-border/70 bg-card px-4 py-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2.5">
