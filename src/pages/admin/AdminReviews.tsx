@@ -81,10 +81,10 @@ export default function AdminReviews() {
   const { sort, toggleSort } = useSort<SortKey>({ key: "date", direction: "desc" });
 
   const stats = useMemo(() => {
-    if (!reviews?.length) return null;
-    const sum = reviews.reduce((total, review) => total + review.rating, 0);
-    return { average: Math.round((sum / reviews.length) * 10) / 10 };
-  }, [reviews]);
+    if (!filtered.length) return null;
+    const sum = filtered.reduce((total, review) => total + review.rating, 0);
+    return { average: Math.round((sum / filtered.length) * 10) / 10 };
+  }, [filtered]);
 
   const restaurantOptions = useMemo(() => {
     const options = new Map<string, string>();
@@ -218,8 +218,8 @@ export default function AdminReviews() {
               <TrendingUp className="size-5" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Average rating</p>
-              <p className="text-lg font-bold tracking-tight sm:text-xl">{stats?.average.toFixed(1)} / 5</p>
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Avg rating{filtered.length < reviews.length ? " (filtered)" : ""}</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{stats ? `${stats.average.toFixed(1)} / 5` : "—"}</p>
             </div>
           </CardContent>
         </Card>
@@ -229,8 +229,8 @@ export default function AdminReviews() {
               <MessageSquareQuote className="size-5" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Total reviews</p>
-              <p className="text-lg font-bold tracking-tight sm:text-xl">{reviews.length}</p>
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Reviews{filtered.length < reviews.length ? ` (${filtered.length}/${reviews.length})` : ""}</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{filtered.length}</p>
             </div>
           </CardContent>
         </Card>
@@ -240,8 +240,8 @@ export default function AdminReviews() {
               <Star className="size-5" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Filtered results</p>
-              <p className="text-lg font-bold tracking-tight sm:text-xl">{filtered.length}</p>
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Total platform</p>
+              <p className="text-lg font-bold tracking-tight sm:text-xl">{reviews.length}</p>
             </div>
           </CardContent>
         </Card>
