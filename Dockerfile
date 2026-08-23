@@ -16,7 +16,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-ARG VITE_CONVEX_URL
+ARG VITE_CONVEX_URL=https://canny-leopard-341.convex.cloud
 ENV VITE_CONVEX_URL=$VITE_CONVEX_URL
 
 COPY . .
