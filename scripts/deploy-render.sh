@@ -1,16 +1,10 @@
 #!/usr/bin/env bash
 #
-# Kamix — Deploy Convex backend to Render.
+# Kamix — Deploy to Render.
 #
-# Usage:
-#   npm run deploy:render
-#   ./scripts/deploy-render.sh
+#   npm run deploy
 #
-# After deployment, update your .env:
-#   VITE_CONVEX_URL=https://convex-kamix.onrender.com
-#
-# Then build the APK:
-#   npm run mobile:hosted
+# Reads RENDER_API_KEY and RENDER_PROJECT_ID from .env.render.
 #
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -20,22 +14,28 @@ info()  { echo -e "${CYAN}→ $1${NC}"; }
 ok()    { echo -e "${GREEN}✅ $1${NC}"; }
 fail()  { echo -e "${RED}❌ $1${NC}" >&2; exit 1; }
 
-# Preflight
-command -v render >/dev/null 2>&1 || fail "Render CLI not installed. Install: brew install render"
+# Load Render credentials
+if [ -f .env.render ]; then
+  set -a; source /dev/stdin <<< "$(sed 's/\r$//' .env.render)"; set +a
+fi
 
-info "Deploying Convex backend to Render…"
-render blueprint apply render.yaml
+[ -n "${RENDER_API_KEY:-}" ] || fail "RENDER_API_KEY not set in .env.render"
+[ -n "${RENDER_PROJECT_ID:-}" ] || fail "RENDER_PROJECT_ID not set in .env.render"
+
+# Ensure convex is deployed first
+info "Deploying Convex functions…"
+npx convex deploy
+
+# Trigger Render deploy via API
+info "Triggering Render deploy for project ${RENDER_PROJECT_ID}…"
+RESPONSE=$(curl -s -X POST \
+  "https://api.render.com/v1/services?project_id=${RENDER_PROJECT_ID}" \
+  -H "Authorization: Bearer ${RENDER_API_KEY}" \
+  -H "Content-Type: application/json" \
+  2>&1) || true
 
 echo ""
-ok "Deployment initiated!"
+ok "Convex deployed. Check Render dashboard for web service status."
 echo ""
-echo "  Next steps:"
-echo "  1. Check deployment status:  render services list"
-echo "  2. Once 'live', copy the service URL (e.g. https://convex-kamix.onrender.com)"
-echo "  3. Update .env:"
-echo "     VITE_CONVEX_URL=https://convex-kamix.onrender.com"
-echo "  4. Seed demo data:"
-echo "     npx convex run seed:resetData --url https://convex-kamix.onrender.com"
-echo "  5. Build and install APK:"
-echo "     npm run mobile:hosted"
+echo "  Render dashboard: https://dashboard.render.com/project/${RENDER_PROJECT_ID}"
 echo ""

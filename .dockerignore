@@ -8,8 +8,6 @@ dist
 !.env.example
 .vite
 coverage
-
-# Capacitor native platforms + build artifacts (regenerated in the image)
 android
 ios
 apk

@@ -1,20 +1,24 @@
+# ---------------------------------------------------------------------------
+# Kamix — Render Web Service (static frontend → hosted Convex)
+#
+# Builds the React/Vite frontend and serves it with nginx.
+# VITE_CONVEX_URL must be set as a build arg or Render env var.
+#
+# Usage:
+#   docker build --build-arg VITE_CONVEX_URL=https://xxx.convex.cloud -t kamix .
+#   docker run -p 80:80 kamix
+# ---------------------------------------------------------------------------
+
 # ---- Build stage -----------------------------------------------------------
 FROM node:20-alpine AS build
 WORKDIR /app
 
-# Install dependencies first for better layer caching
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Environment baked into the production bundle at build time.
-# VITE_CONVEX_URL points at the Convex deployment the frontend talks to.
 ARG VITE_CONVEX_URL
 ENV VITE_CONVEX_URL=$VITE_CONVEX_URL
-# Optional integration key for the Vly plugin (no-op when empty).
-ARG VLY_INTEGRATION_KEY
-ENV VLY_INTEGRATION_KEY=$VLY_INTEGRATION_KEY
 
-# Copy the rest of the source and build
 COPY . .
 RUN npm run build
 

@@ -6,4 +6,4 @@ dist/
 android/
 ios/
 apk/
-*.apk
+*.apk.env.render

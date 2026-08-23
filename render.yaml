@@ -1,32 +1,28 @@
 # ---------------------------------------------------------------------------
 # Kamix — Render Blueprint
 #
-# Deploys the self-hosted Convex backend as a Web Service on Render.
+# Deploys the web admin / customer / restaurant apps as a single Web Service.
+# All apps share the same codebase and connect to the hosted Convex backend.
 #
 # Usage:
 #   1. Push this repo to GitHub/GitLab.
 #   2. In Render dashboard → New → Blueprint, connect the repo.
-#   3. Render reads this file and creates the service automatically.
+#   3. Set VITE_CONVEX_URL in Render env vars to your Convex deployment URL.
 #
 # Or use the CLI:
 #   render blueprint apply render.yaml
-#
-# After deployment, set VITE_CONVEX_URL in your .env to the service URL:
-#   VITE_CONVEX_URL=https://convex-kamix.onrender.com
 # ---------------------------------------------------------------------------
+
 services:
   - type: web
-    name: convex-kamix
+    name: kamix
     runtime: docker
-    dockerfilePath: Dockerfile.convex
+    dockerfilePath: Dockerfile
+    plan: starter
     envVars:
-      - key: CONVEX_SITE_URL
-        value: https://convex-kamix.onrender.com
+      - key: VITE_CONVEX_URL
+        sync: false  # Set manually in Render dashboard
       - key: NODE_ENV
         value: production
-      - key: VLY_CONVEX_AUTH_ISSUER
-        value: https://freebuff.com
-
     healthCheckPath: /
     autoDeploy: true
-    plan: free
