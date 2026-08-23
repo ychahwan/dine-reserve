@@ -1,9 +1,9 @@
 # Kamix Production Action Plan
 
 ## Phase 1: Deploy & Fix
-- [ ] 1.1 Run `npm run convex:deploy` and fix any deployment errors
-- [ ] 1.2 Fix the admin Customers page error (OwnerCustomersTab)
-- [ ] 1.3 Verify all admin pages load without errors
+- [x] 1.1 Run `npm run convex:deploy` and fix any deployment errors
+- [x] 1.2 Fix the admin Customers page error (OwnerCustomersTab)
+- [x] 1.3 Verify all admin pages load without errors
 
 ## Phase 2: Production Cleanup
 - [ ] 2.1 Remove test/debug scripts from `scripts/` (keep only seed.sh, wipe.sh, deploy-render.sh, mobile-*.sh)
@@ -38,3 +38,5 @@
 | 3. Mobile | ⏳ Needs local build env |
 | 4. Stress Seed | ✅ Done |
 | 5. README | ✅ Done |
+| 6. Audit log stats | ✅ Done |
+| 7. Socialize security | ✅ Done |

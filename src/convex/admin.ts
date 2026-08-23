@@ -114,7 +114,6 @@ export const auditLog = query({
     if (user?.role !== "admin") return [];
     let entries = await ctx.db
       .query("adminAuditLog")
-      .withIndex("by_admin", (q) => q.eq("adminUserId", userId))
       .order("desc")
       .take(500);
     if (action) {
@@ -531,14 +530,15 @@ export const deleteAuditEntries = mutation({
       limit: 30,
       windowMs: 60 * 60_000,
     });
-    for (const id of ids) await ctx.db.delete(id);
+    const limited = ids.slice(0, 100); // BUG-12: cap batch size
+    for (const id of limited) await ctx.db.delete(id);
     await ctx.db.insert("adminAuditLog", {
       adminUserId: userId,
       action: "deleteAuditEntries",
-      details: JSON.stringify({ deletedIds: ids.length }),
+      details: JSON.stringify({ deletedIds: limited.length }),
       createdAt: Date.now(),
     });
-    return { deleted: ids.length };
+    return { deleted: limited.length };
   },
 });
 

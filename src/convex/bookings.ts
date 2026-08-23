@@ -214,17 +214,19 @@ async function commitBooking(
     userId: opts.userId,
     type: "booking_created",
   });
-  // async SMS — never blocks or breaks the booking
-  await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
-    to: opts.args.phone?.trim() || "",
-    event: "confirmed",
-    restaurantName: opts.restaurantName,
-    city: opts.city,
-    date: opts.args.date,
-    time: opts.shiftedTime ?? opts.args.time,
-    partySize: opts.args.partySize,
-    code,
-  });
+  // async SMS — never blocks or breaks the booking (only when phone is present)
+  if (opts.args.phone?.trim()) {
+    await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
+      to: opts.args.phone.trim(),
+      event: "confirmed",
+      restaurantName: opts.restaurantName,
+      city: opts.city,
+      date: opts.args.date,
+      time: opts.shiftedTime ?? opts.args.time,
+      partySize: opts.args.partySize,
+      code,
+    });
+  }
   return await ctx.db.get(bookingId);
 }
 
@@ -641,9 +643,12 @@ export const confirmGuest = mutation({
     const restaurant = await ctx.db.get(booking.restaurantId);
     if (restaurant?.disabled) throw new Error("This restaurant is currently unavailable.");
 
-    const today = new Date();
-    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}-${String(today.getDate()).padStart(2, "0")}`;
-    if (booking.date < todayKey) throw new Error("This booking is in the past.");
+    // BUG-04: use server date for past check (guest confirm is on-visit, not day-of specific)
+    const serverToday = (() => {
+      const n = new Date();
+      return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+    })();
+    if (booking.date < serverToday) throw new Error("This booking is in the past.");
 
     if (booking.userId === userId) {
       throw new Error("You're the host — you're already on the list.");

@@ -45,11 +45,14 @@ async function requireOwnConfirmedBooking(
   ctx: MutationCtx | QueryCtx,
   userId: string,
   bookingId: Id<"bookings">,
+  clientDate?: string,
 ) {
   const booking = await ctx.db.get(bookingId);
   if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
   if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
-  if (booking.date < todayKey()) throw new Error("This booking is in the past.");
+  // BUG-05: use resolveTodayKey to handle timezone edge cases near midnight
+  // (server is UTC, diner may be ahead/behind by several hours)
+  if (booking.date < resolveTodayKey(clientDate)) throw new Error("This booking is in the past.");
   return booking;
 }
 

@@ -365,11 +365,41 @@ export const tasteTwins = query({
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
       .collect();
-    const visible = presences.filter((p) => p.visible && p.userId !== userId);
+    let visible = presences.filter((p) => p.visible && p.userId !== userId);
+
+    // BUG-10: apply block list filter (same as visibleDiners)
+    const socializeSettings = restaurant?.socialize;
+    if (socializeSettings?.blockedUserIds?.length) {
+      const blocked = new Set(socializeSettings.blockedUserIds);
+      visible = visible.filter((p) => !blocked.has(p.userId as never));
+    }
+
     const [users, bookings] = await Promise.all([
       Promise.all(visible.map((p) => safeGet<Doc<"users">>(ctx, p.userId))),
       Promise.all(visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId))),
     ]);
+
+    // BUG-10: apply minVisits filter (same as visibleDiners)
+    const minVisits = socializeSettings?.minVisits ?? 0;
+    let visitCounts: Map<string, number> | null = null;
+    if (minVisits > 0) {
+      const visibleUserIds = [...new Set(visible.map((p) => p.userId))];
+      const allBookings = await Promise.all(
+        visibleUserIds.map((uid) =>
+          ctx.db
+            .query("bookings")
+            .withIndex("by_user", (q) => q.eq("userId", uid as never))
+            .collect(),
+        ),
+      );
+      visitCounts = new Map();
+      visibleUserIds.forEach((uid, i) => {
+        const completed = allBookings[i]!.filter(
+          (b) => b.status === "completed" && b.restaurantId === restaurantId,
+        ).length;
+        visitCounts!.set(uid, completed);
+      });
+    }
 
     const matches: {
       _id: string;
@@ -386,6 +416,8 @@ export const tasteTwins = query({
       const other = users[i];
       const booking = bookings[i];
       if (!other || !booking || booking.status !== "confirmed" || booking.date !== today) continue;
+      // BUG-10: skip diners below minVisits threshold
+      if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits) continue;
       const prefs = other.prefs;
       if (!prefs) continue;
 
@@ -426,7 +458,6 @@ export const setVisibility = mutation({
   args: {
     bookingId: v.id("bookings"),
     visible: v.boolean(),
-    clientDate: v.optional(v.string()),
   },
   handler: async (ctx, { bookingId, visible }) => {
     const userId = await getAuthUserId(ctx);
@@ -608,6 +639,16 @@ export const sendGift = mutation({
       throw new Error("That gift isn't available at this restaurant.");
     }
     if (!gift.available) throw new Error(`"${gift.name}" is no longer available.`);
+
+    // BUG-01/02: check block list for both sender and receiver
+    const restaurant = await ctx.db.get(booking.restaurantId);
+    const socializeSettings = restaurant?.socialize;
+    if (socializeSettings?.blockedUserIds?.includes(userId as never)) {
+      throw new Error("You are not able to send gifts at this restaurant.");
+    }
+    if (socializeSettings?.blockedUserIds?.includes(receiverUserId as never)) {
+      throw new Error("That diner isn't accepting gifts right now.");
+    }
 
     // the receiver must be visible at the same restaurant right now
     const receiverPresence = await ctx.db
