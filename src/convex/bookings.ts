@@ -285,11 +285,19 @@ export const byCode = query({
 });
 
 export const myBookings = query({
-  args: {},
-  handler: async (ctx) => {
+  args: {
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, { limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    const bookings = await ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
+    // PERF-FIX: Added pagination limit (default 30, max 100)
+    const effectiveLimit = Math.min(Math.max(limit ?? 30, 1), 100);
+    const bookings = await ctx.db
+      .query("bookings")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .order("desc")
+      .take(effectiveLimit);
     const restaurants = await Promise.all(
       bookings.map((b) => ctx.db.get(b.restaurantId)),
     );

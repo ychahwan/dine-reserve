@@ -451,6 +451,178 @@ npx cap open ios                        # Opens Xcode
 # Product → Archive to build release
 ```
 
+## Firebase Push Notifications (FCM)
+
+Kamix uses **Firebase Cloud Messaging (FCM)** to deliver push notifications to users' devices — booking confirmations, waitlist alerts, and special offers appear in the phone's notification tray even when the app is closed.
+
+### How It Works
+
+```
+User taps "Enable Notifications" in Account → Permission granted → Token saved to Convex
+                                                          ↓
+Backend sends notification via Firebase → FCM delivers to device → Notification appears in tray
+```
+
+### Step 1: Create a Firebase Project
+
+1. Go to [Firebase Console](https://console.firebase.google.com/)
+2. Click **"Add project"**
+3. Enter project name: `kamix-notifications` (or any name you prefer)
+4. Enable Google Analytics (optional)
+5. Click **Create project**
+
+### Step 2: Add Your Android App to Firebase
+
+1. In Firebase Console, click the **Android icon** (Add app)
+2. Enter package name: **`com.kamix.app`** (must match exactly)
+3. Enter app nickname: `Kamix`
+4. **Skip** SHA-1 for now (can add later for App Links)
+5. Click **Register app**
+
+### Step 3: Download google-services.json
+
+1. Click **Download google-services.json**
+2. Replace the placeholder file at:
+   ```
+   android/app/google-services.json
+   ```
+
+The file should look like this:
+
+```json
+{
+  "project_info": {
+    "project_number": "123456789",
+    "project_id": "kamix-notifications",
+    "storage_bucket": "kamix-notifications.appspot.com"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:123456789:android:abcdef123456",
+        "android_client_info": {
+          "package_name": "com.kamix.app"
+        }
+      },
+      "api_key": [
+        {
+          "current_key": "AIzaSyB...your_key_here"
+        }
+      ]
+    }
+  ],
+  "configuration_version": "1"
+}
+```
+
+### Step 4: Get Server Key for Backend
+
+1. In Firebase Console, go to **Project Settings** (gear icon ⚙️)
+2. Click **Cloud Messaging** tab
+3. Copy the **Server key** (legacy)
+4. Add to your `.env` file:
+   ```
+   FIREBASE_SERVER_KEY=your_server_key_here
+   ```
+
+### Step 5: Rebuild the App
+
+```bash
+# Sync Capacitor with latest web build
+npx cap sync android
+
+# Build signed release APK
+cd android
+./gradlew assembleRelease
+
+# Copy to apk folder
+cp app/build/outputs/apk/release/app-release.apk ../apk/kamix-release.apk
+```
+
+### Step 6: Test Push Notifications
+
+#### Using Firebase Console (Easiest)
+
+1. Go to **Firebase Console** → **Messaging** (left sidebar)
+2. Click **New campaign** → **Notifications**
+3. Enter title: "Booking Confirmed!"
+4. Enter body: "Your table at Pizza Palace is reserved for 7PM tonight"
+5. Select your app: `Kamix`
+6. Click **Send test message** → Enter your device's FCM token
+7. Click **Send**
+
+#### Using cURL (Advanced)
+
+```bash
+curl -X POST \
+  https://fcm.googleapis.com/fcm/send \
+  -H "Authorization: key=YOUR_SERVER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "to": "DEVICE_FCM_TOKEN",
+    "notification": {
+      "title": "Kamix",
+      "body": "Your booking is confirmed!"
+    },
+    "data": {
+      "bookingId": "12345",
+      "type": "booking_confirmed"
+    }
+  }'
+```
+
+### Environment Variables
+
+Add these to your `.env` file:
+
+```env
+# Firebase Configuration (from google-services.json)
+VITE_FIREBASE_API_KEY=AIzaSyB...your_key
+VITE_FIREBASE_AUTH_DOMAIN=kamix-notifications.firebaseapp.com
+VITE_FIREBASE_PROJECT_ID=kamix-notifications
+VITE_FIREBASE_STORAGE_BUCKET=kamix-notifications.appspot.com
+VITE_FIREBASE_MESSAGING_SENDER_ID=123456789
+VITE_FIREBASE_APP_ID=1:123456789:android:abcdef123456
+
+# Server-side (for sending notifications from backend)
+FIREBASE_SERVER_KEY=your_server_key_here
+```
+
+### Notification Types in Kamix
+
+| Type | When Sent | Example |
+|------|-----------|---------|
+| `booking_confirmed` | Booking confirmed | "Your table at Pizza Palace is confirmed for 7PM" |
+| `waitlist_freed` | Table becomes available | "Table for 4 is now available at Sushi Hub!" |
+| `booking_reminder` | Day before booking | "Reminder: You have a reservation tomorrow at 8PM" |
+| `special_offer` | Promotional | "20% off lunch today at Cafe Mocha" |
+
+### Firebase Pricing
+
+Firebase Cloud Messaging is **100% free** — no limits on notifications sent.
+
+### Troubleshooting
+
+| Issue | Solution |
+|-------|----------|
+| "google-services.json not found" | Ensure file is at `android/app/google-services.json` |
+| Notifications not appearing | Check device logs: `adb logcat | grep -i "firebase"` |
+| Token not saving | Verify user is logged in and `FIREBASE_SERVER_KEY` is set |
+| App crashes on startup | Verify package name `com.kamix.app` matches in Firebase Console |
+
+### Files Involved
+
+| File | Purpose |
+|------|---------|
+| `android/app/google-services.json` | Firebase configuration (download from console) |
+| `src/components/NotificationHandler.tsx` | Handles notification lifecycle |
+| `src/hooks/use-push-notifications.ts` | React hook for push notifications |
+| `src/convex/notifications.ts` | Backend token management & sending |
+| `src/convex/schema.ts` | `notificationTokens` table definition |
+| `docs/FIREBASE_SETUP.md` | Detailed setup guide |
+
+---
+
 ## Common Convex Mistakes To Avoid
 
 When using convex, make sure:

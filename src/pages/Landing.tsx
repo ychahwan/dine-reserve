@@ -85,6 +85,7 @@ export default function Landing() {
             alt=""
             className="h-full w-full object-cover"
             loading="eager"
+            decoding="async"
           />
           <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background" />
           <div className="absolute inset-0 bg-gradient-to-r from-background/50 to-transparent" />
@@ -187,7 +188,8 @@ export default function Landing() {
                     src={DINING_IMG}
                     alt="Atmospheric restaurant dining scene"
                     className="h-80 w-full object-cover"
-                    loading="eager"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </div>
                 {/* Overlapping courtyard image */}
@@ -196,7 +198,8 @@ export default function Landing() {
                     src={COURTYARD_IMG}
                     alt="Restaurant courtyard"
                     className="h-36 w-48 object-cover"
-                    loading="eager"
+                    loading="lazy"
+                    decoding="async"
                   />
                 </div>
                 {/* Floating reservation receipt card */}
@@ -249,6 +252,7 @@ export default function Landing() {
                     alt=""
                     className="h-full w-full object-cover opacity-60 transition-transform duration-500 group-hover:scale-105"
                     loading="lazy"
+                    decoding="async"
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
                   <span className="absolute bottom-3 left-4 text-5xl font-bold text-foreground/10" style={{ fontFamily: "var(--font-display)" }}>
@@ -287,6 +291,7 @@ export default function Landing() {
                     alt="Restaurant chef preparing a dish"
                     className="h-72 w-full object-cover sm:h-80"
                     loading="lazy"
+                    decoding="async"
                   />
                 </div>
                 {/* Floating social card */}
@@ -408,6 +413,7 @@ export default function Landing() {
                     alt="Restaurant courtyard ambiance"
                     className="h-72 w-full object-cover"
                     loading="lazy"
+                    decoding="async"
                   />
                 </div>
                 {/* Floating stat card */}

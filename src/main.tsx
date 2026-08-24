@@ -1,4 +1,5 @@
 import { Toaster } from "@/components/ui/sonner";
+import { NotificationHandler } from "@/components/NotificationHandler";
 import { RequireAuth } from "@/components/RequireAuth";
 
 import { ConvexAuthProvider } from "@convex-dev/auth/react";
@@ -111,9 +112,9 @@ function RouteSyncer() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RootErrorBoundary>
-      <ConvexAuthProvider client={convex}>
-        <BrowserRouter>
+    <RootErrorBoundary>        <ConvexAuthProvider client={convex}>
+          <NotificationHandler>
+          <BrowserRouter>
           <RouteSyncer />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
@@ -233,6 +234,7 @@ createRoot(document.getElementById("root")!).render(
             </Routes>
           </Suspense>
         </BrowserRouter>
+        </NotificationHandler>
         <Toaster />
       </ConvexAuthProvider>
     </RootErrorBoundary>

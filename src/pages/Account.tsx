@@ -1,4 +1,5 @@
 import { CustomerShell } from "@/components/CustomerShell";
+import { NotificationPermissionButton } from "@/components/NotificationHandler";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,6 +15,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import {
+  Bell,
   CalendarCheck2,
   Compass,
   Heart,
@@ -330,6 +332,21 @@ export default function Account() {
                 ))}
               </div>
             )}
+          </CardContent>
+        </Card>
+
+        {/* Notifications */}
+        <Card className="mt-4 rounded-2xl border-border/70 p-0 shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Bell className="size-4 text-primary" /> {t("account.notificationsTitle")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="mb-3 text-sm text-muted-foreground">
+              {t("account.notificationsHint")}
+            </p>
+            <NotificationPermissionButton />
           </CardContent>
         </Card>
 

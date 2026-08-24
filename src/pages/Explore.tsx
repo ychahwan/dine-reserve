@@ -23,7 +23,7 @@ import {
   Wind,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -53,7 +53,8 @@ type AvailabilitySummary = {
 
 export default function Explore() {
   const { t } = useTranslation();
-  const restaurants = useQuery(api.restaurants.search, {});
+  // PERF-FIX: Removed redundant unfiltered `restaurants` query — searchWithFilters
+  // with no active filters returns the same unfiltered result set.
   const facets = useQuery(api.restaurants.facetValues);
   const cuisines = facets?.cuisines ?? [];
   const cities = facets?.cities ?? [];
@@ -76,14 +77,15 @@ export default function Explore() {
   const [partySize, setPartySize] = useState(2);
 
   // Seed demo data once when the app first loads with an empty database.
+  // PERF-FIX: Use searchWithFilters instead of removed restaurants query
   useEffect(() => {
-    if (restaurants === undefined || seeded) return;
-    if (restaurants.length === 0) {
+    if (searchWithFilters === undefined || seeded) return;
+    if (searchWithFilters.length === 0) {
       ensureDemoData().then(() => setSeeded(true)).catch(() => setSeeded(true));
     } else {
       setSeeded(true);
     }
-  }, [restaurants, seeded, ensureDemoData]);
+  }, [searchWithFilters, seeded, ensureDemoData]);
 
   // Live free-seat summary for the selected day (falls back to today).
   const summary = useQuery(api.availability.summary, { date: quickDate ?? today() });
@@ -173,7 +175,7 @@ export default function Explore() {
         <div>
           <h1 className="text-xl font-bold tracking-tight">{t("explore.title")}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {t("explore.subtitle", { count: restaurants?.length ?? "…" })}
+            {t("explore.subtitle", { count: searchWithFilters?.length ?? "…" })}
           </p>
         </div>
 
@@ -535,7 +537,8 @@ export default function Explore() {
 }
 
 /** Card loads its own (lightweight) data so search results re-render cheaply. */
-function RestaurantCard({
+// PERF-FIX: Wrapped in React.memo to prevent unnecessary re-renders on parent state changes
+const RestaurantCard = React.memo(function RestaurantCard({
   id,
   to,
   summary,
@@ -667,4 +670,4 @@ function RestaurantCard({
       </div>
     </Card>
   );
-}
+});

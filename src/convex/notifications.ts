@@ -1,237 +1,252 @@
-import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
-import { safeGet } from "./helpers";
-import { optionalTextSchema, parseOrThrow } from "./validation";
-
-// Diner-sent check-in alerts ("moving now" style). booking_created /
-// booking_cancelled are written automatically by the booking engine;
-// new_order / assist_request / menu_request come from the dine-in experience;
-// gift_ordered comes from Socialize (diner → diner gift).
-export const DINER_ALERT_TYPES = v.union(
-  v.literal("on_my_way"),
-  v.literal("running_late"),
-  v.literal("arrived"),
-  v.literal("special_request"),
-);
-
-export const ALL_NOTIFICATION_TYPES = v.union(
-  DINER_ALERT_TYPES,
-  v.literal("booking_created"),
-  v.literal("booking_cancelled"),
-  v.literal("new_order"),
-  v.literal("assist_request"),
-  v.literal("menu_request"),
-  v.literal("gift_ordered"),
-);
+import { mutation, query, action } from "../_generated/server";
 
 /**
- * Shared insert helper used by the booking engine and by sendForBooking.
- * Not exported as a public function — call it from within other mutations.
+ * Save a push notification token for a user
  */
-export async function notifyRestaurant(
-  ctx: MutationCtx,
-  opts: {
-    restaurantId: Id<"restaurants">;
-    bookingId?: Id<"bookings">;
-    userId: Id<"users">;
-    type:
-      | "on_my_way"
-      | "running_late"
-      | "arrived"
-      | "special_request"
-      | "booking_created"
-      | "booking_cancelled"
-      | "new_order"
-      | "assist_request"
-      | "menu_request"
-      | "gift_ordered";
-    message?: string;
-  },
-) {
-  await ctx.db.insert("notifications", {
-    restaurantId: opts.restaurantId,
-    bookingId: opts.bookingId,
-    userId: opts.userId,
-    type: opts.type,
-    message: opts.message,
-    read: false,
-    createdAt: Date.now(),
-  });
-}
-
-// ---------------------------------------------------------------------------
-// diner side
-// ---------------------------------------------------------------------------
-
-/** Diner sends a check-in alert tied to one of their confirmed bookings. */
-export const sendForBooking = mutation({
+export const saveToken = mutation({
   args: {
-    bookingId: v.id("bookings"),
-    type: DINER_ALERT_TYPES,
-    message: v.optional(v.string()),
-    clientDate: v.optional(v.string()),
+    token: v.string(),
+    platform: v.union(v.literal("android"), v.literal("ios"), v.literal("web")),
+    userId: v.id("users"),
   },
-  handler: async (ctx, { bookingId, type, message, clientDate }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) throw new Error("Please sign in to notify the restaurant.");
-    parseOrThrow(optionalTextSchema(300), message);
+  handler: async (ctx, args) => {
+    // Check if token already exists
+    const existing = await ctx.db
+      .query("notificationTokens")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .first();
 
-    const booking = await ctx.db.get(bookingId);
-    if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
-    if (booking.status !== "confirmed") {
-      throw new Error("Only confirmed bookings can send alerts.");
+    if (existing) {
+      // Update existing token
+      await ctx.db.patch(existing._id, {
+        userId: args.userId,
+        platform: args.platform,
+        lastUsed: Date.now(),
+        active: true,
+      });
+      return existing._id;
     }
-    // only for upcoming bookings — KB-04: compare against the diner's local
-    // date (client-supplied, bounded ±1 day) so a valid same-day alert near
-    // midnight isn't rejected by the UTC server clock.
-    const serverToday = (() => {
-      const now = new Date();
-      return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-        now.getDate(),
-      ).padStart(2, "0")}`;
-    })();
-    const localToday =
-      clientDate && /^\d{4}-\d{2}-\d{2}$/.test(clientDate) &&
-      Math.abs(new Date(`${clientDate}T00:00:00Z`).getTime() - new Date(`${serverToday}T00:00:00Z`).getTime()) <= 24 * 60 * 60 * 1000
-        ? clientDate
-        : serverToday;
-    if (booking.date < localToday) throw new Error("This booking is in the past.");
 
-    const cleaned = message?.trim().slice(0, 300);
-    await notifyRestaurant(ctx, {
-      restaurantId: booking.restaurantId,
-      bookingId: booking._id,
-      userId,
-      type,
-      message: cleaned || undefined,
+    // Create new token
+    return await ctx.db.insert("notificationTokens", {
+      token: args.token,
+      platform: args.platform,
+      userId: args.userId,
+      createdAt: Date.now(),
+      lastUsed: Date.now(),
+      active: true,
     });
-    return await ctx.db.get(bookingId);
   },
 });
 
-/** The diner's own sent alerts, for showing "you notified the restaurant" state. */
-export const myAlerts = query({
-  args: {},
-  handler: async (ctx) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) return [];
-    const items = await ctx.db
-      .query("notifications")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .collect();
-    const restaurants = await Promise.all(items.map((n) => ctx.db.get(n.restaurantId)));
-    return items
-      .map((n, i) => ({
-        ...n,
-        restaurantName: restaurants[i]?.name ?? "Restaurant",
-      }))
-      .sort((a, b) => b.createdAt - a.createdAt);
-  },
-});
-
-// ---------------------------------------------------------------------------
-// owner side
-// ---------------------------------------------------------------------------
-
-async function isOwnerOf(
-  ctx: MutationCtx | QueryCtx,
-  userId: string,
-  restaurantId: Id<"restaurants">,
-): Promise<boolean> {
-  const restaurant = await ctx.db.get(restaurantId);
-  return !!restaurant && restaurant.ownerId === userId;
-}
-
-/** All notifications for one restaurant — optionally filtered to one booking. */
-export const forRestaurant = query({
+/**
+ * Remove a push notification token
+ */
+export const removeToken = mutation({
   args: {
-    restaurantId: v.id("restaurants"),
-    bookingId: v.optional(v.id("bookings")),
+    token: v.string(),
   },
-  handler: async (ctx, { restaurantId, bookingId }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) return [];
-    if (!(await isOwnerOf(ctx, userId, restaurantId))) return [];
+  handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("notificationTokens")
+      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .first();
 
-    const items = bookingId
-      ? await ctx.db
-          .query("notifications")
-          .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
-          .collect()
-      : await ctx.db
-          .query("notifications")
-          .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-          .collect();
-
-    // safeGet: diner ids may be bare auth subjects (test/legacy identities)
-    // rather than user docs — never take down the notification center.
-    const [users, bookings] = await Promise.all([
-      Promise.all(items.map((n) => safeGet<Doc<"users">>(ctx, n.userId))),
-      Promise.all(items.map((n) => (n.bookingId ? safeGet<Doc<"bookings">>(ctx, n.bookingId) : null))),
-    ]);
-
-    return items
-      .map((n, i) => ({
-        ...n,
-        dinerName: users[i]?.name ?? "Guest",
-        booking: bookings[i]
-          ? {
-              _id: bookings[i]!._id,
-              date: bookings[i]!.date,
-              time: bookings[i]!.time,
-              partySize: bookings[i]!.partySize,
-              code: bookings[i]!.code,
-              sectionName: bookings[i]!.sectionName,
-            }
-          : null,
-      }))
-      .sort((a, b) => b.createdAt - a.createdAt);
+    if (existing) {
+      await ctx.db.patch(existing._id, { active: false });
+    }
   },
 });
 
-/** Unread count for the owner tab badge. */
-export const unreadCount = query({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) return 0;
-    if (!(await isOwnerOf(ctx, userId, restaurantId))) return 0;
-    const unread = await ctx.db
-      .query("notifications")
-      .withIndex("by_restaurant_read", (q) => q.eq("restaurantId", restaurantId).eq("read", false))
+/**
+ * Get all active tokens for a user
+ */
+export const getUserTokens = query({
+  args: {
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("notificationTokens")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .filter((q) => q.eq(q.field("active"), true))
       .collect();
-    return unread.length;
   },
 });
 
-/** Mark one notification as read (owner). */
-export const markRead = mutation({
-  args: { id: v.id("notifications") },
-  handler: async (ctx, { id }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) throw new Error("You must be signed in.");
-    const n = await ctx.db.get(id);
-    if (!n) return null;
-    if (!(await isOwnerOf(ctx, userId, n.restaurantId))) throw new Error("Not allowed.");
-    if (!n.read) await ctx.db.patch(id, { read: true });
-    return await ctx.db.get(id);
-  },
-});
-
-/** Mark every unread notification of the restaurant as read. */
-export const markAllRead = mutation({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
-    const userId = await getAuthUserId(ctx);
-    if (userId === null) throw new Error("You must be signed in.");
-    if (!(await isOwnerOf(ctx, userId, restaurantId))) throw new Error("Not allowed.");
-    const unread = await ctx.db
-      .query("notifications")
-      .withIndex("by_restaurant_read", (q) => q.eq("restaurantId", restaurantId).eq("read", false))
+/**
+ * Get all active tokens (for broadcasting)
+ */
+export const getAllActiveTokens = query({
+  handler: async (ctx) => {
+    return await ctx.db
+      .query("notificationTokens")
+      .filter((q) => q.eq(q.field("active"), true))
       .collect();
-    await Promise.all(unread.map((n) => ctx.db.patch(n._id, { read: true })));
-    return unread.length;
+  },
+});
+
+/**
+ * Send a push notification to a specific user
+ */
+export const sendToUser = action({
+  args: {
+    userId: v.id("users"),
+    title: v.string(),
+    body: v.string(),
+    data: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const tokens = await ctx.runQuery(api.notifications.getUserTokens, {
+      userId: args.userId,
+    });
+
+    if (tokens.length === 0) {
+      console.log("No active tokens for user:", args.userId);
+      return { sent: 0 };
+    }
+
+    const serverKey = process.env.FIREBASE_SERVER_KEY;
+    if (!serverKey) {
+      console.error("FIREBASE_SERVER_KEY not configured");
+      return { sent: 0, error: "Server key not configured" };
+    }
+
+    let sentCount = 0;
+    for (const tokenRecord of tokens) {
+      try {
+        const response = await fetch("https://fcm.googleapis.com/fcm/send", {
+          method: "POST",
+          headers: {
+            Authorization: `key=${serverKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            to: tokenRecord.token,
+            notification: {
+              title: args.title,
+              body: args.body,
+            },
+            data: args.data || {},
+          }),
+        });
+
+        if (response.ok) {
+          sentCount++;
+          // Update lastUsed timestamp
+          await ctx.runMutation(api.notifications.updateTokenLastUsed, {
+            tokenId: tokenRecord._id,
+          });
+        }
+      } catch (error) {
+        console.error("Failed to send notification:", error);
+      }
+    }
+
+    return { sent: sentCount, total: tokens.length };
+  },
+});
+
+/**
+ * Send a broadcast notification to all users
+ */
+export const broadcast = action({
+  args: {
+    title: v.string(),
+    body: v.string(),
+    data: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    const tokens = await ctx.runQuery(api.notifications.getAllActiveTokens);
+
+    if (tokens.length === 0) {
+      return { sent: 0 };
+    }
+
+    const serverKey = process.env.FIREBASE_SERVER_KEY;
+    if (!serverKey) {
+      return { sent: 0, error: "Server key not configured" };
+    }
+
+    // FCM supports multicast (up to 500 tokens)
+    const BATCH_SIZE = 500;
+    let sentCount = 0;
+
+    for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
+      const batch = tokens.slice(i, i + BATCH_SIZE);
+      const registration_ids = batch.map((t) => t.token);
+
+      try {
+        const response = await fetch("https://fcm.googleapis.com/fcm/send", {
+          method: "POST",
+          headers: {
+            Authorization: `key=${serverKey}`,
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            registration_ids,
+            notification: {
+              title: args.title,
+              body: args.body,
+            },
+            data: args.data || {},
+          }),
+        });
+
+        if (response.ok) {
+          sentCount += registration_ids.length;
+        }
+      } catch (error) {
+        console.error("Failed to send batch notification:", error);
+      }
+    }
+
+    return { sent: sentCount, total: tokens.length };
+  },
+});
+
+/**
+ * Update token last used timestamp
+ */
+export const updateTokenLastUsed = mutation({
+  args: {
+    tokenId: v.id("notificationTokens"),
+  },
+  handler: async (ctx, args) => {
+    await ctx.db.patch(args.tokenId, {
+      lastUsed: Date.now(),
+    });
+  },
+});
+
+/**
+ * Clean up old inactive tokens (run periodically)
+ */
+export const cleanupTokens = mutation({
+  args: {
+    olderThanDays: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const days = args.olderThanDays || 90;
+    const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
+
+    const oldTokens = await ctx.db
+      .query("notificationTokens")
+      .filter((q) =>
+        q.and(
+          q.eq(q.field("active"), false),
+          q.lt(q.field("lastUsed"), cutoff),
+        ),
+      )
+      .collect();
+
+    let deleted = 0;
+    for (const token of oldTokens) {
+      await ctx.db.delete(token._id);
+      deleted++;
+    }
+
+    return { deleted };
   },
 });

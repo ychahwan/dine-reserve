@@ -698,6 +698,19 @@ const schema = defineSchema(
       updatedBy: v.id("users"),
       updatedAt: v.number(),
     }).index("by_enabled_priority", ["enabled", "priority"]).index("by_key", ["key"]),
+
+    // Push notification tokens for FCM (Firebase Cloud Messaging)
+    notificationTokens: defineTable({
+      token: v.string(),
+      platform: v.union(v.literal("android"), v.literal("ios"), v.literal("web")),
+      userId: v.id("users"),
+      createdAt: v.number(),
+      lastUsed: v.number(),
+      active: v.boolean(),
+    })
+      .index("by_token", ["token"])
+      .index("by_user", ["userId"])
+      .index("by_platform", ["platform"]),
   },
   {
     schemaValidation: true,

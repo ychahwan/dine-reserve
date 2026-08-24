@@ -3,7 +3,7 @@
 @import "tw-animate-css";
 @custom-variant dark (&:is(.dark *));
 
-@import url('https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;500;600;700;800&family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&display=swap');
+/* PERF-FIX: Fonts now loaded via <link> in index.html with preload for non-blocking load */
 
 /* DO NOT CHANGE */
 @theme inline {

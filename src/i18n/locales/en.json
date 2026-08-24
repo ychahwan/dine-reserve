@@ -271,7 +271,9 @@
     "delDone": "Your account has been deleted.",
     "delErrSend": "Could not send the code.",
     "delErrConfirm": "Incorrect code. Try again.",
-    "errFav": "Could not update favorites."
+    "errFav": "Could not update favorites.",
+    "notificationsTitle": "Push notifications",
+    "notificationsHint": "Get notified about booking confirmations, waitlist alerts, and special offers even when the app is closed."
   },
   "bookings": {
     "title": "My bookings",

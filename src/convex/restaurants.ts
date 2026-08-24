@@ -153,16 +153,20 @@ export const search = query({
     if (args.city) filtered = filtered.filter((r) => r.city === args.city);
     if (args.solo) filtered = filtered.filter((r) => r.features.soloFriendly === true);
 
-    // seating-preference filtering requires section knowledge
+    // PERF-FIX: Batch-fetch sections instead of N+1 per-restaurant queries
     if (args.seat || args.nonSmoking) {
       const ids = filtered.map((r) => r._id);
-      const sections = await Promise.all(
-        ids.map((id) =>
-          ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ),
-      );
-      filtered = filtered.filter((r, i) => {
-        const secs = sections[i];
+      const allSections = await ctx.db.query("sections").collect();
+      const sectionsByRestaurant = new Map<string, typeof allSections>();
+      for (const s of allSections) {
+        if (ids.includes(s.restaurantId as any)) {
+          const list = sectionsByRestaurant.get(s.restaurantId) ?? [];
+          list.push(s);
+          sectionsByRestaurant.set(s.restaurantId, list);
+        }
+      }
+      filtered = filtered.filter((r) => {
+        const secs = sectionsByRestaurant.get(r._id) ?? [];
         if (!secs.length) return false;
         if (args.seat && !secs.some((s) => s.kind === args.seat)) return false;
         if (args.nonSmoking && !secs.some((s) => !s.smoking)) return false;
@@ -170,20 +174,25 @@ export const search = query({
       });
     }
 
-    // dietary filter: restaurant must serve an available item with that tag
+    // PERF-FIX: Batch-fetch menu items instead of N+1 per-restaurant queries
     if (args.dietary && args.dietary.trim()) {
       const tag = args.dietary.trim().toLowerCase();
       const ids = filtered.map((r) => r._id);
-      const items = await Promise.all(
-        ids.map((id) =>
-          ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ),
-      );
-      filtered = filtered.filter((_, i) =>
-        items[i]!.some(
+      const allItems = await ctx.db.query("menuItems").collect();
+      const itemsByRestaurant = new Map<string, typeof allItems>();
+      for (const item of allItems) {
+        if (ids.includes(item.restaurantId as any)) {
+          const list = itemsByRestaurant.get(item.restaurantId) ?? [];
+          list.push(item);
+          itemsByRestaurant.set(item.restaurantId, list);
+        }
+      }
+      filtered = filtered.filter((r) => {
+        const items = itemsByRestaurant.get(r._id) ?? [];
+        return items.some(
           (it) => it.available && (it.tags ?? []).some((t) => t.toLowerCase() === tag),
-        ),
-      );
+        );
+      });
     }
 
     return filtered.slice(0, 50);
@@ -316,14 +325,19 @@ export const listMine = query({
 export const trending = query({
   args: {},
   handler: async (ctx) => {
-    const bookings = await ctx.db.query("bookings").collect();
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 7);
     const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
 
+    // PERF-FIX: Use date index instead of scanning all bookings
+    const recentBookings = await ctx.db
+      .query("bookings")
+      .withIndex("by_date", (q) => q.gte("date", cutoffKey))
+      .collect();
+
     const covers = new Map<string, number>();
-    for (const b of bookings) {
-      if (b.status === "confirmed" && b.date >= cutoffKey) {
+    for (const b of recentBookings) {
+      if (b.status === "confirmed") {
         covers.set(b.restaurantId, (covers.get(b.restaurantId) ?? 0) + b.partySize);
       }
     }
@@ -360,13 +374,25 @@ export const forYou = query({
     const favs = new Set(user.favorites ?? []);
     const dietary = (user.prefs?.dietary ?? []).map((d) => d.toLowerCase());
 
-    const pastCuisines = new Set<string>();
-    await Promise.all(
-      pastBookings.map(async (b) => {
-        const r = await ctx.db.get(b.restaurantId);
-        if (r) pastCuisines.add(r.cuisine.toLowerCase());
-      }),
+    // PERF-FIX: Batch-fetch past restaurant cuisines instead of N+1 queries
+    const pastRestaurantIds = [...new Set(pastBookings.map((b) => b.restaurantId))];
+    const pastRestaurants = await Promise.all(
+      pastRestaurantIds.map((id) => ctx.db.get(id)),
     );
+    const pastCuisines = new Set(
+      pastRestaurants.filter(Boolean).map((r) => r!.cuisine.toLowerCase()),
+    );
+
+    // PERF-FIX: Batch-fetch ALL menu items in one query instead of per-restaurant
+    const allMenuItems = dietary.length > 0
+      ? await ctx.db.query("menuItems").collect()
+      : [];
+    const itemsByRestaurant = new Map<string, typeof allMenuItems>();
+    for (const item of allMenuItems) {
+      const list = itemsByRestaurant.get(item.restaurantId) ?? [];
+      list.push(item);
+      itemsByRestaurant.set(item.restaurantId, list);
+    }
 
     const scored: { id: Id<"restaurants">; score: number }[] = [];
     for (const r of restaurants) {
@@ -375,10 +401,7 @@ export const forYou = query({
       if (favs.has(r._id)) score += 3;
       if (pastCuisines.has(r.cuisine.toLowerCase())) score += 2;
       if (dietary.length > 0) {
-        const items = await ctx.db
-          .query("menuItems")
-          .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
-          .collect();
+        const items = itemsByRestaurant.get(r._id) ?? [];
         const matches = dietary.some((d) =>
           items.some((it) => it.available && (it.tags ?? []).some((t) => t.toLowerCase() === d)),
         );
