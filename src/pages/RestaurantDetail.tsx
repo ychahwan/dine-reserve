@@ -33,6 +33,7 @@ import {
   Heart,
   MapPin,
   MessageCircle,
+  Navigation,
   Phone,
   ShieldCheck,
   Sofa,
@@ -61,6 +62,7 @@ import {
   whatsappShareUrl,
 } from "@/lib/format";
 import { spiceEmoji, spiceLabel } from "@/lib/menu";
+import { openNavigation } from "@/lib/navigation";
 
 /** "Maria N" → "MN" for the review avatar. */
 function initialsOf(name: string) {
@@ -478,6 +480,18 @@ export default function RestaurantDetail() {
             <p className="mt-1 flex items-center gap-1.5 text-sm text-white/90">
               <MapPin className="size-3.5" /> {r.address} · {r.neighborhood || r.city}
             </p>
+            <button
+              onClick={() =>
+                openNavigation({
+                  address: r.address,
+                  city: r.city,
+                  neighborhood: r.neighborhood,
+                })
+              }
+              className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-white/20 px-3 py-1.5 text-xs font-medium text-white backdrop-blur transition-colors hover:bg-white/30"
+            >
+              <Navigation className="size-3.5" /> {t("detail.getDirections")}
+            </button>
           </div>
         </div>
 
@@ -511,6 +525,18 @@ export default function RestaurantDetail() {
               <Phone className="size-3.5" /> {r.phone}
             </a>
           )}
+          <button
+            onClick={() =>
+              openNavigation({
+                address: r.address,
+                city: r.city,
+                neighborhood: r.neighborhood,
+              })
+            }
+            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Navigation className="size-3.5" /> {t("detail.directions")}
+          </button>
         </div>
 
         {r.description && (

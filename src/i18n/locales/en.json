@@ -448,7 +448,11 @@
     "sortReviews": "Sort reviews",
     "sortNewest": "Newest",
     "sortHighest": "Highest",
-    "sortLowest": "Lowest"
+    "sortLowest": "Lowest",
+    "getDirections": "Get Directions",
+    "directions": "Directions",
+    "openInMaps": "Open in Maps",
+    "chooseMap": "Choose a map app"
   },
   "lang": {
     "label": "Language",
