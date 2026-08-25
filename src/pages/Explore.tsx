@@ -1,5 +1,6 @@
 import { CustomerShell } from "@/components/CustomerShell";
 import AiConcierge from "@/components/AiConcierge";
+import { WalkInDialog } from "@/components/WalkInDialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,6 +22,7 @@ import {
   Store,
   Users,
   Wind,
+  MapPinned,
   type LucideIcon,
 } from "lucide-react";
 import React, { useEffect, useMemo, useState } from "react";
@@ -76,17 +78,6 @@ export default function Explore() {
   const [quickDate, setQuickDate] = useState<string | null>(today());
   const [partySize, setPartySize] = useState(2);
 
-  // Seed demo data once when the app first loads with an empty database.
-  // PERF-FIX: Use searchWithFilters instead of removed restaurants query
-  useEffect(() => {
-    if (searchWithFilters === undefined || seeded) return;
-    if (searchWithFilters.length === 0) {
-      ensureDemoData().then(() => setSeeded(true)).catch(() => setSeeded(true));
-    } else {
-      setSeeded(true);
-    }
-  }, [searchWithFilters, seeded, ensureDemoData]);
-
   // Live free-seat summary for the selected day (falls back to today).
   const summary = useQuery(api.availability.summary, { date: quickDate ?? today() });
   const summaryMap = useMemo(() => {
@@ -98,6 +89,10 @@ export default function Explore() {
   // Saved restaurants (dining profile) + toggle
   const favorites = useQuery(api.users.myFavorites);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
+
+  // Walk-in dialog state
+  const [walkInDialogOpen, setWalkInDialogOpen] = useState(false);
+  const [walkInRestaurant, setWalkInRestaurant] = useState<{ id: string; name: string } | null>(null);
 
   const quickDays = useMemo(
     () => Array.from({ length: 7 }, (_, i) => dateFromNow(i)),
@@ -119,6 +114,17 @@ export default function Explore() {
       solo: solo || undefined,
     },
   );
+
+  // Seed demo data once when the app first loads with an empty database.
+  // PERF-FIX: Use searchWithFilters instead of removed restaurants query
+  useEffect(() => {
+    if (searchWithFilters === undefined || seeded) return;
+    if (searchWithFilters.length === 0) {
+      ensureDemoData().then(() => setSeeded(true)).catch(() => setSeeded(true));
+    } else {
+      setSeeded(true);
+    }
+  }, [searchWithFilters, seeded, ensureDemoData]);
 
   const visible = useMemo(() => {
     if (!searchWithFilters) return undefined;
@@ -247,6 +253,35 @@ export default function Explore() {
               ? t("explore.showingForDate", { count: partySize, guests: t("common.guest", { count: partySize }), date: dateLabel(quickDate) })
               : t("explore.showingToday", { count: partySize, guests: t("common.guest", { count: partySize }) })}
           </p>
+        </Card>
+
+        {/* Walk-in button */}
+        <Card className="mt-4 rounded-2xl border-border/70 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-primary/10 rounded-lg">
+                <MapPinned className="h-5 w-5 text-primary" />
+              </div>
+              <div>
+                <p className="font-medium">Already at a restaurant?</p>
+                <p className="text-sm text-muted-foreground">Check in without a booking</p>
+              </div>
+            </div>
+            <Button
+              onClick={() => {
+                // For walk-in, we need to select a restaurant first
+                // For now, open the dialog with the first visible restaurant
+                if (visible && visible.length > 0) {
+                  setWalkInRestaurant({ id: visible[0]._id, name: visible[0].name });
+                  setWalkInDialogOpen(true);
+                }
+              }}
+              variant="outline"
+              size="sm"
+            >
+              Walk-in
+            </Button>
+          </div>
         </Card>
 
         {/* Search */}
@@ -532,6 +567,16 @@ export default function Explore() {
         </div>
       </div>
       <AiConcierge />
+
+      {/* Walk-in Dialog */}
+      {walkInRestaurant && (
+        <WalkInDialog
+          open={walkInDialogOpen}
+          onOpenChange={setWalkInDialogOpen}
+          restaurantId={walkInRestaurant.id as any}
+          restaurantName={walkInRestaurant.name}
+        />
+      )}
     </CustomerShell>
   );
 }
@@ -663,6 +708,9 @@ const RestaurantCard = React.memo(function RestaurantCard({
           >
             <Heart className={cn("size-4", favorited && "fill-current")} />
           </button>
+          <Button size="sm" variant="outline" asChild className="shrink-0">
+            <Link to={`/restaurant/${r._id}?walkin=true`}>{t("explore.book")}</Link>
+          </Button>
           <Button size="sm" asChild className="shrink-0">
             <Link to={to}>{t("explore.book")}</Link>
           </Button>

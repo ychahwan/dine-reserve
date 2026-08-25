@@ -60,6 +60,9 @@ export const NOTIFICATION_TYPE = v.union(
   v.literal("assist_request"),
   v.literal("menu_request"),
   v.literal("gift_ordered"),
+  v.literal("walk_in_request"),
+  v.literal("walk_in_approved"),
+  v.literal("walk_in_rejected"),
 );
 export type NotificationType = Infer<typeof NOTIFICATION_TYPE>;
 
@@ -358,6 +361,15 @@ const schema = defineSchema(
       reminderSent: v.optional(v.boolean()),
       // diner confirmed arrival at the restaurant (timestamp)
       checkedInAt: v.optional(v.number()),
+      // walk-in tracking: how this booking was created
+      source: v.optional(v.union(
+        v.literal("online"),
+        v.literal("walk_in"),
+        v.literal("qr_scan"),
+        v.literal("host_created"),
+      )),
+      // walk-in specific: table number entered by the diner or assigned by host
+      walkInTable: v.optional(v.string()),
     })
       .index("by_user", ["userId"])
       .index("by_restaurant", ["restaurantId"])
@@ -698,6 +710,48 @@ const schema = defineSchema(
       updatedBy: v.id("users"),
       updatedAt: v.number(),
     }).index("by_enabled_priority", ["enabled", "priority"]).index("by_key", ["key"]),
+
+    // ---------- Walk-in feature (Idea #20) ----------
+
+    // Pending walk-in approval requests. A diner arrives at a restaurant and
+    // requests to be seated via the app. The host/owner approves or rejects.
+    walkInRequests: defineTable({
+      restaurantId: v.id("restaurants"),
+      userId: v.id("users"),
+      name: v.string(),
+      partySize: v.number(),
+      tableNumber: v.optional(v.string()), // entered by diner (Option A/B) or assigned by host (Option C)
+      source: v.union(
+        v.literal("app_check_in"), // Option A: diner enters table #
+        v.literal("qr_scan"),     // Option B: diner scans table QR
+        v.literal("host_created"), // Option C: host creates on behalf
+      ),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("approved"),
+        v.literal("rejected"),
+      ),
+      bookingId: v.optional(v.id("bookings")), // set once approved + booking created
+      createdAt: v.number(),
+      processedAt: v.optional(v.number()),
+      processedBy: v.optional(v.id("users")), // host/owner who approved
+      rejectReason: v.optional(v.string()),
+    })
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_restaurant_status", ["restaurantId", "status"])
+      .index("by_user", ["userId"]),
+
+    // Table QR codes. Each table has a unique QR that encodes the table ID.
+    // The diner scans it to start the walk-in flow (Option B).
+    tableQRCodes: defineTable({
+      restaurantId: v.id("restaurants"),
+      tableNumber: v.string(),
+      sectionId: v.optional(v.id("sections")),
+      active: v.boolean(),
+      createdAt: v.number(),
+    })
+      .index("by_restaurant", ["restaurantId"])
+      .index("by_restaurant_table", ["restaurantId", "tableNumber"]),
 
     // Push notification tokens for FCM (Firebase Cloud Messaging)
     notificationTokens: defineTable({
