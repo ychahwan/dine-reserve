@@ -41,18 +41,27 @@ function resolveTodayKey(clientDate?: string): string {
   return diffMs <= 24 * 60 * 60 * 1000 ? clientDate : serverToday;
 }
 
-async function requireOwnConfirmedBooking(
+async function requireConfirmedBookingParticipant(
   ctx: MutationCtx | QueryCtx,
   userId: string,
   bookingId: Id<"bookings">,
   clientDate?: string,
 ) {
   const booking = await ctx.db.get(bookingId);
-  if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
+  if (!booking) throw new Error("Booking not found.");
   if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
   // BUG-05: use resolveTodayKey to handle timezone edge cases near midnight
   // (server is UTC, diner may be ahead/behind by several hours)
   if (booking.date < resolveTodayKey(clientDate)) throw new Error("This booking is in the past.");
+
+  // Allow both the host AND confirmed guests to participate
+  const isHost = booking.userId === userId;
+  const guests = booking.guests ?? [];
+  const isGuest = guests.some((g) => g.userId === userId);
+
+  if (!isHost && !isGuest) {
+    throw new Error("You're not part of this booking.");
+  }
   return booking;
 }
 
@@ -170,7 +179,7 @@ export const placeOrder = mutation({
   handler: async (ctx, { bookingId, items, note }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to order.");
-    const booking = await requireOwnConfirmedBooking(ctx, userId, bookingId);
+    const booking = await requireConfirmedBookingParticipant(ctx, userId, bookingId);
 
     // Zod: non-empty order, ≤50 lines, integer quantities 1–20, capped notes.
     parseOrThrow(placeOrderSchema, { items, note });
@@ -411,6 +420,53 @@ export const billForBooking = query({
       .map((l) => ({ ...l, lineTotal: l.priceCents * l.quantity }))
       .sort((a, b) => b.lineTotal - a.lineTotal);
 
+    // Per-user breakdown: group orders and gifts by userId
+    const userBreakdown = new Map<
+      string,
+      {
+        userId: string;
+        name: string;
+        orderCount: number;
+        subtotalCents: number;
+      }
+    >();
+
+    for (const order of billable) {
+      const existing = userBreakdown.get(order.userId);
+      if (existing) {
+        existing.orderCount++;
+        existing.subtotalCents += order.totalCents;
+      } else {
+        const user = await safeGet<Doc<"users">>(ctx, order.userId);
+        userBreakdown.set(order.userId, {
+          userId: order.userId,
+          name: user?.name ?? "Guest",
+          orderCount: 1,
+          subtotalCents: order.totalCents,
+        });
+      }
+    }
+
+    // Add gifts sent by each user to their share
+    for (const gift of billableGifts) {
+      const existing = userBreakdown.get(gift.senderUserId);
+      if (existing) {
+        existing.subtotalCents += gift.priceCents;
+      } else {
+        const user = await safeGet<Doc<"users">>(ctx, gift.senderUserId);
+        userBreakdown.set(gift.senderUserId, {
+          userId: gift.senderUserId,
+          name: user?.name ?? "Guest",
+          orderCount: 0,
+          subtotalCents: gift.priceCents,
+        });
+      }
+    }
+
+    const breakdown = [...userBreakdown.values()]
+      .map((b) => ({ ...b }))
+      .sort((a, b) => b.subtotalCents - a.subtotalCents);
+
     return {
       bookingId,
       restaurantId: booking.restaurantId,
@@ -418,7 +474,62 @@ export const billForBooking = query({
       totalCents,
       orderCount: billable.length,
       orders,
+      breakdown, // Per-user split
       paid: false, // payments arrive in a later milestone
+    };
+  },
+});
+
+/**
+ * The current user's share of the bill for a specific booking.
+ * Returns only their orders and gifts they sent.
+ */
+export const myBillShare = query({
+  args: { bookingId: v.id("bookings") },
+  handler: async (ctx, { bookingId }) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) throw new Error("Please sign in.");
+
+    const booking = await ctx.db.get(bookingId);
+    if (!booking) throw new Error("Booking not found.");
+
+    // Verify participant
+    const isHost = booking.userId === userId;
+    const guests = booking.guests ?? [];
+    const isGuest = guests.some((g) => g.userId === userId);
+    if (!isHost && !isGuest) throw new Error("Not part of this booking.");
+
+    // Get my orders for this booking
+    const myOrders = await ctx.db
+      .query("dineOrders")
+      .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
+      .collect();
+
+    const myBillable = myOrders.filter(
+      (o) => o.userId === userId && o.status !== "cancelled",
+    );
+
+    // Get gifts I sent from this booking
+    const myGifts = await ctx.db
+      .query("giftDeliveries")
+      .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
+      .collect();
+
+    const myBillableGifts = myGifts.filter(
+      (g) => g.senderUserId === userId && g.status !== "cancelled",
+    );
+
+    const ordersTotal = myBillable.reduce((sum, o) => sum + o.totalCents, 0);
+    const giftsTotal = myBillableGifts.reduce((sum, g) => sum + g.priceCents, 0);
+
+    return {
+      bookingId,
+      userId,
+      orders: myBillable,
+      gifts: myBillableGifts,
+      ordersTotalCents: ordersTotal,
+      giftsTotalCents: giftsTotal,
+      subtotalCents: ordersTotal + giftsTotal,
     };
   },
 });
@@ -437,7 +548,7 @@ export const sendAssist = mutation({
   handler: async (ctx, { bookingId, template, note }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
-    const booking = await requireOwnConfirmedBooking(ctx, userId, bookingId);
+    const booking = await requireConfirmedBookingParticipant(ctx, userId, bookingId);
     parseOrThrow(assistNoteSchema, { note });
 
     const id = await ctx.db.insert("assistRequests", {

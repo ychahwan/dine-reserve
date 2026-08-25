@@ -576,6 +576,25 @@ export function DiningDialog({
                     <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
                       <Receipt className="size-3" /> Saved to this booking — pay at the table.
                     </p>
+
+                    {/* Per-user breakdown */}
+                    {bill.breakdown && bill.breakdown.length > 1 && (
+                      <div className="mt-3 border-t border-border/60 pt-3">
+                        <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
+                          Split by person
+                        </p>
+                        <div className="space-y-1.5">
+                          {bill.breakdown.map((person: { userId: string; name: string; orderCount: number; subtotalCents: number }) => (
+                            <div key={person.userId} className="flex items-center justify-between text-xs">
+                              <span className="text-muted-foreground">
+                                {person.name} ({person.orderCount} items)
+                              </span>
+                              <span className="font-medium">{formatPrice(person.subtotalCents)}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
