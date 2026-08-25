@@ -303,6 +303,7 @@
     "invite": "Invite",
     "socialize": "Socialize",
     "dine": "Dine",
+    "viewBillSplit": "Bill Split",
     "notify": "Notify",
     "receipt": "Receipt",
     "release": "Release",
@@ -362,7 +363,11 @@
     "partyGoing": "{{count}} going",
     "copy": "Copy",
     "inviteCopied": "Invite link copied!",
-    "shareWhatsapp": "Share invite on WhatsApp"
+    "shareWhatsapp": "Share invite on WhatsApp",
+    "billSplitTitle": "Bill Split · {{name}}",
+    "billSplitTitleFallback": "Bill Split",
+    "billSplitDesc": "{{date}} at {{time}} — see who ordered what.",
+    "billSplitDescFallback": "See who ordered what."
   },
   "detail": {
     "back": "Back",

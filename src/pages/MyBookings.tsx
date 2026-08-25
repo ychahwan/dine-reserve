@@ -2,6 +2,7 @@ import { CustomerShell } from "@/components/CustomerShell";
 import { BookingReceiptDialog } from "@/components/BookingReceipt";
 import { DiningDialog } from "@/components/DiningDialog";
 import { SocializeDialog } from "@/components/SocializeDialog";
+import { BillSplit } from "@/components/BillSplit";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +41,7 @@ import {
   MessageCircle,
   PartyPopper,
   QrCode,
+  Receipt,
   Send,
   ShieldCheck,
   Sparkles,
@@ -178,6 +180,12 @@ export default function MyBookings() {
 
   // Invite-friends dialog (group invites)
   const [inviteBookingId, setInviteBookingId] = useState<string | null>(null);
+
+  // Bill split dialog: per-user breakdown of shared booking
+  const [billSplitBookingId, setBillSplitBookingId] = useState<string | null>(null);
+  const billSplitBooking = billSplitBookingId
+    ? (bookings ?? []).find((b) => b._id === billSplitBookingId) ?? null
+    : null;
 
   // Dine-in dialog: order, ping the team, menu ideas, bill
   const [dineBookingId, setDineBookingId] = useState<string | null>(null);
@@ -637,6 +645,15 @@ export default function MyBookings() {
                               onClick={() => setDineBookingId(b._id)}
                             >
                               <Utensils className="size-3.5" /> {t("bookings.dine")}
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-9 w-full justify-start hover:bg-primary/10 hover:text-primary sm:h-8 sm:w-auto"
+                              title="View bill split by person"
+                              onClick={() => setBillSplitBookingId(b._id)}
+                            >
+                              <Receipt className="size-3.5" /> {t("bookings.viewBillSplit")}
                             </Button>
                             <Button
                               variant="ghost"
@@ -1120,6 +1137,35 @@ export default function MyBookings() {
               {t("bookings.postReview")}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Bill split per-user breakdown */}
+      <Dialog
+        open={!!billSplitBookingId}
+        onOpenChange={(open) => {
+          if (!open) setBillSplitBookingId(null);
+        }}
+      >
+        <DialogContent className="max-h-[85vh] overflow-y-auto rounded-3xl sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="tracking-tight">
+              {billSplitBooking
+                ? t("bookings.billSplitTitle", { name: billSplitBooking.restaurant?.name ?? t("common.restaurant") })
+                : t("bookings.billSplitTitleFallback")}
+            </DialogTitle>
+            <DialogDescription>
+              {billSplitBooking
+                ? t("bookings.billSplitDesc", {
+                    date: dateLabel(billSplitBooking.date),
+                    time: formatTime(billSplitBooking.time),
+                  })
+                : t("bookings.billSplitDescFallback")}
+            </DialogDescription>
+          </DialogHeader>
+          {billSplitBooking && (
+            <BillSplit bookingId={billSplitBooking._id as never} />
+          )}
         </DialogContent>
       </Dialog>
 
