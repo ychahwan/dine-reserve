@@ -1,7 +1,7 @@
 import { useEffect, useCallback } from "react";
 import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useMutation } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
 import { toast } from "sonner";
 

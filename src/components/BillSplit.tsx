@@ -1,5 +1,5 @@
 import { useQuery } from "convex/react";
-import { api } from "../../convex/_generated/api";
+import { api } from "@/convex/_generated/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Separator } from "@/components/ui/separator";
 import { formatPrice } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
 import { Receipt, Gift, ShoppingCart } from "lucide-react";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Id } from "@/convex/_generated/dataModel";
 
 interface BillSplitProps {
   bookingId: Id<"bookings">;

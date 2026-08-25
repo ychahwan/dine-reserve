@@ -11,6 +11,7 @@ import {
 } from "@/components/OwnerDiningTabs";
 import { OwnerGiftsTab, OwnerGiftsTabCount } from "@/components/OwnerGiftsTab";
 import { OwnerStoriesTab } from "@/components/OwnerStoriesTab";
+import { WalkInApproval } from "@/components/WalkInApproval";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -189,6 +190,7 @@ export default function OwnerRestaurant() {
             { key: "requests", label: "Requests", badge: "assists" as const },
             { key: "menuideas", label: "Menu ideas", badge: "menuRequests" as const },
             { key: "gifts", label: "Gifts", badge: "gifts" as const },
+            { key: "walkins", label: "Walk-ins" },
             { key: "stories", label: "Stories" },
             { key: "insights", label: "Insights" },
             { key: "notifications", label: "Notifications", badge: "notifications" as const },
@@ -246,6 +248,9 @@ export default function OwnerRestaurant() {
         </TabsContent>
         <TabsContent value="gifts" className="mt-5">
           <OwnerGiftsTab restaurantId={r._id} />
+        </TabsContent>
+        <TabsContent value="walkins" className="mt-5">
+          <WalkInApproval restaurantId={r._id} />
         </TabsContent>
         <TabsContent value="stories" className="mt-5">
           <OwnerStoriesTab restaurantId={r._id} />
