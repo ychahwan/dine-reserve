@@ -60,7 +60,7 @@ const META: Record<string, { label: string; group: string; hint: string; secret:
     group: "AI agent",
     hint: "Stable Gemini model used by the concierge and owner advisor.",
     secret: false,
-    placeholder: "gemini-3.7-flash",
+    placeholder: "gemini-2.0-flash",
   },
   TWILIO_ENABLED: {
     label: "Twilio enabled",

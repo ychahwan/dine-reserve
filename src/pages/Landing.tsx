@@ -16,7 +16,6 @@ import {
   Users,
   Utensils,
 } from "lucide-react";
-import { motion } from "framer-motion";
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { Input } from "@/components/ui/input";
@@ -80,11 +79,7 @@ export default function Landing() {
 
         <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 lg:pb-24 lg:pt-20">
           <div className="mx-auto max-w-2xl text-center">
-            <motion.div
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.6 }}
-            >
+            <div className="animate-fade-in-up">
               <Badge variant="secondary" className="mb-5 gap-1.5 rounded-full bg-primary/10 text-primary border-primary/20 px-3 py-1">
                 <span className="size-1.5 rounded-full bg-primary" />
                 {t("landing.heroBadge")}
@@ -99,15 +94,13 @@ export default function Landing() {
               <p className="mt-5 mx-auto max-w-lg text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
                 {t("landing.subtitle")}
               </p>
-            </motion.div>
+            </div>
 
             {/* Phone entry */}
-            <motion.form
+            <form
               onSubmit={handleGetStarted}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.5, delay: 0.15 }}
-              className="mt-8 mx-auto flex max-w-md flex-col gap-3 sm:flex-row"
+              className="animate-fade-in-up mt-8 mx-auto flex max-w-md flex-col gap-3 sm:flex-row"
+              style={{ animationDelay: '0.15s' }}
             >
               <div className="relative flex-1">
                 <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
@@ -125,26 +118,22 @@ export default function Landing() {
               <Button type="submit" size="lg" className="h-11 rounded-xl px-6 bg-primary hover:bg-primary/90 text-primary-foreground">
                 {t("common.getStarted")} <ArrowRight className="size-4" />
               </Button>
-            </motion.form>
+            </form>
 
-            <motion.p
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.3 }}
-              className="mt-4 text-sm text-muted-foreground"
+            <p
+              className="animate-fade-in mt-4 text-sm text-muted-foreground"
+              style={{ animationDelay: '0.3s' }}
             >
               {t("landing.alreadyHave")}{" "}
               <Link to="/auth" className="font-medium text-primary hover:underline">
                 {t("common.signIn")}
               </Link>
-            </motion.p>
+            </p>
 
             {/* Social proof */}
-            <motion.div
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              transition={{ duration: 0.5, delay: 0.4 }}
-              className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-muted-foreground"
+            <div
+              className="animate-fade-in mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-muted-foreground"
+              style={{ animationDelay: '0.4s' }}
             >
               <span className="flex items-center gap-2">
                 <Utensils className="size-4 text-primary" />{" "}
@@ -160,7 +149,7 @@ export default function Landing() {
               <span className="flex items-center gap-2">
                 <Check className="size-4 text-primary" /> {t("landing.freeToJoin")}
               </span>
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>
@@ -177,12 +166,10 @@ export default function Landing() {
 
           <div className="mt-14 grid gap-6 md:grid-cols-3">
             {STEPS.map((step, i) => (
-              <motion.div
+              <div
                 key={step.titleKey}
-                initial={{ opacity: 0, y: 20 }}
-                whileInView={{ opacity: 1, y: 0 }}
-                viewport={{ once: true, margin: "-60px" }}
-                transition={{ duration: 0.5, delay: i * 0.1 }}
+                className="animate-fade-in-up"
+                style={{ animationDelay: `${i * 0.1}s` }}
               >
                 <Card className="group relative overflow-hidden rounded-2xl border-border/70 p-6 transition-shadow hover:shadow-md">
                   <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
@@ -194,7 +181,7 @@ export default function Landing() {
                   <h3 className="font-semibold text-lg">{t(step.titleKey)}</h3>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">{t(step.textKey)}</p>
                 </Card>
-              </motion.div>
+              </div>
             ))}
           </div>
         </div>
@@ -205,12 +192,7 @@ export default function Landing() {
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="grid items-center gap-12 lg:grid-cols-2">
             {/* Text content */}
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.6 }}
-            >
+            <div className="animate-fade-in-up">
               <p className="text-xs font-semibold uppercase tracking-widest text-primary">{t("landing.socializeLabel")}</p>
               <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
                 {t("landing.socializeTitle")}
@@ -236,15 +218,12 @@ export default function Landing() {
                   {t("landing.socializeCta")} <ArrowRight className="size-4" />
                 </Link>
               </Button>
-            </motion.div>
+            </div>
 
             {/* Mock social card */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="flex justify-center"
+            <div
+              className="animate-fade-in-up flex justify-center"
+              style={{ animationDelay: '0.1s' }}
             >
               <Card className="w-full max-w-sm rounded-2xl border-border/70 p-5">
                 <div className="mb-4 flex items-center gap-3">
@@ -280,7 +259,7 @@ export default function Landing() {
                   ))}
                 </div>
               </Card>
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>
@@ -289,12 +268,7 @@ export default function Landing() {
       <section id="owners" className="border-t border-border/60">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="grid items-center gap-12 lg:grid-cols-2">
-            <motion.div
-              initial={{ opacity: 0, x: -20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.6 }}
-            >
+            <div className="animate-fade-in-up">
               <p className="text-xs font-semibold uppercase tracking-widest text-primary">{t("landing.ownersLabel")}</p>
               <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
                 {t("landing.ownersTitle")}
@@ -317,15 +291,12 @@ export default function Landing() {
                   {t("landing.ownersCta")} <ArrowRight className="size-4" />
                 </Link>
               </Button>
-            </motion.div>
+            </div>
 
             {/* Stats cards */}
-            <motion.div
-              initial={{ opacity: 0, x: 20 }}
-              whileInView={{ opacity: 1, x: 0 }}
-              viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.6, delay: 0.1 }}
-              className="grid grid-cols-2 gap-4"
+            <div
+              className="animate-fade-in-up grid grid-cols-2 gap-4"
+              style={{ animationDelay: '0.1s' }}
             >
               <Card className="rounded-2xl border-border/70 p-5 text-center">
                 <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
@@ -354,7 +325,7 @@ export default function Landing() {
                   </div>
                 </div>
               </Card>
-            </motion.div>
+            </div>
           </div>
         </div>
       </section>
@@ -362,13 +333,7 @@ export default function Landing() {
       {/* ────────── CTA Banner ────────── */}
       <section className="border-t border-border/60 bg-primary/[0.04]">
         <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
-          <motion.div
-            initial={{ opacity: 0, y: 16 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, margin: "-60px" }}
-            transition={{ duration: 0.5 }}
-            className="mx-auto max-w-xl text-center"
-          >
+          <div className="animate-fade-in-up mx-auto max-w-xl text-center">
             <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
               {t("landing.title1")}<br />
               <span className="text-primary">{t("landing.title2")}</span>
@@ -381,7 +346,7 @@ export default function Landing() {
                 {t("common.getStarted")} <ArrowRight className="size-4" />
               </Link>
             </Button>
-          </motion.div>
+          </div>
         </div>
       </section>
 

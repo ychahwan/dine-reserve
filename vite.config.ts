@@ -54,7 +54,6 @@ export default defineConfig({
             '@radix-ui/react-tooltip',
           ],
           // Heavy optional libraries - separate chunks for better lazy loading
-          'framer-motion': ['framer-motion'],
           'charts': ['recharts'],
           'forms': ['react-hook-form', '@hookform/resolvers', 'zod'],
         },
@@ -83,7 +82,6 @@ export default defineConfig({
       'react-dom/client',
       'react-router',
       '@convex-dev/auth/react',
-      'framer-motion',
     ],
   },
   // Performance hints

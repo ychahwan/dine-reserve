@@ -231,3 +231,20 @@ h1, h2, h3 {
 .overflow-x-auto {
   -webkit-overflow-scrolling: touch;
 }
+
+/* PERF-FIX: CSS fade-in animations replacing framer-motion (~127KB gzipped).
+   Respects prefers-reduced-motion via the existing base rule above. */
+@keyframes fade-in-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+.animate-fade-in-up {
+  animation: fade-in-up 0.4s ease-out both;
+}
+.animate-fade-in {
+  animation: fade-in 0.22s ease-out both;
+}

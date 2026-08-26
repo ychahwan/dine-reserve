@@ -4,7 +4,6 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { Loader2, Utensils } from "lucide-react";
-import { motion } from "framer-motion";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
@@ -62,11 +61,8 @@ function Onboarding({ onDone }: { onDone: () => void }) {
 
   return (
     <main className="flex min-h-screen items-center justify-center bg-background px-4 py-10">
-      <motion.div
-        initial={{ opacity: 0, y: 16 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.4 }}
-        className="w-full max-w-md"
+      <div
+        className="animate-fade-in-up w-full max-w-md"
       >
         <div className="mb-8 text-center">
           <div className="mx-auto mb-4 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
@@ -122,7 +118,7 @@ function Onboarding({ onDone }: { onDone: () => void }) {
             )}
           </Button>
         </form>
-      </motion.div>
+      </div>
     </main>
   );
 }

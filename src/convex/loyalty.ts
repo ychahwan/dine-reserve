@@ -60,7 +60,7 @@ export const myBalance = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
-    if (userId === null) return { points: 0, activity: [] as any[] };
+    if (userId === null) return { points: 0, activity: [] as { _id: string; amount: number; source: string; createdAt: number }[] };
     const user = await ctx.db.get(userId as Id<"users">);
     const entries = await ctx.db
       .query("loyaltyLedger")

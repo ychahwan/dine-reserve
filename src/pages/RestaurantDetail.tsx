@@ -124,6 +124,7 @@ export default function RestaurantDetail() {
   const { user, isLoading } = useAuth();
   const { t, i18n } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: id as never });
+  const menuData = useQuery(api.restaurants.menuForRestaurant, { id: id as never });
   const reviewsData = useQuery(api.reviews.listForRestaurant, { restaurantId: id as never });
   const stories = useQuery(api.stories.forRestaurant, { restaurantId: id as never });
   const ensureForDate = useMutation(api.availability.ensureForDate);
@@ -292,11 +293,11 @@ export default function RestaurantDetail() {
   // conditionally. Grouping a few dozen menu items is cheap, so a plain call
   // is fine and keeps hook order stable across load/ready renders.
   const groupedItems = useMemo(() => {
-    if (!data) return [] as [string, MenuItemLike[]][];
-    const all = data.menuDocs.flatMap((m) => m.items);
-    const visible = menuTab === "overview" ? all : data.menuDocs.find((m) => m._id === menuTab)?.items ?? [];
+    if (!menuData) return [] as [string, MenuItemLike[]][];
+    const all = menuData.menuDocs.flatMap((m) => m.items);
+    const visible = menuTab === "overview" ? all : menuData.menuDocs.find((m) => m._id === menuTab)?.items ?? [];
     return groupMenuItems(visible);
-  }, [data, menuTab]);
+  }, [menuData, menuTab]);
 
   const handleConfirm = async () => {
     if (!selectedSlot || !id) return;
@@ -463,7 +464,8 @@ export default function RestaurantDetail() {
     );
   }
 
-  const { restaurant: r, menuDocs, rating } = data;
+  const { restaurant: r, rating } = data;
+  const menuDocs = menuData?.menuDocs ?? [];
   const isFavorite = (user?.favorites ?? []).includes(r._id);
   const policyHours = r.cancellationPolicyHours ?? 0;
 
@@ -847,7 +849,11 @@ export default function RestaurantDetail() {
         {/* Menu */}
         <div className="mt-6 px-4">
           <h2 className="font-semibold">{t("detail.menu")}</h2>
-          {menuDocs.length === 0 ? (
+          {menuData === undefined ? (
+            <div className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+              <Spinner className="size-4" /> {t("detail.loadingReviews")}
+            </div>
+          ) : menuDocs.length === 0 ? (
             <p className="mt-2 text-sm text-muted-foreground">
               {t("detail.menuSoon")}
             </p>

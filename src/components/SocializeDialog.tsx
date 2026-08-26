@@ -6,7 +6,6 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { motion } from "framer-motion";
 import {
   ArrowLeft,
   BellRing,
@@ -401,12 +400,10 @@ export function SocializeDialog({
               ) : (
                 <div className="space-y-2">
                   {(diners ?? []).map((d, i) => (
-                    <motion.div
+                    <div
                       key={d._id}
-                      initial={{ opacity: 0, y: 6 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: i * 0.04, duration: 0.2 }}
-                      className="flex items-center gap-3 rounded-xl border border-border/70 bg-card px-3.5 py-3"
+                      className="animate-fade-in-up flex items-center gap-3 rounded-xl border border-border/70 bg-card px-3.5 py-3"
+                      style={{ animationDelay: `${i * 0.04}s` }}
                     >
                       {d.image ? (
                         <img src={d.image} alt="" className="size-10 shrink-0 rounded-full object-cover" />
@@ -441,7 +438,7 @@ export function SocializeDialog({
                       >
                         <Gift className="size-3.5" /> {t("social.send")}
                       </Button>
-                    </motion.div>
+                    </div>
                   ))}
                 </div>
               )}

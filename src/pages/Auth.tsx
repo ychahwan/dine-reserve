@@ -19,7 +19,6 @@ import { api } from "@/convex/_generated/api";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
 import { useMutation } from "convex/react";
 import { useTranslation } from "react-i18next";
-import { AnimatePresence, motion } from "framer-motion";
 import {
   ArrowRight,
   KeyRound,
@@ -364,13 +363,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
       {/* Auth Content */}
       <div className="relative flex flex-1 items-center justify-center px-4 py-8">
         <Card className="w-full max-w-md border-border/60 bg-card/90 shadow-none backdrop-blur-sm">
-          <AnimatePresence mode="wait">
-            <motion.div
+            <div
               key={stepKey}
-              initial={{ opacity: 0, y: 12 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.22, ease: "easeOut" }}
+              className="animate-fade-in-up"
             >
               {/* ─── Step 1: Enter phone ─── */}
               {step === "enter-phone" && (
@@ -733,8 +728,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
                   </form>
                 </>
               )}
-            </motion.div>
-          </AnimatePresence>
+            </div>
         </Card>
       </div>
     </div>

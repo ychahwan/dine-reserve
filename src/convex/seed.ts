@@ -591,7 +591,7 @@ async function runSeed(ctx: MutationCtx) {
     await ctx.db.insert("aiSemanticRules", { ...entry, updatedBy: ownerMarco, updatedAt: now });
   }
   await ctx.db.insert("appSettings", { key: "AI_SYSTEM_PROMPT", value: DEFAULT_AI_SYSTEM_PROMPT, updatedBy: ownerMarco, updatedAt: now });
-  await ctx.db.insert("appSettings", { key: "AI_MODEL", value: "gemini-3.7-flash", updatedBy: ownerMarco, updatedAt: now });
+  await ctx.db.insert("appSettings", { key: "AI_MODEL", value: "gemini-2.0-flash", updatedBy: ownerMarco, updatedAt: now });
   await ctx.db.insert("reviews", {
     restaurantId: sakura,
     userId: leo,

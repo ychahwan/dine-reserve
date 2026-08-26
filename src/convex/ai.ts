@@ -159,7 +159,7 @@ export const recommendDinner = action({
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: agentConfig.model || process.env.AI_MODEL || "gemini-3.7-flash",
+      model: agentConfig.model || process.env.AI_MODEL || "gemini-2.0-flash",
       systemInstruction: AI_SECURITY_POLICY,
       generationConfig: {
         responseMimeType: "application/json",
@@ -358,7 +358,7 @@ export const ownerInsights = action({
 
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({
-      model: agentConfig.model || process.env.AI_MODEL || "gemini-3.7-flash",
+      model: agentConfig.model || process.env.AI_MODEL || "gemini-2.0-flash",
       systemInstruction: AI_SECURITY_POLICY,
       generationConfig: { responseMimeType: "application/json", responseSchema: OWNER_INSIGHT_SCHEMA, temperature: 0.2, maxOutputTokens: 1800 },
     }, { timeout: 15_000 });

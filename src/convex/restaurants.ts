@@ -212,16 +212,38 @@ export const get = query({
       const caller = userId !== null ? await ctx.db.get(userId) : null;
       if (!(restaurant.ownerId === userId || caller?.role === "admin")) return null;
     }
-    const [sections, hours, menus, rawItems, rating] = await Promise.all([
+    const [sections, hours, rating] = await Promise.all([
       ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-      ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-      ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       restaurantRating(ctx, id),
     ]);
 
-    // Resolve uploaded photos (Convex storage ids) to public URLs so the
-    // frontend can render every item image uniformly.
+    // Ownership info so the manager page can explain empty bookings and
+    // notifications instead of silently showing nothing: isOwner drives a
+    // banner, ownerIsDemo allows the "become the demo owner" recovery path.
+    const userId = await getAuthUserId(ctx);
+    const isOwner = userId !== null && restaurant.ownerId === userId;
+    let ownerIsDemo = false;
+    if (!isOwner) {
+      // safeGet: the owner may be a bare auth subject (e.g. a legacy/test
+      // identity) rather than a real user doc — never crash the detail page.
+      const owner = await safeGet<Doc<"users">>(ctx, restaurant.ownerId);
+      const email = owner?.email ?? "";
+      ownerIsDemo = email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo");
+    }
+    return { restaurant, sections, hours, isOwner, ownerIsDemo, rating };
+  },
+});
+
+/** KB-04: Lazy-loaded menu data — separated from `get` so the detail page
+ *  renders the hero + booking panel instantly while menu images resolve. */
+export const menuForRestaurant = query({
+  args: { id: v.id("restaurants") },
+  handler: async (ctx, { id }) => {
+    const [menus, rawItems] = await Promise.all([
+      ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
+      ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
+    ]);
     const menuDocs = await Promise.all(
       menus.map(async (m) => {
         const items = await Promise.all(
@@ -239,21 +261,7 @@ export const get = query({
         return { ...m, items };
       }),
     );
-
-    // Ownership info so the manager page can explain empty bookings and
-    // notifications instead of silently showing nothing: isOwner drives a
-    // banner, ownerIsDemo allows the "become the demo owner" recovery path.
-    const userId = await getAuthUserId(ctx);
-    const isOwner = userId !== null && restaurant.ownerId === userId;
-    let ownerIsDemo = false;
-    if (!isOwner) {
-      // safeGet: the owner may be a bare auth subject (e.g. a legacy/test
-      // identity) rather than a real user doc — never crash the detail page.
-      const owner = await safeGet<Doc<"users">>(ctx, restaurant.ownerId);
-      const email = owner?.email ?? "";
-      ownerIsDemo = email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo");
-    }
-    return { restaurant, sections, hours, menuDocs, isOwner, ownerIsDemo, rating };
+    return { menuDocs };
   },
 });
 

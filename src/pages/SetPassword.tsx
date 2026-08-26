@@ -12,7 +12,6 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
-import { motion } from "framer-motion";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router";
@@ -99,11 +98,8 @@ export default function SetPassword() {
       </div>
 
       <div className="relative flex flex-1 items-center justify-center px-4 py-8">
-        <motion.div
-          initial={{ opacity: 0, y: 12 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.3 }}
-          className="w-full max-w-md"
+        <div
+          className="animate-fade-in-up w-full max-w-md"
         >
           <Card className="border-border/60 bg-card/90 shadow-none backdrop-blur-sm">
             <CardHeader className="text-center">
@@ -179,7 +175,7 @@ export default function SetPassword() {
               </CardFooter>
             </form>
           </Card>
-        </motion.div>
+        </div>
       </div>
     </div>
   );

@@ -213,7 +213,7 @@ export const forRestaurant = query({
           read: r.read,
           createdAt: r.createdAt,
           bookingId: r.bookingId,
-          dinerName: (diner as any)?.name ?? (diner as any)?.email ?? "Diner",
+          dinerName: diner?.name ?? diner?.email ?? "Diner",
           booking: booking
             ? {
                 _id: booking._id,
@@ -221,7 +221,7 @@ export const forRestaurant = query({
                 time: booking.time,
                 partySize: booking.partySize,
                 code: booking.code,
-                sectionName: (booking as any).sectionName,
+                sectionName: booking.sectionName,
               }
             : null,
         };
