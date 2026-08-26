@@ -37,6 +37,8 @@ The "Forgot password?" flow on the login screen sends an OTP to the phone and le
 - Accept the window (standard for JWT-based auth; short-lived tokens mitigate)
 - Add a `sessionRevokedAt` timestamp on the user doc; check it in `currentUser` and `RequireAuth`
 
+**Status:** ✅ Fixed — `admin.setUserPassword` now calls `invalidateUserSessions` after password reset, immediately revoking all existing sessions.
+
 ---
 
 ## J-04 — Diner can't send a gift after the booking time has passed but they haven't checked in yet
@@ -66,6 +68,8 @@ Same root cause as BUG-04/07: `todayKey()` uses server UTC. A diner in EET (UTC+
 
 `bookings.byRestaurant` returns the booking but not the expanded guest list. The owner must click into each booking to see guests. **Improvement opportunity:** include `guests` in the owner query response.
 
+**Status:** ✅ Fixed — Owner booking cards now display confirmed guest names below the booking details.
+
 ---
 
 ## J-07 — Diner can't cancel an order after it moves to "preparing"
@@ -84,6 +88,8 @@ Same root cause as BUG-04/07: `todayKey()` uses server UTC. A diner in EET (UTC+
 
 `checkedInAt` exists on each booking but isn't surfaced in the owner's booking list view. **Improvement:** show a check-in badge/icon in the owner's booking table.
 
+**Status:** ✅ Fixed — Owner booking cards now show a green "Checked in" badge when `checkedInAt` is set.
+
 ---
 
 ## J-09 — Admin "Tag owner" page doesn't show a list of existing tags
@@ -92,6 +98,8 @@ Same root cause as BUG-04/07: `todayKey()` uses server UTC. A diner in EET (UTC+
 **Journey:** Admin tags accounts → wants to review who's been tagged → no overview
 
 The admin can see all users in the Users list (with role badges), but there's no dedicated "tagged owners" view or filter. The Users list with the "Owner" role badge serves this purpose, but it's not obvious.
+
+**Status:** ✅ Fixed — Admin Users page has a Role filter dropdown that includes "Owner" option for filtering tagged restaurant owners.
 
 ---
 

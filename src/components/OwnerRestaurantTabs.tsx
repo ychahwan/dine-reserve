@@ -1017,6 +1017,11 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
                     {b.sectionName && <span>{b.sectionName}</span>}
                     {b.phone && <span className="flex items-center gap-1"><Phone className="size-3" /> {b.phone}</span>}
                   </p>
+                  {b.guests && b.guests.length > 0 && (
+                    <p className="mt-1.5 text-xs text-muted-foreground">
+                      Guests: {b.guests.map((g) => g.name).join(", ")}
+                    </p>
+                  )}
                   {b.notes && <p className="mt-1.5 rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs italic text-muted-foreground">“{b.notes}”</p>}
                 </div>
                 <div className="flex shrink-0 flex-col items-end gap-1.5">
