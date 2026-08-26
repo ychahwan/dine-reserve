@@ -94,9 +94,15 @@ export const leaderboard = query({
     // Only admins can see other users' points.
     const me = await ctx.db.get(userId as Id<"users">);
     if (me?.role !== "admin") return [];
-    const users = await ctx.db.query("users").collect();
+    // L-20: bound the scan instead of collecting every user — filter+take
+    // stops reading after this many point-holders even as the users table
+    // grows (no points index exists yet to order by).
+    const MAX_SCAN = 2000;
+    const users = await ctx.db
+      .query("users")
+      .filter((q) => q.gt(q.field("points"), 0))
+      .take(MAX_SCAN);
     return users
-      .filter((u) => (u.points ?? 0) > 0)
       .map((u) => ({ _id: u._id, name: u.name ?? "Diner", phone: u.phone, points: u.points ?? 0 }))
       .sort((a, b) => b.points - a.points)
       .slice(0, Math.min(limit ?? 25, 100));

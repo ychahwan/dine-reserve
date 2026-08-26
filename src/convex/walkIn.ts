@@ -9,19 +9,66 @@
  * All paths converge: approval creates a booking with source: "walk_in" | "qr_scan" | "host_created"
  */
 
-import { mutation, query } from "./_generated/server";
+import { MutationCtx, mutation, query } from "./_generated/server";
+import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import { generateCode } from "./bookings";
 
 /* ────────────────────────────────────────────
- * Helper: generate a short alphanumeric code
+ * Helper: unique booking code (H-3). Reuses bookings' crypto-random
+ * generator and retries against the by_code index, because the code is a
+ * public capability — a collision would leak a stranger's booking via the
+ * invite-link lookup.
  * ──────────────────────────────────────────── */
-function generateCode(): string {
-  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"; // no I/1/O/0
-  let code = "";
-  for (let i = 0; i < 6; i++) {
-    code += chars[Math.floor(Math.random() * chars.length)];
+async function generateUniqueCode(ctx: MutationCtx): Promise<string> {
+  let code = generateCode();
+  while (true) {
+    const clash = await ctx.db.query("bookings").withIndex("by_code", (q) => q.eq("code", code)).first();
+    if (!clash) break;
+    code = generateCode();
   }
   return code;
+}
+
+/* ────────────────────────────────────────────
+ * Helper: single clock (L-7). Date AND time both come from UTC getters so the
+ * day boundary can never disagree between the two fields.
+ * ──────────────────────────────────────────── */
+function nowUtc(): { date: string; time: string } {
+  const now = new Date();
+  return {
+    date: `${now.getUTCFullYear()}-${String(now.getUTCMonth() + 1).padStart(2, "0")}-${String(now.getUTCDate()).padStart(2, "0")}`,
+    time: `${String(now.getUTCHours()).padStart(2, "0")}:${String(now.getUTCMinutes()).padStart(2, "0")}`,
+  };
+}
+
+/* ────────────────────────────────────────────
+ * Helper: atomic seat decrement for approved walk-ins (H-2). Mirrors
+ * attemptBooking's serializable read-check-write on the slot ledger. A missing
+ * or exhausted ledger row is tolerated (the party is physically seated either
+ * way, and cancel paths never restore walk-in seats), so this can only ever
+ * under-count availability — never mint phantom seats.
+ * ──────────────────────────────────────────── */
+async function decrementLedgerForWalkIn(
+  ctx: MutationCtx,
+  opts: { restaurantId: Id<"restaurants">; date: string; time: string; partySize: number; sectionId?: Id<"sections"> },
+): Promise<void> {
+  const slots = await ctx.db
+    .query("slots")
+    .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", opts.restaurantId).eq("date", opts.date))
+    .collect();
+  const matches = slots.filter(
+    (s) => s.time === opts.time && !s.closed && (!opts.sectionId || s.sectionId === opts.sectionId),
+  );
+  // duplicates are benign: treat the doc with most remaining as canonical
+  const slot = matches.reduce<null | (typeof matches)[number]>(
+    (best, s) => (!best || best.remaining < s.remaining ? s : best),
+    null,
+  );
+  if (slot && slot.remaining >= opts.partySize) {
+    await ctx.db.patch(slot._id, { remaining: slot.remaining - opts.partySize });
+  }
 }
 
 /* ════════════════════════════════════════════
@@ -41,7 +88,7 @@ export const walkInCheckIn = mutation({
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     // Validate party size
@@ -70,13 +117,17 @@ export const walkInCheckIn = mutation({
       throw new Error("You already have a pending walk-in request at this restaurant");
     }
 
+    // Sanitized free-text (M-8): trim + length caps like every other writer.
+    const name = args.name.trim().slice(0, 80);
+    const tableNumber = args.tableNumber.trim().slice(0, 20);
+
     // Create walk-in request
     const requestId = await ctx.db.insert("walkInRequests", {
       restaurantId: args.restaurantId,
       userId,
-      name: args.name,
+      name,
       partySize: args.partySize,
-      tableNumber: args.tableNumber,
+      tableNumber,
       source: "app_check_in",
       status: "pending",
       createdAt: Date.now(),
@@ -87,7 +138,7 @@ export const walkInCheckIn = mutation({
       restaurantId: args.restaurantId,
       userId,
       type: "walk_in_request",
-      message: `Walk-in request: ${args.name} (party of ${args.partySize}) at table ${args.tableNumber}`,
+      message: `Walk-in request: ${name} (party of ${args.partySize}) at table ${tableNumber}`,
       read: false,
       createdAt: Date.now(),
     });
@@ -112,14 +163,15 @@ export const scanTableQR = mutation({
     name: v.string(),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     if (args.partySize < 1 || args.partySize > 20) {
       throw new Error("Party size must be between 1 and 20");
     }
 
-    // Validate table QR code exists and is active
+    // Validate table QR code exists and is active (L-6: a fabricated table
+    // with no QR row must be rejected just like an inactive one).
     const qrCode = await ctx.db
       .query("tableQRCodes")
       .withIndex("by_restaurant_table", (q) =>
@@ -127,7 +179,7 @@ export const scanTableQR = mutation({
       )
       .first();
 
-    if (qrCode && !qrCode.active) {
+    if (!qrCode || !qrCode.active) {
       throw new Error("This table is not available for walk-in check-in");
     }
 
@@ -152,12 +204,16 @@ export const scanTableQR = mutation({
       throw new Error("You already have a pending walk-in request at this restaurant");
     }
 
+    // Sanitized free-text (M-8).
+    const name = args.name.trim().slice(0, 80);
+    const tableNumber = args.tableNumber.trim().slice(0, 20);
+
     const requestId = await ctx.db.insert("walkInRequests", {
       restaurantId: args.restaurantId,
       userId,
-      name: args.name,
+      name,
       partySize: args.partySize,
-      tableNumber: args.tableNumber,
+      tableNumber,
       source: "qr_scan",
       status: "pending",
       createdAt: Date.now(),
@@ -167,7 +223,7 @@ export const scanTableQR = mutation({
       restaurantId: args.restaurantId,
       userId,
       type: "walk_in_request",
-      message: `QR walk-in: ${args.name} (party of ${args.partySize}) at table ${args.tableNumber}`,
+      message: `QR walk-in: ${name} (party of ${args.partySize}) at table ${tableNumber}`,
       read: false,
       createdAt: Date.now(),
     });
@@ -196,53 +252,69 @@ export const hostInitiatedWalkIn = mutation({
     notes: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     // Verify the user is the owner of this restaurant
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found");
     if (restaurant.ownerId !== userId) throw new Error("Only the restaurant owner can create walk-in bookings");
+    // Disabled venues accept no new business, walk-ins included (H-2).
+    if (restaurant.disabled) throw new Error("This restaurant is currently unavailable.");
 
     if (args.partySize < 1 || args.partySize > 20) {
       throw new Error("Party size must be between 1 and 20");
     }
 
+    // Sanitized free-text (M-8).
+    const dinerName = args.dinerName.trim().slice(0, 80);
+    const tableNumber = args.tableNumber.trim().slice(0, 20);
+    const notes = args.notes?.trim().slice(0, 300) || undefined;
+    const dinerEmail = args.dinerEmail?.trim().slice(0, 120) || undefined;
+    const dinerPhone = args.dinerPhone?.trim().slice(0, 20) || undefined;
+
     // Create a walk-in request with host-created source
     const requestId = await ctx.db.insert("walkInRequests", {
       restaurantId: args.restaurantId,
       userId, // the host's userId (they are the contact for this walk-in)
-      name: args.dinerName,
+      name: dinerName,
       partySize: args.partySize,
-      tableNumber: args.tableNumber,
+      tableNumber,
       source: "host_created",
       status: "pending",
       createdAt: Date.now(),
     });
 
     // Create the booking immediately (host has authority)
-    const today = new Date().toISOString().split("T")[0];
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const code = generateCode();
+    const { date: today, time: timeStr } = nowUtc();
+    const code = await generateUniqueCode(ctx);
 
     const bookingId = await ctx.db.insert("bookings", {
       restaurantId: args.restaurantId,
       userId,
-      name: args.dinerName,
-      email: args.dinerEmail,
-      phone: args.dinerPhone,
+      name: dinerName,
+      email: dinerEmail,
+      phone: dinerPhone,
       date: today,
       time: timeStr,
       partySize: args.partySize,
       sectionId: args.sectionId,
       status: "confirmed",
       code,
-      notes: args.notes,
+      notes,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       source: "host_created",
-      walkInTable: args.tableNumber,
+      walkInTable: tableNumber,
+    });
+
+    // H-2: take the seats from the slot ledger like any other booking.
+    await decrementLedgerForWalkIn(ctx, {
+      restaurantId: args.restaurantId,
+      date: today,
+      time: timeStr,
+      partySize: args.partySize,
+      sectionId: args.sectionId,
     });
 
     // Update the walk-in request with the booking
@@ -259,7 +331,7 @@ export const hostInitiatedWalkIn = mutation({
       userId,
       type: "booking_created",
       bookingId,
-      message: `Walk-in booking created: ${args.dinerName} (party of ${args.partySize}) at table ${args.tableNumber}`,
+      message: `Walk-in booking created: ${dinerName} (party of ${args.partySize}) at table ${tableNumber}`,
       read: false,
       createdAt: Date.now(),
     });
@@ -279,7 +351,7 @@ export const approveWalkIn = mutation({
     requestId: v.id("walkInRequests"),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     const request = await ctx.db.get(args.requestId);
@@ -290,12 +362,12 @@ export const approveWalkIn = mutation({
     const restaurant = await ctx.db.get(request.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found");
     if (restaurant.ownerId !== userId) throw new Error("Only the restaurant owner can approve walk-ins");
+    // Disabled venues accept no new business, walk-ins included (H-2).
+    if (restaurant.disabled) throw new Error("This restaurant is currently unavailable.");
 
     // Create the booking
-    const today = new Date().toISOString().split("T")[0];
-    const now = new Date();
-    const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-    const code = generateCode();
+    const { date: today, time: timeStr } = nowUtc();
+    const code = await generateUniqueCode(ctx);
 
     const bookingId = await ctx.db.insert("bookings", {
       restaurantId: request.restaurantId,
@@ -310,6 +382,14 @@ export const approveWalkIn = mutation({
       updatedAt: Date.now(),
       source: request.source === "qr_scan" ? "qr_scan" : "walk_in",
       walkInTable: request.tableNumber,
+    });
+
+    // H-2: take the seats from the slot ledger like any other booking.
+    await decrementLedgerForWalkIn(ctx, {
+      restaurantId: request.restaurantId,
+      date: today,
+      time: timeStr,
+      partySize: request.partySize,
     });
 
     // Update the walk-in request
@@ -344,7 +424,7 @@ export const rejectWalkIn = mutation({
     reason: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     const request = await ctx.db.get(args.requestId);
@@ -384,7 +464,7 @@ export const pendingWalkIns = query({
     restaurantId: v.id("restaurants"),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     const restaurant = await ctx.db.get(args.restaurantId);
@@ -423,7 +503,7 @@ export const myWalkInStatus = query({
     restaurantId: v.id("restaurants"),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     const request = await ctx.db
@@ -442,6 +522,33 @@ export const myWalkInStatus = query({
 });
 
 /* ════════════════════════════════════════════
+ * Query: Get the caller's latest walk-in request for a restaurant regardless
+ * of status (pending / approved / rejected) — lets the diner UI react once the
+ * host decides instead of staring at "waiting" forever.
+ * Returns null when signed out or when no request exists.
+ * ════════════════════════════════════════════ */
+export const myLatestWalkIn = query({
+  args: {
+    restaurantId: v.id("restaurants"),
+  },
+  handler: async (ctx, args) => {
+    const userId = await getAuthUserId(ctx);
+    if (!userId) return null;
+
+    const requests = await ctx.db
+      .query("walkInRequests")
+      .withIndex("by_user", (q) => q.eq("userId", userId as Id<"users">))
+      .collect();
+
+    const latest = requests
+      .filter((r) => r.restaurantId === args.restaurantId)
+      .sort((a, b) => b.createdAt - a.createdAt)[0];
+
+    return latest ?? null;
+  },
+});
+
+/* ════════════════════════════════════════════
  * Query: Get all walk-in history for a restaurant
  * ════════════════════════════════════════════ */
 export const walkInHistory = query({
@@ -454,7 +561,7 @@ export const walkInHistory = query({
     )),
   },
   handler: async (ctx, args) => {
-    const userId = (await ctx.auth.getUserIdentity())?.subject;
+    const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
 
     const restaurant = await ctx.db.get(args.restaurantId);

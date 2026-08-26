@@ -1,16 +1,20 @@
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
 import {
   ArrowRight,
   CalendarDays,
   Check,
   Gift,
+  MapPin,
   MessageSquareText,
   PartyPopper,
   Phone,
   Search,
+  Sparkles,
   Store,
   Users,
+  Utensils,
 } from "lucide-react";
 import { motion } from "framer-motion";
 import { useState } from "react";
@@ -33,12 +37,6 @@ const SOCIALIZE_POINTS = [
   { icon: Check, titleKey: "landing.soc3Title", textKey: "landing.soc3Text" },
 ];
 
-/* Editorial restaurant photography — high-quality Unsplash images */
-const HERO_IMG = "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=1400&q=80&auto=format";
-const DINING_IMG = "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=80&auto=format";
-const COURTYARD_IMG = "https://images.unsplash.com/photo-1555396273-367ea4eb4db5?w=900&q=80&auto=format";
-const CHEF_IMG = "https://images.unsplash.com/photo-1577219491135-ce391730fb2c?w=900&q=80&auto=format";
-
 export default function Landing() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -57,180 +55,122 @@ export default function Landing() {
     <div className="min-h-screen bg-background text-foreground">
       {/* ────────── Nav ────────── */}
       <header className="sticky top-0 z-40 border-b border-border/60 bg-background/85 backdrop-blur-md">
-        <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6">
-          <Link to="/" className="flex items-center gap-2.5">
-            <span className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground">
-              <Store className="size-5" />
+        <div className="mx-auto flex h-14 max-w-6xl items-center justify-between px-4 sm:px-6">
+          <Link to="/" className="flex items-center gap-2">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Store className="size-4" />
             </span>
-            <span className="text-lg font-semibold tracking-tight font-[var(--font-display)]">Kamix</span>
+            <span className="font-semibold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>Kamix</span>
           </Link>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
             <LanguageSwitcher />
             <Button variant="ghost" size="sm" asChild>
               <Link to="/auth">{t("common.signIn")}</Link>
             </Button>
-            <Button size="sm" asChild className="bg-[var(--color-terracotta)] hover:bg-[var(--color-terracotta)]/90 text-white">
+            <Button size="sm" asChild className="bg-primary hover:bg-primary/90 text-primary-foreground">
               <Link to="/auth">{t("common.getStarted")}</Link>
             </Button>
           </div>
         </div>
       </header>
 
-      {/* ────────── Hero — atmospheric restaurant scene ────────── */}
+      {/* ────────── Hero ────────── */}
       <section className="relative overflow-hidden">
-        {/* Background image with overlay */}
-        <div className="absolute inset-0">
-          <img
-            src={HERO_IMG}
-            alt=""
-            className="h-full w-full object-cover"
-            loading="eager"
-            decoding="async"
-          />
-          <div className="absolute inset-0 bg-gradient-to-b from-background/80 via-background/60 to-background" />
-          <div className="absolute inset-0 bg-gradient-to-r from-background/50 to-transparent" />
-        </div>
+        <div className="absolute inset-0 bg-gradient-to-b from-primary/[0.04] via-transparent to-transparent" />
 
-        <div className="relative mx-auto max-w-6xl px-4 pb-20 pt-20 sm:px-6 lg:pb-28 lg:pt-24">
-          <div className="grid items-center gap-12 lg:grid-cols-2">
-            {/* Left: editorial headline */}
+        <div className="relative mx-auto max-w-6xl px-4 pb-16 pt-14 sm:px-6 lg:pb-24 lg:pt-20">
+          <div className="mx-auto max-w-2xl text-center">
             <motion.div
               initial={{ opacity: 0, y: 16 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.6 }}
             >
-              <Badge variant="secondary" className="mb-5 gap-1.5 rounded-full bg-[var(--color-terracotta)]/10 text-[var(--color-terracotta)] border-[var(--color-terracotta)]/20 px-3 py-1">
-                <span className="size-1.5 rounded-full bg-[var(--color-terracotta)]" />
+              <Badge variant="secondary" className="mb-5 gap-1.5 rounded-full bg-primary/10 text-primary border-primary/20 px-3 py-1">
+                <span className="size-1.5 rounded-full bg-primary" />
                 {t("landing.heroBadge")}
               </Badge>
-              <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl" style={{ fontFamily: "var(--font-display)" }}>
+
+              <h1 className="text-balance text-4xl font-bold tracking-tight sm:text-5xl lg:text-6xl">
                 {t("landing.title1")}
                 <br />
-                <span className="text-[var(--color-terracotta)]">{t("landing.title2")}</span>
+                <span className="text-primary">{t("landing.title2")}</span>
               </h1>
-              <p className="mt-5 max-w-lg text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
+
+              <p className="mt-5 mx-auto max-w-lg text-pretty text-base leading-7 text-muted-foreground sm:text-lg">
                 {t("landing.subtitle")}
               </p>
-
-              {/* Phone entry */}
-              <motion.form
-                onSubmit={handleGetStarted}
-                initial={{ opacity: 0, y: 12 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ duration: 0.5, delay: 0.15 }}
-                className="mt-8 flex max-w-md flex-col gap-3 sm:flex-row"
-              >
-                <div className="relative flex-1">
-                  <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    type="tel"
-                    inputMode="tel"
-                    placeholder={t("landing.phonePlaceholder")}
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    className="h-12 rounded-[var(--radius-md)] pl-10 text-base"
-                    aria-label="Phone number"
-                    autoFocus
-                  />
-                </div>
-                <Button type="submit" size="lg" className="h-12 rounded-[var(--radius-md)] px-6 text-base bg-[var(--color-terracotta)] hover:bg-[var(--color-terracotta)]/90 text-white">
-                  {t("common.getStarted")} <ArrowRight className="size-4" />
-                </Button>
-              </motion.form>
-
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.3 }}
-                className="mt-4 text-sm text-muted-foreground"
-              >
-                {t("landing.alreadyHave")}{" "}
-                <Link to="/auth" className="font-medium text-primary hover:underline">
-                  {t("common.signIn")}
-                </Link>
-              </motion.p>
-
-              {/* Social proof */}
-              <motion.div
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.5, delay: 0.4 }}
-                className="mt-8 flex flex-wrap items-center gap-x-6 gap-y-3 text-sm text-muted-foreground"
-              >
-                <span className="flex items-center gap-2">
-                  <Users className="size-4" />{" "}
-                  {restaurantCount !== null
-                    ? t("landing.partner", { count: restaurantCount })
-                    : t("landing.loadingPartners")}
-                </span>
-                {cityCount !== null && cityCount > 0 && (
-                  <span className="flex items-center gap-2">
-                    <Store className="size-4" /> {t("landing.city", { count: cityCount })}
-                  </span>
-                )}
-                <span className="flex items-center gap-2">
-                  <Check className="size-4" /> {t("landing.freeToJoin")}
-                </span>
-              </motion.div>
             </motion.div>
 
-            {/* Right: editorial image composition */}
-            <motion.div
-              initial={{ opacity: 0, scale: 0.96 }}
-              animate={{ opacity: 1, scale: 1 }}
-              transition={{ duration: 0.7, delay: 0.2 }}
-              className="relative hidden lg:block"
+            {/* Phone entry */}
+            <motion.form
+              onSubmit={handleGetStarted}
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.5, delay: 0.15 }}
+              className="mt-8 mx-auto flex max-w-md flex-col gap-3 sm:flex-row"
             >
-              <div className="relative">
-                {/* Main restaurant image */}
-                <div className="overflow-hidden rounded-[var(--radius-2xl)] shadow-2xl">
-                  <img
-                    src={DINING_IMG}
-                    alt="Atmospheric restaurant dining scene"
-                    className="h-80 w-full object-cover"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                {/* Overlapping courtyard image */}
-                <div className="absolute -bottom-6 -left-8 overflow-hidden rounded-[var(--radius-xl)] shadow-xl ring-1 ring-border/20">
-                  <img
-                    src={COURTYARD_IMG}
-                    alt="Restaurant courtyard"
-                    className="h-36 w-48 object-cover"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                {/* Floating reservation receipt card */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  transition={{ duration: 0.5, delay: 0.6 }}
-                  className="absolute -right-4 top-8 w-56 rounded-[var(--radius-xl)] border border-border/60 bg-background/95 p-4 shadow-lg backdrop-blur-sm"
-                >
-                  <p className="text-xs font-semibold uppercase tracking-widest text-[var(--color-terracotta)]">Reservation confirmed</p>
-                  <p className="mt-1.5 text-sm font-semibold" style={{ fontFamily: "var(--font-display)" }}>Beirut Bistro</p>
-                  <div className="mt-2 flex items-center gap-4 text-xs text-muted-foreground">
-                    <span className="flex items-center gap-1"><CalendarDays className="size-3" /> Sat, Aug 23</span>
-                    <span>8:00 PM · 4 guests</span>
-                  </div>
-                  <div className="mt-2.5 flex items-center gap-1.5 rounded-full bg-emerald-600/10 px-2.5 py-1 text-[10px] font-semibold text-emerald-700">
-                    <Check className="size-3" /> Table ready
-                  </div>
-                </motion.div>
+              <div className="relative flex-1">
+                <Phone className="absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  type="tel"
+                  inputMode="tel"
+                  placeholder={t("landing.phonePlaceholder")}
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  className="h-11 rounded-xl pl-10"
+                  aria-label="Phone number"
+                  autoFocus
+                />
               </div>
+              <Button type="submit" size="lg" className="h-11 rounded-xl px-6 bg-primary hover:bg-primary/90 text-primary-foreground">
+                {t("common.getStarted")} <ArrowRight className="size-4" />
+              </Button>
+            </motion.form>
+
+            <motion.p
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, delay: 0.3 }}
+              className="mt-4 text-sm text-muted-foreground"
+            >
+              {t("landing.alreadyHave")}{" "}
+              <Link to="/auth" className="font-medium text-primary hover:underline">
+                {t("common.signIn")}
+              </Link>
+            </motion.p>
+
+            {/* Social proof */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              transition={{ duration: 0.5, delay: 0.4 }}
+              className="mt-8 flex flex-wrap items-center justify-center gap-x-6 gap-y-3 text-sm text-muted-foreground"
+            >
+              <span className="flex items-center gap-2">
+                <Utensils className="size-4 text-primary" />{" "}
+                {restaurantCount !== null
+                  ? t("landing.partner", { count: restaurantCount })
+                  : t("landing.loadingPartners")}
+              </span>
+              {cityCount !== null && cityCount > 0 && (
+                <span className="flex items-center gap-2">
+                  <MapPin className="size-4 text-primary" /> {t("landing.city", { count: cityCount })}
+                </span>
+              )}
+              <span className="flex items-center gap-2">
+                <Check className="size-4 text-primary" /> {t("landing.freeToJoin")}
+              </span>
             </motion.div>
           </div>
         </div>
       </section>
 
-      {/* ────────── How it works — editorial flow ────────── */}
+      {/* ────────── How it works ────────── */}
       <section id="how" className="border-t border-border/60">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="mx-auto max-w-2xl text-center">
-            <p className="text-sm font-medium uppercase tracking-widest text-[var(--color-terracotta)]">{t("landing.howLabel")}</p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl" style={{ fontFamily: "var(--font-display)" }}>
+            <p className="text-xs font-semibold uppercase tracking-widest text-primary">{t("landing.howLabel")}</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">
               {t("landing.howTitle")}
             </h2>
           </div>
@@ -243,104 +183,36 @@ export default function Landing() {
                 whileInView={{ opacity: 1, y: 0 }}
                 viewport={{ once: true, margin: "-60px" }}
                 transition={{ duration: 0.5, delay: i * 0.1 }}
-                className="group relative overflow-hidden rounded-[var(--radius-2xl)] border border-border/60 bg-card shadow-sm transition-shadow hover:shadow-md"
               >
-                {/* Step image */}
-                <div className="relative h-40 overflow-hidden bg-gradient-to-br from-[var(--color-terracotta)]/10 via-[var(--color-gold)]/5 to-card">
-                  <img
-                    src={[DINING_IMG, COURTYARD_IMG, CHEF_IMG][i]}
-                    alt=""
-                    className="h-full w-full object-cover opacity-60 transition-transform duration-500 group-hover:scale-105"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-background/80 to-transparent" />
-                  <span className="absolute bottom-3 left-4 text-5xl font-bold text-foreground/10" style={{ fontFamily: "var(--font-display)" }}>
+                <Card className="group relative overflow-hidden rounded-2xl border-border/70 p-6 transition-shadow hover:shadow-md">
+                  <div className="mb-4 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                    <step.icon className="size-6" />
+                  </div>
+                  <span className="absolute right-4 top-4 text-4xl font-bold text-muted-foreground/20" style={{ fontFamily: "var(--font-display)" }}>
                     0{i + 1}
                   </span>
-                </div>
-                <div className="p-5">
-                  <div className="mb-3 flex size-10 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-terracotta)]/10 text-[var(--color-terracotta)] transition-colors group-hover:bg-[var(--color-terracotta)] group-hover:text-white">
-                    <step.icon className="size-5" />
-                  </div>
-                  <h3 className="font-semibold" style={{ fontFamily: "var(--font-display)" }}>{t(step.titleKey)}</h3>
+                  <h3 className="font-semibold text-lg">{t(step.titleKey)}</h3>
                   <p className="mt-2 text-sm leading-6 text-muted-foreground">{t(step.textKey)}</p>
-                </div>
+                </Card>
               </motion.div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* ────────── Socialize — atmospheric dining ────────── */}
+      {/* ────────── Socialize ────────── */}
       <section id="socialize" className="border-t border-border/60 bg-muted/20">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="grid items-center gap-12 lg:grid-cols-2">
-            {/* Image composition */}
+            {/* Text content */}
             <motion.div
               initial={{ opacity: 0, x: -20 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true, margin: "-60px" }}
               transition={{ duration: 0.6 }}
-              className="relative order-1 lg:order-1"
             >
-              <div className="relative">
-                <div className="overflow-hidden rounded-[var(--radius-2xl)] shadow-xl">
-                  <img
-                    src={CHEF_IMG}
-                    alt="Restaurant chef preparing a dish"
-                    className="h-72 w-full object-cover sm:h-80"
-                    loading="lazy"
-                    decoding="async"
-                  />
-                </div>
-                {/* Floating social card */}
-                <motion.div
-                  initial={{ opacity: 0, y: 16 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.4, delay: 0.3 }}
-                  className="absolute -bottom-5 -right-5 w-60 rounded-[var(--radius-xl)] border border-border/60 bg-background/95 p-4 shadow-lg backdrop-blur-sm sm:-right-8"
-                >
-                  <div className="mb-3 flex items-center gap-2">
-                    <span className="flex size-7 items-center justify-center rounded-[var(--radius-sm)] bg-[var(--color-terracotta)]/10 text-[var(--color-terracotta)]">
-                      <PartyPopper className="size-3.5" />
-                    </span>
-                    <div>
-                      <p className="text-xs font-semibold">{t("landing.mockTitle")}</p>
-                      <p className="text-[10px] text-muted-foreground">{t("landing.mockSubtitle")}</p>
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    {[
-                      { name: "Rania", emoji: "🫖", time: "7:30 PM" },
-                      { name: "Karim", emoji: "🥂", time: "8:00 PM" },
-                    ].map((diner) => (
-                      <div
-                        key={diner.name}
-                        className="flex items-center gap-2.5 rounded-[var(--radius-md)] border border-border/60 bg-muted/30 px-3 py-2"
-                      >
-                        <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--color-terracotta)]/10 text-sm">
-                          {diner.emoji}
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium">{diner.name}</p>
-                          <p className="text-[10px] text-muted-foreground">{diner.time}</p>
-                        </div>
-                        <span className="flex items-center gap-1 rounded-full bg-emerald-600/10 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                          <Check className="size-2.5" /> {t("landing.mockCheckedIn")}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </motion.div>
-              </div>
-            </motion.div>
-
-            {/* Text content */}
-            <div className="order-2">
-              <p className="text-sm font-medium uppercase tracking-widest text-[var(--color-terracotta)]">{t("landing.socializeLabel")}</p>
-              <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl" style={{ fontFamily: "var(--font-display)" }}>
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">{t("landing.socializeLabel")}</p>
+              <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
                 {t("landing.socializeTitle")}
               </h2>
               <p className="mt-5 text-base leading-7 text-muted-foreground">
@@ -349,7 +221,7 @@ export default function Landing() {
               <div className="mt-8 space-y-5">
                 {SOCIALIZE_POINTS.map((point) => (
                   <div key={point.titleKey} className="flex items-start gap-4">
-                    <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-md)] bg-[var(--color-terracotta)]/10 text-[var(--color-terracotta)]">
+                    <div className="flex size-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                       <point.icon className="size-5" />
                     </div>
                     <div>
@@ -359,23 +231,72 @@ export default function Landing() {
                   </div>
                 ))}
               </div>
-              <Button size="lg" className="mt-8 h-12 rounded-[var(--radius-md)] px-7 text-base bg-[var(--color-terracotta)] hover:bg-[var(--color-terracotta)]/90 text-white" asChild>
+              <Button size="lg" className="mt-8 h-11 rounded-xl px-7 bg-primary hover:bg-primary/90 text-primary-foreground" asChild>
                 <Link to="/auth">
                   {t("landing.socializeCta")} <ArrowRight className="size-4" />
                 </Link>
               </Button>
-            </div>
+            </motion.div>
+
+            {/* Mock social card */}
+            <motion.div
+              initial={{ opacity: 0, x: 20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: "-60px" }}
+              transition={{ duration: 0.6, delay: 0.1 }}
+              className="flex justify-center"
+            >
+              <Card className="w-full max-w-sm rounded-2xl border-border/70 p-5">
+                <div className="mb-4 flex items-center gap-3">
+                  <div className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <PartyPopper className="size-5" />
+                  </div>
+                  <div>
+                    <p className="font-semibold" style={{ fontFamily: "var(--font-display)" }}>{t("landing.mockTitle")}</p>
+                    <p className="text-xs text-muted-foreground">{t("landing.mockSubtitle")}</p>
+                  </div>
+                </div>
+                <div className="space-y-2.5">
+                  {[
+                    { name: "Rania", emoji: "🫖", time: "7:30 PM" },
+                    { name: "Karim", emoji: "🥂", time: "8:00 PM" },
+                    { name: "Layla", emoji: "🍝", time: "8:15 PM" },
+                  ].map((diner) => (
+                    <div
+                      key={diner.name}
+                      className="flex items-center gap-3 rounded-xl border border-border/60 bg-muted/30 px-3.5 py-2.5"
+                    >
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm">
+                        {diner.emoji}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium">{diner.name}</p>
+                        <p className="text-xs text-muted-foreground">{diner.time}</p>
+                      </div>
+                      <span className="flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-medium text-primary">
+                        <Check className="size-3" /> {t("landing.mockCheckedIn")}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </Card>
+            </motion.div>
           </div>
         </div>
       </section>
 
-      {/* ────────── Owners — editorial with image ────────── */}
+      {/* ────────── Owners ────────── */}
       <section id="owners" className="border-t border-border/60">
         <div className="mx-auto max-w-6xl px-4 py-20 sm:px-6">
           <div className="grid items-center gap-12 lg:grid-cols-2">
-            <div>
-              <p className="text-sm font-medium uppercase tracking-widest text-[var(--color-gold)]">{t("landing.ownersLabel")}</p>
-              <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl" style={{ fontFamily: "var(--font-display)" }}>
+            <motion.div
+              initial={{ opacity: 0, x: -20 }}
+              whileInView={{ opacity: 1, x: 0 }}
+              viewport={{ once: true, margin: "-60px" }}
+              transition={{ duration: 0.6 }}
+            >
+              <p className="text-xs font-semibold uppercase tracking-widest text-primary">{t("landing.ownersLabel")}</p>
+              <h2 className="mt-3 text-balance text-3xl font-bold tracking-tight sm:text-4xl">
                 {t("landing.ownersTitle")}
               </h2>
               <p className="mt-4 text-base leading-7 text-muted-foreground">
@@ -384,60 +305,91 @@ export default function Landing() {
               <ul className="mt-6 space-y-3">
                 {[t("landing.ownerFeature1"), t("landing.ownerFeature2"), t("landing.ownerFeature3")].map((item) => (
                   <li key={item} className="flex items-start gap-3 text-sm text-muted-foreground">
-                    <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-[var(--color-gold)]/15 text-[var(--color-gold)]">
+                    <span className="mt-0.5 flex size-5 shrink-0 items-center justify-center rounded-full bg-primary/15 text-primary">
                       <Check className="size-3" />
                     </span>
                     {item}
                   </li>
                 ))}
               </ul>
-              <Button size="lg" className="mt-8 h-12 rounded-[var(--radius-md)] px-7 text-base bg-[var(--color-forest)] hover:bg-[var(--color-forest)]/90 text-white" asChild>
+              <Button size="lg" className="mt-8 h-11 rounded-xl px-7 bg-primary hover:bg-primary/90 text-primary-foreground" asChild>
                 <Link to="/auth?returnTo=/owner">
                   {t("landing.ownersCta")} <ArrowRight className="size-4" />
                 </Link>
               </Button>
-            </div>
+            </motion.div>
 
-            {/* Restaurant imagery */}
+            {/* Stats cards */}
             <motion.div
               initial={{ opacity: 0, x: 20 }}
               whileInView={{ opacity: 1, x: 0 }}
               viewport={{ once: true, margin: "-60px" }}
-              transition={{ duration: 0.6 }}
-              className="relative hidden lg:block"
+              transition={{ duration: 0.6, delay: 0.1 }}
+              className="grid grid-cols-2 gap-4"
             >
-              <div className="relative">
-                <div className="overflow-hidden rounded-[var(--radius-2xl)] shadow-xl">
-                  <img
-                    src={COURTYARD_IMG}
-                    alt="Restaurant courtyard ambiance"
-                    className="h-72 w-full object-cover"
-                    loading="lazy"
-                    decoding="async"
-                  />
+              <Card className="rounded-2xl border-border/70 p-5 text-center">
+                <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <CalendarDays className="size-6" />
                 </div>
-                {/* Floating stat card */}
-                <motion.div
-                  initial={{ opacity: 0, y: 12 }}
-                  whileInView={{ opacity: 1, y: 0 }}
-                  viewport={{ once: true }}
-                  transition={{ duration: 0.4, delay: 0.3 }}
-                  className="absolute -bottom-5 left-6 rounded-[var(--radius-xl)] border border-border/60 bg-background/95 px-5 py-3 shadow-lg backdrop-blur-sm"
-                >
-                  <p className="text-2xl font-bold text-[var(--color-gold)]" style={{ fontFamily: "var(--font-display)" }}>4.8★</p>
-                  <p className="text-xs text-muted-foreground">Average owner rating</p>
-                </motion.div>
-              </div>
+                <p className="text-2xl font-bold text-primary" style={{ fontFamily: "var(--font-display)" }}>
+                  {restaurantCount !== null ? restaurantCount : "—"}
+                </p>
+                <p className="mt-1 text-xs text-muted-foreground">{t("landing.partner", { count: restaurantCount ?? 0 })}</p>
+              </Card>
+              <Card className="rounded-2xl border-border/70 p-5 text-center">
+                <div className="mx-auto mb-3 flex size-12 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                  <Sparkles className="size-6" />
+                </div>
+                <p className="text-2xl font-bold text-primary" style={{ fontFamily: "var(--font-display)" }}>4.8★</p>
+                <p className="mt-1 text-xs text-muted-foreground">Average owner rating</p>
+              </Card>
+              <Card className="col-span-2 rounded-2xl border-border/70 p-5">
+                <div className="flex items-center gap-4">
+                  <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
+                    <Store className="size-6" />
+                  </div>
+                  <div>
+                    <p className="font-semibold">Fill your free tables, live.</p>
+                    <p className="text-sm text-muted-foreground">Walk-ins, callers and app bookings — never oversell a table.</p>
+                  </div>
+                </div>
+              </Card>
             </motion.div>
           </div>
+        </div>
+      </section>
+
+      {/* ────────── CTA Banner ────────── */}
+      <section className="border-t border-border/60 bg-primary/[0.04]">
+        <div className="mx-auto max-w-6xl px-4 py-16 sm:px-6 sm:py-20">
+          <motion.div
+            initial={{ opacity: 0, y: 16 }}
+            whileInView={{ opacity: 1, y: 0 }}
+            viewport={{ once: true, margin: "-60px" }}
+            transition={{ duration: 0.5 }}
+            className="mx-auto max-w-xl text-center"
+          >
+            <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
+              {t("landing.title1")}<br />
+              <span className="text-primary">{t("landing.title2")}</span>
+            </h2>
+            <p className="mt-4 text-muted-foreground">
+              {t("landing.subtitle")}
+            </p>
+            <Button size="lg" className="mt-8 h-11 rounded-xl px-8 bg-primary hover:bg-primary/90 text-primary-foreground" asChild>
+              <Link to="/auth">
+                {t("common.getStarted")} <ArrowRight className="size-4" />
+              </Link>
+            </Button>
+          </motion.div>
         </div>
       </section>
 
       {/* ────────── Footer ────────── */}
       <footer className="border-t border-border/60 bg-muted/20">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 px-4 py-8 sm:flex-row sm:px-6">
-          <div className="flex items-center gap-2.5">
-            <span className="flex size-8 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+          <div className="flex items-center gap-2">
+            <span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground">
               <Store className="size-4" />
             </span>
             <span className="font-semibold tracking-tight" style={{ fontFamily: "var(--font-display)" }}>Kamix</span>

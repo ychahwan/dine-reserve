@@ -361,10 +361,11 @@ export const billForBooking = query({
     const billable = orders.filter((o) => o.status !== "cancelled");
 
     // aggregate identical lines across orders into one bill row; a different
-    // customization (removals/note) makes it a distinct row
+    // price or customization (removals/note) makes it a distinct row
     const linesMap = new Map<
       string,
       {
+        _rowId: string;
         name: string;
         quantity: number;
         priceCents: number;
@@ -377,12 +378,15 @@ export const billForBooking = query({
     for (const o of billable) {
       for (const line of o.items) {
         const removed = line.removeIngredients ?? [];
-        const key = `${line.name.toLowerCase()}|${removed.slice().sort().join(",")}|${(line.note ?? "").toLowerCase()}`;
+        // M-2: the key must include priceCents — otherwise a dish repriced
+        // between orders merges rows whose Σ(lineTotal) ≠ totalCents.
+        const key = `${line.name.toLowerCase()}|${line.priceCents}|${removed.slice().sort().join(",")}|${(line.note ?? "").toLowerCase()}`;
         const existing = linesMap.get(key);
         if (existing) {
           existing.quantity += line.quantity;
         } else {
           linesMap.set(key, {
+            _rowId: `order:${key}`,
             name: line.name,
             quantity: line.quantity,
             priceCents: line.priceCents,
@@ -407,6 +411,7 @@ export const billForBooking = query({
       const g = billableGifts[i]!;
       const senderName = senders[i]?.name ?? "Guest";
       linesMap.set(`gift|${g._id}`, {
+        _rowId: g._id,
         name: `${g.emoji} ${g.name}`,
         quantity: 1,
         priceCents: g.priceCents,
@@ -694,7 +699,7 @@ export const createMenuRequest = mutation({
     const id = await ctx.db.insert("menuRequests", {
       restaurantId,
       userId,
-      bookingId,
+      ...(bookingId ? { bookingId } : {}),
       name: cleanName,
       description: description?.trim().slice(0, 400) || undefined,
       status: "new",

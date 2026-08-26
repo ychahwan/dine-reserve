@@ -22,11 +22,27 @@ export default function AdminTag() {
   const handleTag = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    // Validate up front instead of silently skipping a short password (L-41).
+    if (tempPassword && tempPassword.length < 8) {
+      setError("Temporary password must be at least 8 characters.");
+      return;
+    }
     setSaving(true);
     try {
       const result = await tagAsRestaurant({ phone, name: name || undefined });
-      if (tempPassword.length >= 8) {
-        await ensureOwnerPassword({ phone, tempPassword });
+      if (tempPassword) {
+        // A failure here shouldn't hide that the tag itself succeeded.
+        try {
+          await ensureOwnerPassword({ phone, tempPassword });
+        } catch (pwErr) {
+          toast.error(
+            `Account tagged, but setting the temporary password failed: ${
+              pwErr instanceof Error ? pwErr.message : "unknown error"
+            }`,
+          );
+          setPhone(""); setName(""); setTempPassword("");
+          return;
+        }
       }
       toast.success(`Account tagged as restaurant (${result?.name || phone}).`);
       setPhone(""); setName(""); setTempPassword("");
@@ -78,7 +94,7 @@ export default function AdminTag() {
               </div>
             </div>
             {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-            <Button type="submit" className="w-full" disabled={saving}>
+            <Button type="submit" className="w-full" disabled={saving || (tempPassword.length > 0 && tempPassword.length < 8)}>
               {saving ? (<><Loader2 className="size-4 animate-spin" /> Tagging…</>) : "Tag as restaurant"}
             </Button>
           </form>

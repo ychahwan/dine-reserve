@@ -97,13 +97,25 @@ export const myNotifications = query({
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    const items = await ctx.db
+    // L-11: two bounded indexed takes (unread, then read fill) instead of
+    // collecting the user's entire notification history to sort/slice in JS.
+    const unread = await ctx.db
       .query("dinerNotifications")
-      .withIndex("by_user", (q) => q.eq("userId", userId as Id<"users">))
-      .collect();
-    return items
-      .sort((a, b) => Number(b.read) - Number(a.read) || b.createdAt - a.createdAt)
-      .slice(0, 100);
+      .withIndex("by_user_read", (q) => q.eq("userId", userId as Id<"users">).eq("read", false))
+      .order("desc")
+      .take(100);
+    if (unread.length >= 100) {
+      return unread.sort((a, b) => b.createdAt - a.createdAt);
+    }
+    const read = await ctx.db
+      .query("dinerNotifications")
+      .withIndex("by_user_read", (q) => q.eq("userId", userId as Id<"users">).eq("read", true))
+      .order("desc")
+      .take(100 - unread.length);
+    return [
+      ...unread.sort((a, b) => b.createdAt - a.createdAt),
+      ...read.sort((a, b) => b.createdAt - a.createdAt),
+    ];
   },
 });
 
@@ -153,25 +165,28 @@ export const markAllRead = mutation({
 // event hooks — called by the originating mutations
 // ---------------------------------------------------------------------------
 
+/** Users scanned per onStoryPosted invocation (M-18) — keeps story posting O(page). */
+const STORY_SCAN_PAGE = 200;
+
 /** A restaurant posted a story → tell diners who saved it (or dined there). */
 export const onStoryPosted = internalMutation({
-  args: { storyId: v.id("stories") },
-  handler: async (ctx, { storyId }) => {
+  args: { storyId: v.id("stories"), cursor: v.optional(v.string()) },
+  handler: async (ctx, { storyId, cursor }) => {
     const story = await ctx.db.get(storyId);
     if (!story) return { notified: 0 };
     const restaurant = await ctx.db.get(story.restaurantId);
     if (!restaurant) return { notified: 0 };
 
-    const users = await ctx.db.query("users").collect();
-    const interested = users.filter((u) => {
-      if ((u.favorites ?? []).includes(story.restaurantId)) return true;
-      // also reach diners who have booked here before (recent-ish signal)
-      return false; // favorites only for the story nudge — bookings drive reengage
-    });
+    // M-18: paginate the users scan and continue across scheduled
+    // invocations instead of collecting the whole table in one transaction.
+    const page = await ctx.db
+      .query("users")
+      .paginate({ numItems: STORY_SCAN_PAGE, cursor: cursor ?? null });
 
     let notified = 0;
-    for (const u of interested) {
-      if (!u.phone && !u.email) continue;
+    for (const u of page.page) {
+      if (!(u.favorites ?? []).includes(story.restaurantId)) continue;
+      // L-11: delivery is purely in-app — no phone/email requirement.
       const inserted = await notifyDiner(ctx, {
         userId: u._id,
         type: "favorite_story",
@@ -181,6 +196,13 @@ export const onStoryPosted = internalMutation({
         dedupeKey: `story:${story._id}`,
       });
       if (inserted) notified++;
+    }
+
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.dinerNotify.onStoryPosted, {
+        storyId,
+        cursor: page.continueCursor,
+      });
     }
     return { notified };
   },
@@ -193,13 +215,19 @@ export const onGuestConfirmed = internalMutation({
     const booking = await ctx.db.get(bookingId);
     if (!booking) return { notified: 0 };
     const restaurant = await ctx.db.get(booking.restaurantId);
+    // L-10: key on the guest's stable identity (userId + confirmation time)
+    // so two same-named guests never collide; fall back to the name for
+    // legacy guest entries without a userId.
+    const guest = booking.guests?.find(
+      (g) => g.name.toLowerCase() === guestName.toLowerCase(),
+    );
     const inserted = await notifyDiner(ctx, {
       userId: booking.userId,
       type: "guest_joined",
       title: `${guestName} confirmed their seat`,
       body: `${guestName} is in for ${restaurant?.name ?? "your booking"} on ${booking.date} at ${booking.time}. Your party is growing!`,
       link: "/bookings",
-      dedupeKey: `guest:${booking._id}:${guestName.toLowerCase()}`,
+      dedupeKey: `guest:${booking._id}:${guest?.userId ?? guestName.toLowerCase()}:${guest?.confirmedAt ?? ""}`,
     });
     return { notified: inserted ? 1 : 0 };
   },

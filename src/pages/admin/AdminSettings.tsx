@@ -123,7 +123,10 @@ export default function AdminSettings() {
   const setSetting = useMutation(api.settings.setSetting);
   const [rows, setRows] = useState<SettingRow[] | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  // Separate maps: revealing the masked stored value and toggling the input's
+  // plain-text mode are independent choices (L-41).
   const [revealed, setRevealed] = useState<Record<string, boolean>>({});
+  const [inputRevealed, setInputRevealed] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState<string | null>(null);
   const [clearKey, setClearKey] = useState<string | null>(null);
 
@@ -229,6 +232,7 @@ export default function AdminSettings() {
                 if (!meta) return null;
                 const dirty = isDirty(row.key);
                 const show = revealed[row.key] ?? false;
+                const showInput = inputRevealed[row.key] ?? false;
                 const isEnv = row.source === "env";
                 return (
                   <div key={row.key} className="rounded-2xl border border-border/70 bg-card p-4">
@@ -280,7 +284,7 @@ export default function AdminSettings() {
                     <div className="mt-3 flex flex-col gap-2 sm:flex-row">
                       <div className="flex flex-1 items-center gap-2">
                         <Input
-                          type={meta.secret && !show ? "password" : "text"}
+                          type={meta.secret && !showInput ? "password" : "text"}
                           value={drafts[row.key] ?? ""}
                           onChange={(e) => setDrafts((p) => ({ ...p, [row.key]: e.target.value }))}
                           placeholder={meta.placeholder}
@@ -294,10 +298,10 @@ export default function AdminSettings() {
                             variant="ghost"
                             size="icon"
                             className="size-9 shrink-0 text-muted-foreground"
-                            onClick={() => setRevealed((p) => ({ ...p, [row.key]: !p[row.key] }))}
-                            aria-label={show ? "Hide input" : "Show input"}
+                            onClick={() => setInputRevealed((p) => ({ ...p, [row.key]: !p[row.key] }))}
+                            aria-label={showInput ? "Hide input" : "Show input"}
                           >
-                            {show ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                            {showInput ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                           </Button>
                         )}
                       </div>

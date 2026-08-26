@@ -21,6 +21,7 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatDate, formatPrice, formatTime, today } from "@/lib/format";
 import { toast } from "sonner";
@@ -60,9 +61,9 @@ type GiftLike = {
   available: boolean;
 };
 
-/** Epoch-millisecond timestamp -> "5:30 PM" */
-const formatClock = (ts: number) =>
-  new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+/** Epoch-millisecond timestamp -> localized "5:30 PM" */
+const formatClockIn = (ts: number, locale: string) =>
+  new Date(ts).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
 
 function initials(name: string): string {
   return name
@@ -73,18 +74,18 @@ function initials(name: string): string {
     .join("");
 }
 
-function timeAgo(ts: number): string {
-  const s = Math.floor((Date.now() - ts) / 1000);
-  if (s < 60) return "just now";
-  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
-  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
-  return `${Math.floor(s / 86400)}d ago`;
+function timeAgo(ts: number, nowMs: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
+  const s = Math.floor((nowMs - ts) / 1000);
+  if (s < 60) return t("notif.justNow");
+  if (s < 3600) return t("notif.mAgo", { count: Math.floor(s / 60) });
+  if (s < 86400) return t("notif.hAgo", { count: Math.floor(s / 3600) });
+  return t("notif.dAgo", { count: Math.floor(s / 86400) });
 }
 
-const DELIVERY_META: Record<string, { label: string; cls: string }> = {
-  ordered: { label: "At the bar", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  delivered: { label: "Delivered", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
-  cancelled: { label: "Cancelled", cls: "bg-muted text-muted-foreground" },
+const DELIVERY_META: Record<string, { key: string; cls: string }> = {
+  ordered: { key: "social.deliveryOrdered", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
+  delivered: { key: "social.deliveryDelivered", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
+  cancelled: { key: "social.deliveryCancelled", cls: "bg-muted text-muted-foreground" },
 };
 
 /**
@@ -105,7 +106,24 @@ export function SocializeDialog({
   booking: SocializeBooking | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t, i18n } = useTranslation();
+  const formatClock = (ts: number) => formatClockIn(ts, i18n.language);
   const isToday = booking?.date === today();
+
+  // Low-frequency tick (L-27/M-24): keeps relative times fresh and re-derives
+  // the seated tier as checked-in time accumulates.
+  const [nowTs, setNowTs] = useState(() => Date.now());
+  const bookingKey = booking?._id ?? null;
+  useEffect(() => {
+    if (!bookingKey) return;
+    const update = () => setNowTs(Date.now());
+    const first = setTimeout(update, 0);
+    const iv = setInterval(update, 30_000);
+    return () => {
+      clearTimeout(first);
+      clearInterval(iv);
+    };
+  }, [bookingKey]);
 
   const presences = useQuery(api.socialize.myPresence);
   // KB-04/11: pass the diner's local date so the room's "today" matches the
@@ -143,9 +161,17 @@ export function SocializeDialog({
   const visible = myPresence?.visible ?? false;
   const checkedIn = !!booking?.checkedInAt;
 
-  // Soft gate: derive viewer's access tier from presence data
-  const viewerTier = (myPresence?.accessTier as "booked" | "checked_in" | "seated" | undefined)
-    ?? (visible ? "checked_in" : "booked");
+  // M-24 (client side): the >15-min "seated" promotion is derived from the
+  // checked-in elapsed time (recomputed on the tick above), not from the
+  // stored accessTier alone — waiting at the table now actually unlocks.
+  const seatedMinutes = booking?.checkedInAt
+    ? Math.floor((nowTs - booking.checkedInAt) / 60_000)
+    : 0;
+  const storedTier =
+    (myPresence?.accessTier as "booked" | "checked_in" | "seated" | undefined) ??
+    (visible ? "checked_in" : "booked");
+  const viewerTier: "booked" | "checked_in" | "seated" =
+    storedTier === "seated" || seatedMinutes >= 15 ? "seated" : storedTier;
 
   const gifts = (catalog ?? []) as GiftLike[];
   const openCount = (diners ?? []).length;
@@ -158,11 +184,11 @@ export function SocializeDialog({
       await setVisibility({ bookingId: booking._id as never, visible: !visible });
       toast.success(
         visible
-          ? "You're now invisible — diners won't see you or send gifts."
-          : "You're visible — diners at this restaurant can see you and send you something.",
+          ? t("social.nowHiddenToast")
+          : t("social.nowVisibleToast"),
       );
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update your visibility.");
+      toast.error(err instanceof Error ? err.message : t("social.errVisibility"));
     } finally {
       setBusy(null);
     }
@@ -183,18 +209,21 @@ export function SocializeDialog({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex items-center gap-2 border-b border-border px-3 py-3 sm:px-4">
-        <Button variant="ghost" size="icon" onClick={handleBack} aria-label="Back">
+        <Button variant="ghost" size="icon" onClick={handleBack} aria-label={t("common.back")}>
           <ArrowLeft className="size-5" />
         </Button>
         <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
           <PartyPopper className="size-4" />
         </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-base font-semibold tracking-tight">Socialize</p>
+          <p className="truncate text-base font-semibold tracking-tight">{t("social.title")}</p>
           <p className="truncate text-xs text-muted-foreground">
-            {`${booking.restaurant?.name ?? "Your table"} · ${formatDate(booking.date)} at ${formatTime(
-              booking.time,
-            )} · code ${booking.code}`}
+            {t("social.headerMeta", {
+              name: booking.restaurant?.name ?? t("social.yourTable"),
+              date: formatDate(booking.date),
+              time: formatTime(booking.time),
+              code: booking.code,
+            })}
           </p>
         </div>
       </div>
@@ -215,8 +244,8 @@ export function SocializeDialog({
             {/* Tabs */}
         <div className="no-scrollbar horizontal-rail mt-2 flex gap-2 overflow-x-auto pb-1">
           {[
-            { key: "room" as const, label: "Who's dining", icon: Users, count: openCount },
-            { key: "gifts" as const, label: "Gifts", icon: Gift, count: pendingReceived },
+            { key: "room" as const, label: t("social.tabRoom"), icon: Users, count: openCount },
+            { key: "gifts" as const, label: t("social.tabGifts"), icon: Gift, count: pendingReceived },
           ].map((t) => (
             <button
               key={t.key}
@@ -253,8 +282,7 @@ export function SocializeDialog({
               <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground">
                 <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
                 <span>
-                  Socialize is available on the day of your visit. Check in when you arrive to go
-                  visible and start connecting with other diners.
+                  {t("social.dayOnlyHint")}
                 </span>
               </div>
             )}
@@ -262,8 +290,7 @@ export function SocializeDialog({
               <div className="flex items-start gap-2 rounded-xl border border-amber-500/30 bg-amber-500/5 px-3.5 py-2.5 text-xs text-amber-800 dark:text-amber-300">
                 <Sparkles className="mt-0.5 size-3.5 shrink-0" />
                 <span>
-                  Check in at the restaurant to go visible. This ensures only real diners appear in
-                  the Socialize room.
+                  {t("social.checkInFirst")}
                 </span>
               </div>
             )}
@@ -278,31 +305,30 @@ export function SocializeDialog({
                     ) : (
                       <EyeOff className="size-4 text-muted-foreground" />
                     )}
-                    {visible ? "Visible in the room" : "Invisible right now"}
+                    {visible ? t("social.visibleNow") : t("social.invisibleNow")}
                   </p>
                   <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
                     {!checkedIn
-                      ? "Check in at the restaurant to enable visibility."
+                      ? t("social.hintNotCheckedIn")
                       : visible
-                        ? "Other diners here can see you and send you a drink or dessert."
-                        : "No one here can see you — and you won't receive gifts."}
+                        ? t("social.hintVisible")
+                        : t("social.hintInvisible")}
                   </p>
                 </div>
                 <Switch
                   checked={visible}
                   disabled={busy === "visibility" || !checkedIn}
                   onCheckedChange={handleToggleVisible}
-                  aria-label="Toggle Socialize visibility"
+                  aria-label={t("social.toggleVisibility")}
                 />
               </div>
               {busy === "visibility" && (
                 <p className="mt-2 flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Spinner className="size-3" /> Updating…
+                  <Spinner className="size-3" /> {t("social.updating")}
                 </p>
               )}
               <p className="mt-2.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                <BellRing className="size-3" /> When you send a gift it's added to your bill at the
-                table.
+                <BellRing className="size-3" /> {t("social.giftBillNote")}
               </p>
             </div>
 
@@ -310,32 +336,32 @@ export function SocializeDialog({
             {(twins ?? []).length > 0 && viewerTier === "seated" && (
               <div className="rounded-2xl border border-primary/20 bg-primary/5 p-4">
                 <p className="flex items-center gap-1.5 text-xs font-semibold text-primary">
-                  <Sparkles className="size-3.5" /> Your taste twins
+                  <Sparkles className="size-3.5" /> {t("social.twinsTitle")}
                 </p>
                 <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
-                  Diners here who share your preferences — a good bet for a shared bottle.
+                  {t("social.twinsHint")}
                 </p>
                 <div className="mt-2.5 space-y-2">
-                  {(twins ?? []).map((t) => (
+                  {(twins ?? []).map((tw) => (
                     <div
-                      key={t._id}
+                      key={tw._id}
                       className="flex items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-2.5"
                     >
-                      {t.image ? (
-                        <img src={t.image} alt="" className="size-8 shrink-0 rounded-full object-cover" />
+                      {tw.image ? (
+                        <img src={tw.image} alt="" className="size-8 shrink-0 rounded-full object-cover" />
                       ) : (
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
-                          {initials(t.name)}
+                          {initials(tw.name)}
                         </span>
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{t.name}</p>
+                        <p className="truncate text-sm font-medium">{tw.name}</p>
                         <p className="truncate text-[11px] text-muted-foreground">
-                          {t.sharedTags.join(" · ")}
+                          {tw.sharedTags.join(" · ")}
                         </p>
                       </div>
                       <Badge className="shrink-0 bg-primary/10 text-primary">
-                        {t.score}% match
+                        {t("social.matchScore", { score: tw.score })}
                       </Badge>
                     </div>
                   ))}
@@ -348,8 +374,7 @@ export function SocializeDialog({
               <div className="flex items-start gap-2 rounded-xl border border-primary/20 bg-primary/5 px-3.5 py-2.5 text-xs text-muted-foreground">
                 <Sparkles className="mt-0.5 size-3.5 shrink-0 text-primary" />
                 <span>
-                  You're seeing first names. Stay seated for 15 minutes to unlock full profiles
-                  and Taste Twins matching.
+                  {t("social.tierHint")}
                 </span>
               </div>
             )}
@@ -357,20 +382,20 @@ export function SocializeDialog({
             {/* Live room */}
             <div>
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Dining now · live
+                {t("social.diningNow")}
               </p>
               {diners === undefined ? (
                 <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                  <Spinner className="size-4" /> Loading the room…
+                  <Spinner className="size-4" /> {t("social.loadingRoom")}
                 </div>
               ) : openCount === 0 ? (
                 <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
                   <Users className="mx-auto size-8 text-muted-foreground/50" />
-                  <p className="mt-2 text-sm font-medium">The room is quiet right now</p>
+                  <p className="mt-2 text-sm font-medium">{t("social.roomQuiet")}</p>
                   <p className="mt-1 text-xs text-muted-foreground">
                     {visible
-                      ? "You're the first visible diner — others will appear here the moment they show up."
-                      : "Turn on your visibility and others will see you here."}
+                      ? t("social.quietAsVisible")
+                      : t("social.quietAsInvisible")}
                   </p>
                 </div>
               ) : (
@@ -398,7 +423,7 @@ export function SocializeDialog({
                         </p>
                         {d.checkedIn && (
                           <p className="mt-0.5 flex items-center gap-1 text-[10px] font-medium text-emerald-700 dark:text-emerald-400">
-                            <CheckCircle2 className="size-3" /> Checked in
+                            <CheckCircle2 className="size-3" /> {t("social.checkedInBadge")}
                           </p>
                         )}
                       </div>
@@ -409,12 +434,12 @@ export function SocializeDialog({
                         disabled={gifts.length === 0 || !isToday}
                         title={
                           gifts.length === 0
-                            ? "This restaurant hasn't added gifts yet"
-                            : `Send ${d.name} something`
+                            ? t("social.venueNoGifts")
+                            : t("social.sendSomething", { name: d.name })
                         }
                         onClick={() => setSendingTo(d)}
                       >
-                        <Gift className="size-3.5" /> Send
+                        <Gift className="size-3.5" /> {t("social.send")}
                       </Button>
                     </motion.div>
                   ))}
@@ -430,15 +455,15 @@ export function SocializeDialog({
             {/* Received */}
             <div>
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Received
+                {t("social.received")}
               </p>
               {received === undefined ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                  <Spinner className="size-4" /> Loading…
+                  <Spinner className="size-4" /> {t("common.loading")}
                 </div>
               ) : (received ?? []).length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
-                  No gifts yet — appear in the room and a fellow diner might send you a drink.
+                  {t("social.receivedEmpty")}
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -449,24 +474,26 @@ export function SocializeDialog({
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
                             <p className="text-sm font-medium">
-                              {g.surprise ? "🎁 A surprise is coming…" : `${g.gift?.emoji ?? "🎁"} ${g.gift?.name ?? "A gift"}`}
+                              {g.surprise ? t("social.surpriseComing") : `${g.gift?.emoji ?? "🎁"} ${g.gift?.name ?? t("social.aGift")}`}
                             </p>
                             <p className="mt-0.5 text-xs text-muted-foreground">
                               {g.surprise
-                                ? "Someone sent you something — it stays a secret until the restaurant delivers it."
-                                : `From ${g.senderName}${g.gift?.note ? ` · “${g.gift.note}”` : ""}`}
+                                ? t("social.surpriseHint")
+                                : g.gift?.note
+                                  ? `${t("social.from", { name: g.senderName })} · “${g.gift.note}”`
+                                  : t("social.from", { name: g.senderName })}
                             </p>
                             <p className="mt-1 text-[10px] text-muted-foreground">
-                              {g.restaurantName} · {timeAgo(g.createdAt)}
+                              {g.restaurantName} · {timeAgo(g.createdAt, nowTs, t)}
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-1">
                             <Badge className={cn("gap-1", meta.cls)}>
-                              {g.status === "ordered" && g.surprise ? "On its way" : meta.label}
+                              {g.status === "ordered" && g.surprise ? t("social.onItsWay") : t(meta.key)}
                             </Badge>
                             {g.surprise && g.status === "delivered" && (
                               <span className="text-[10px] text-muted-foreground">
-                                from {g.senderName}
+                                {t("social.revealedBy", { name: g.senderName })}
                               </span>
                             )}
                           </div>
@@ -481,15 +508,15 @@ export function SocializeDialog({
             {/* Sent */}
             <div>
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                Sent
+                {t("social.sent")}
               </p>
               {sent === undefined ? (
                 <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
-                  <Spinner className="size-4" /> Loading…
+                  <Spinner className="size-4" /> {t("common.loading")}
                 </div>
               ) : (sent ?? []).length === 0 ? (
                 <div className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
-                  Nothing sent yet — pick a diner in the room and surprise them.
+                  {t("social.sentEmpty")}
                 </div>
               ) : (
                 <div className="space-y-2">
@@ -504,18 +531,18 @@ export function SocializeDialog({
                             </p>
                             <p className="mt-0.5 text-xs text-muted-foreground">
                               {g.reveal === "on_delivery"
-                                ? "Surprise — revealed when the restaurant delivers it"
-                                : "They were told right away"}
+                                ? t("social.revealOnDelivery")
+                                : t("social.revealedNow")}
                               {g.note ? ` · “${g.note}”` : ""}
                             </p>
                             <p className="mt-1 text-[10px] text-muted-foreground">
-                              {g.restaurantName} · {timeAgo(g.createdAt)}
-                              {g.deliveredAt ? ` · delivered ${formatClock(g.deliveredAt)}` : ""}
+                              {g.restaurantName} · {timeAgo(g.createdAt, nowTs, t)}
+                              {g.deliveredAt ? ` · ${t("social.deliveredAt", { time: formatClock(g.deliveredAt) })}` : ""}
                             </p>
                           </div>
                           <div className="flex shrink-0 flex-col items-end gap-1">
                             <span className="text-sm font-semibold">{formatPrice(g.priceCents)}</span>
-                            <Badge className={cn("gap-1", meta.cls)}>{meta.label}</Badge>
+                            <Badge className={cn("gap-1", meta.cls)}>{t(meta.key)}</Badge>
                           </div>
                         </div>
                       </div>
@@ -529,10 +556,11 @@ export function SocializeDialog({
 
         <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Users className="size-3" /> {isToday ? `${openCount} visible diner${openCount === 1 ? "" : "s"}` : "Live on the day of your visit"}
+            <Users className="size-3" />{" "}
+            {isToday ? t("social.visibleDiners", { count: openCount }) : t("social.liveOnDay")}
           </span>
           <span className="flex items-center gap-1">
-            <BellRing className="size-3" /> Gifts are added to your bill
+            <BellRing className="size-3" /> {t("social.giftsOnBillFooter")}
           </span>
         </div>
           </>
@@ -562,6 +590,7 @@ function SendGiftSheet({
   bookingId: string | null;
   onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const sendGift = useMutation(api.socialize.sendGift);
 
   const [giftId, setGiftId] = useState<string | null>(null);
@@ -596,12 +625,16 @@ function SendGiftSheet({
       });
       toast.success(
         reveal === "now"
-          ? `${selected?.emoji ?? ""} ${selected?.name ?? "Gift"} sent to ${recipient.name} — it's on your bill.`
-          : `Surprise on its way to ${recipient.name} — it's revealed when the restaurant delivers it.`,
+          ? t("social.sentNowToast", {
+              emoji: selected?.emoji ?? "",
+              name: selected?.name ?? t("social.aGift"),
+              recipient: recipient.name,
+            })
+          : t("social.sentSurpriseToast", { recipient: recipient.name }),
       );
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not send the gift.");
+      setError(err instanceof Error ? err.message : t("social.errSendGift"));
     } finally {
       setBusy(false);
     }
@@ -612,10 +645,10 @@ function SendGiftSheet({
       <div className="mb-1">
         <p className="flex items-center gap-2 text-base font-semibold tracking-tight">
           <Gift className="size-4 text-primary" />
-          Send {recipient?.name ? `to ${recipient.name}` : "a gift"}
+          {recipient?.name ? t("social.sendToName", { name: recipient.name }) : t("social.sendGift")}
         </p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Picked from this restaurant's gift list — it lands on your bill at the table.
+          {t("social.sheetHint")}
         </p>
       </div>
 
@@ -623,11 +656,11 @@ function SendGiftSheet({
           {/* Gift picker */}
           {gifts.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              This restaurant hasn't added gifts yet — check back later.
+              {t("social.venueNoGiftsYet")}
             </div>
           ) : (
             <div>
-              <p className="mb-2 text-xs font-medium text-muted-foreground">Pick a gift</p>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("social.pickGift")}</p>
               <div className="grid grid-cols-2 gap-2">
                 {gifts.map((g) => (
                   <button
@@ -660,7 +693,7 @@ function SendGiftSheet({
           {/* Reveal choice */}
           {giftId && (
             <div>
-              <p className="mb-2 text-xs font-medium text-muted-foreground">When should they find out?</p>
+              <p className="mb-2 text-xs font-medium text-muted-foreground">{t("social.whenFindOut")}</p>
               <div className="grid grid-cols-2 gap-2">
                 <button
                   type="button"
@@ -672,9 +705,9 @@ function SendGiftSheet({
                       : "border-border bg-card hover:border-primary/40",
                   )}
                 >
-                  <p className="text-xs font-semibold">Tell them now</p>
+                  <p className="text-xs font-semibold">{t("social.tellNow")}</p>
                   <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                    They get the notification right away
+                    {t("social.tellNowHint")}
                   </p>
                 </button>
                 <button
@@ -687,9 +720,9 @@ function SendGiftSheet({
                       : "border-border bg-card hover:border-primary/40",
                   )}
                 >
-                  <p className="text-xs font-semibold">Keep it a surprise</p>
+                  <p className="text-xs font-semibold">{t("social.keepSurprise")}</p>
                   <p className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
-                    Revealed only when the restaurant delivers it
+                    {t("social.keepSurpriseHint")}
                   </p>
                 </button>
               </div>
@@ -699,7 +732,7 @@ function SendGiftSheet({
           {/* Note */}
           <div className="space-y-1.5">
             <Label htmlFor="gift-note" className="text-xs text-muted-foreground">
-              Add a note <span className="font-normal">(optional)</span>
+              {t("social.addNote")} <span className="font-normal">{t("social.optional")}</span>
             </Label>
             <Textarea
               id="gift-note"
@@ -707,7 +740,9 @@ function SendGiftSheet({
               value={note}
               maxLength={200}
               onChange={(e) => setNote(e.target.value)}
-              placeholder={reveal === "on_delivery" ? "e.g. Enjoy! 🥂" : "e.g. Cheers from the bar!"}
+              placeholder={
+                reveal === "on_delivery" ? t("social.noteSurprisePlaceholder") : t("social.noteCheersPlaceholder")
+              }
             />
           </div>
 
@@ -717,7 +752,7 @@ function SendGiftSheet({
 
           <div className="flex gap-3">
             <Button variant="outline" className="flex-1" onClick={onClose} disabled={busy}>
-              Cancel
+              {t("common.cancel")}
             </Button>
             <Button
               className="flex-1"
@@ -729,7 +764,8 @@ function SendGiftSheet({
               ) : (
                 <Send className="size-4" />
               )}
-              Send{selected ? ` · ${formatPrice(selected.priceCents)}` : ""}
+              {t("social.send")}
+              {selected ? ` · ${formatPrice(selected.priceCents)}` : ""}
             </Button>
           </div>
         </div>

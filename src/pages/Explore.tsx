@@ -25,13 +25,20 @@ import {
   MapPinned,
   type LucideIcon,
 } from "lucide-react";
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import { dateFromNow, dateLabel, formatDate, today } from "@/lib/format";
+import { dateLabel, formatDate, today } from "@/lib/format";
 import { DIETARY_TAGS } from "@/lib/menu";
 import { toast } from "sonner";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 // KB-25: cuisine/city filter chips are now derived from the live data via
 // restaurants.facetValues (previously hardcoded to Milan/Italian lists that
@@ -54,7 +61,7 @@ type AvailabilitySummary = {
 };
 
 export default function Explore() {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   // PERF-FIX: Removed redundant unfiltered `restaurants` query — searchWithFilters
   // with no active filters returns the same unfiltered result set.
   const facets = useQuery(api.restaurants.facetValues);
@@ -78,8 +85,16 @@ export default function Explore() {
   const [quickDate, setQuickDate] = useState<string | null>(today());
   const [partySize, setPartySize] = useState(2);
 
+  // L-28: keep "today" fresh across midnight so badges and the date strip
+  // never anchor to yesterday.
+  const [todayKey, setTodayKey] = useState(today());
+  useEffect(() => {
+    const iv = setInterval(() => setTodayKey(today()), 60_000);
+    return () => clearInterval(iv);
+  }, []);
+
   // Live free-seat summary for the selected day (falls back to today).
-  const summary = useQuery(api.availability.summary, { date: quickDate ?? today() });
+  const summary = useQuery(api.availability.summary, { date: quickDate ?? todayKey });
   const summaryMap = useMemo(() => {
     const map = new Map<string, AvailabilitySummary>();
     for (const s of summary ?? []) map.set(s.restaurantId, s);
@@ -90,14 +105,24 @@ export default function Explore() {
   const favorites = useQuery(api.users.myFavorites);
   const toggleFavorite = useMutation(api.users.toggleFavorite);
 
-  // Walk-in dialog state
+  // Walk-in dialog state (M-25: an explicit picker replaces the arbitrary
+  // first-result binding).
   const [walkInDialogOpen, setWalkInDialogOpen] = useState(false);
   const [walkInRestaurant, setWalkInRestaurant] = useState<{ id: string; name: string } | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerQuery, setPickerQuery] = useState("");
 
-  const quickDays = useMemo(
-    () => Array.from({ length: 7 }, (_, i) => dateFromNow(i)),
-    [],
-  );
+  const quickDays = useMemo(() => {
+    const base = new Date(`${todayKey}T00:00:00`);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    });
+  }, [todayKey]);
 
   // All filters (text, cuisine, city, seating, dietary, solo) are applied
   // server-side; the client then hides places that can't host the party on
@@ -166,14 +191,19 @@ export default function Explore() {
     return `/restaurant/${restaurantId}${qs ? `?${qs}` : ""}`;
   };
 
-  const handleToggleFavorite = async (id: string, name: string) => {
-    try {
-      const res = await toggleFavorite({ restaurantId: id as never });
-      toast.success(res.favorited ? t("explore.favSaved", { name }) : t("explore.favRemoved", { name }));
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t("explore.favError"));
-    }
-  };
+  // M-30: stable identity so the memoized RestaurantCard actually skips
+  // re-renders while typing in the search box.
+  const handleToggleFavorite = useCallback(
+    async (id: string, name: string) => {
+      try {
+        const res = await toggleFavorite({ restaurantId: id as never });
+        toast.success(res.favorited ? t("explore.favSaved", { name }) : t("explore.favRemoved", { name }));
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t("explore.favError"));
+      }
+    },
+    [toggleFavorite, t],
+  );
 
   return (
     <CustomerShell>
@@ -181,7 +211,8 @@ export default function Explore() {
         <div>
           <h1 className="text-xl font-bold tracking-tight">{t("explore.title")}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            {t("explore.subtitle", { count: searchWithFilters?.length ?? "…" })}
+            {/* L-28: count what's actually shown (after the availability filter). */}
+            {t("explore.subtitle", { count: visible?.length ?? searchWithFilters?.length ?? "…" })}
           </p>
         </div>
 
@@ -215,7 +246,9 @@ export default function Explore() {
                 )}
               >
                 <span className="text-[10px] font-medium uppercase opacity-80">
-                  {d === today() ? t("explore.today") : new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
+                  {d === todayKey
+                    ? t("explore.today")
+                    : new Date(`${d}T00:00:00`).toLocaleDateString(i18n.language, { weekday: "short" })}
                 </span>
                 <span className="text-base font-bold leading-5">
                   {new Date(`${d}T00:00:00`).getDate()}
@@ -263,26 +296,97 @@ export default function Explore() {
                 <MapPinned className="h-5 w-5 text-primary" />
               </div>
               <div>
-                <p className="font-medium">Already at a restaurant?</p>
-                <p className="text-sm text-muted-foreground">Check in without a booking</p>
+                <p className="font-medium">{t("explore.alreadyAt")}</p>
+                <p className="text-sm text-muted-foreground">{t("explore.checkInNoBooking")}</p>
               </div>
             </div>
+            {/* M-25: open a restaurant picker instead of binding to an
+                arbitrary first result. */}
             <Button
-              onClick={() => {
-                // For walk-in, we need to select a restaurant first
-                // For now, open the dialog with the first visible restaurant
-                if (visible && visible.length > 0) {
-                  setWalkInRestaurant({ id: visible[0]._id, name: visible[0].name });
-                  setWalkInDialogOpen(true);
-                }
-              }}
+              onClick={() => setPickerOpen(true)}
               variant="outline"
               size="sm"
             >
-              Walk-in
+              {t("explore.walkin")}
             </Button>
           </div>
         </Card>
+
+        {/* Walk-in restaurant picker (M-25) */}
+        <Dialog
+          open={pickerOpen}
+          onOpenChange={(open) => {
+            if (!open) setPickerQuery("");
+            setPickerOpen(open);
+          }}
+        >
+          <DialogContent className="rounded-3xl sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="tracking-tight">{t("walkin.pickTitle")}</DialogTitle>
+              <DialogDescription>{t("walkin.pickHint")}</DialogDescription>
+            </DialogHeader>
+            <Input
+              value={pickerQuery}
+              onChange={(e) => setPickerQuery(e.target.value)}
+              placeholder={t("walkin.searchPlaceholder")}
+            />
+            {visible === undefined ? (
+              <div className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground">
+                <Spinner className="size-4" /> {t("explore.loadingRestaurants")}
+              </div>
+            ) : (
+              <div className="-mx-1 max-h-72 overflow-y-auto px-1">
+                {visible.filter((r) => {
+                  const q = pickerQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  return (
+                    r.name.toLowerCase().includes(q) ||
+                    (r.city ?? "").toLowerCase().includes(q) ||
+                    (r.neighborhood ?? "").toLowerCase().includes(q)
+                  );
+                }).length === 0 ? (
+                  <p className="py-6 text-center text-sm text-muted-foreground">
+                    {t("walkin.pickEmpty")}
+                  </p>
+                ) : (
+                  <div className="space-y-1.5">
+                    {visible
+                      .filter((r) => {
+                        const q = pickerQuery.trim().toLowerCase();
+                        if (!q) return true;
+                        return (
+                          r.name.toLowerCase().includes(q) ||
+                          (r.city ?? "").toLowerCase().includes(q) ||
+                          (r.neighborhood ?? "").toLowerCase().includes(q)
+                        );
+                      })
+                      .map((r) => (
+                        <button
+                          key={r._id}
+                          onClick={() => {
+                            setWalkInRestaurant({ id: r._id, name: r.name });
+                            setWalkInDialogOpen(true);
+                            setPickerOpen(false);
+                            setPickerQuery("");
+                          }}
+                          className="flex w-full items-center gap-3 rounded-xl border border-border bg-card px-3 py-2.5 text-left transition-colors hover:border-primary/40"
+                        >
+                          <MapPin className="size-4 shrink-0 text-primary" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block truncate text-sm font-medium">{r.name}</span>
+                            <span className="block truncate text-xs text-muted-foreground">
+                              {r.neighborhood || r.city}
+                              {r.cuisine ? ` · ${r.cuisine}` : ""}
+                            </span>
+                          </span>
+                        </button>
+                      ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
 
         {/* Search */}
         <div className="relative mt-4">
@@ -453,7 +557,7 @@ export default function Explore() {
                   id={id}
                   to={cardLink(id)}
                   summary={summaryMap.get(id)}
-                  date={quickDate ?? today()}
+                  date={quickDate}
                   favorited={favoriteIds.has(id)}
                   onToggleFavorite={handleToggleFavorite}
                 />
@@ -506,7 +610,7 @@ export default function Explore() {
                   id={id}
                   to={cardLink(id)}
                   summary={summaryMap.get(id)}
-                  date={quickDate ?? today()}
+                  date={quickDate}
                   favorited={favoriteIds.has(id)}
                   onToggleFavorite={handleToggleFavorite}
                 />
@@ -558,7 +662,7 @@ export default function Explore() {
                 id={r._id}
                 to={cardLink(r._id)}
                 summary={summaryMap.get(r._id)}
-                date={quickDate ?? today()}
+                date={quickDate}
                 favorited={favoriteIds.has(r._id)}
                 onToggleFavorite={handleToggleFavorite}
               />
@@ -594,7 +698,9 @@ const RestaurantCard = React.memo(function RestaurantCard({
   id: string;
   to: string;
   summary?: AvailabilitySummary;
-  date: string;
+  /** Selected quick-find day, or null under "Any day" — badges are hidden
+   *  then, since the summary is computed for a specific day. */
+  date: string | null;
   favorited: boolean;
   onToggleFavorite: (id: string, name: string) => void;
 }) {
@@ -612,11 +718,12 @@ const RestaurantCard = React.memo(function RestaurantCard({
   if (r.features.smoking) tags.push(t("detail.smokingArea"));
   if (r.features.soloFriendly) tags.push(t("explore.soloFriendly"));
 
-  const statusBadge = !summary
+  // L-28: no today-based availability badge when no specific day is chosen.
+  const statusBadge = !summary || !date
     ? null
     : !summary.open
       ? {
-          label: t("explore.closedOn", { weekday: new Date(`${date}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" }) }),
+          label: t("explore.closedOn", { weekday: new Date(`${date}T00:00:00`).toLocaleDateString(undefined, { weekday: "short" }) }),
           cls: "bg-black/50 text-white/90 backdrop-blur",
         }
       : summary.estimated
@@ -709,7 +816,9 @@ const RestaurantCard = React.memo(function RestaurantCard({
             <Heart className={cn("size-4", favorited && "fill-current")} />
           </button>
           <Button size="sm" variant="outline" asChild className="shrink-0">
-            <Link to={`/restaurant/${r._id}?walkin=true`}>{t("explore.book")}</Link>
+            {/* H-18: distinct walk-in entry — the detail page auto-opens the
+                WalkInDialog when this link is followed. */}
+            <Link to={`/restaurant/${r._id}?walkin=true`}>{t("explore.walkin")}</Link>
           </Button>
           <Button size="sm" asChild className="shrink-0">
             <Link to={to}>{t("explore.book")}</Link>

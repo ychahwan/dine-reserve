@@ -134,16 +134,21 @@ export async function rebuildRestaurantSlots(
   daysAhead = 14,
 ) {
   const today = dateFromNow(0);
+  // M-6: prune only inside the regeneration window. Slots materialized beyond
+  // `daysAhead` (ensureForDate has no upper bound) survive rule edits instead
+  // of being destroyed and never regenerated.
+  const windowEnd = dateFromNow(daysAhead);
   const slots = await ctx.db
     .query("slots")
     .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
     .collect();
 
-  // Batch-delete unbooked future slots (remaining === total means no bookings
-  // reference them) so retrofits stay fast even with hundreds of stale slots.
+  // Batch-delete unbooked future slots within the window (remaining === total
+  // means no bookings reference them) so retrofits stay fast even with
+  // hundreds of stale slots.
   await Promise.all(
     slots
-      .filter((s) => s.date >= today && s.remaining === s.total)
+      .filter((s) => s.date >= today && s.date < windowEnd && s.remaining === s.total)
       .map((s) => ctx.db.delete(s._id)),
   );
 
@@ -228,8 +233,27 @@ export const forDate = query({
 export const summary = query({
   args: { date: v.string() },
   handler: async (ctx, { date }) => {
-    const restaurants = await ctx.db.query("restaurants").collect();
+    const restaurants = (await ctx.db.query("restaurants").collect()).filter((r) => !r.disabled);
     const dow = new Date(`${date}T00:00:00`).getDay();
+    // M-5: bulk-load hours + sections once (grouped below) instead of two
+    // extra indexed queries per restaurant; the per-date slots query stays
+    // per-restaurant but is skipped entirely for closed/unconfigured venues.
+    const [allHours, allSections] = await Promise.all([
+      ctx.db.query("hours").collect(),
+      ctx.db.query("sections").collect(),
+    ]);
+    const hoursByRestaurant = new Map<string, typeof allHours>();
+    for (const h of allHours) {
+      const list = hoursByRestaurant.get(h.restaurantId) ?? [];
+      list.push(h);
+      hoursByRestaurant.set(h.restaurantId, list);
+    }
+    const sectionsByRestaurant = new Map<string, typeof allSections>();
+    for (const s of allSections) {
+      const list = sectionsByRestaurant.get(s.restaurantId) ?? [];
+      list.push(s);
+      sectionsByRestaurant.set(s.restaurantId, list);
+    }
     const out: {
       restaurantId: Id<"restaurants">;
       open: boolean;
@@ -238,16 +262,16 @@ export const summary = query({
     }[] = [];
     for (const r of restaurants) {
       if (r.disabled) continue; // disabled venues never show availability
-      const [hours, sections, slots] = await Promise.all([
-        ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
-        ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
-        ctx.db.query("slots").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", r._id).eq("date", date)).collect(),
-      ]);
-      const day = hours.find((h) => h.dayOfWeek === dow && h.enabled);
+      const day = (hoursByRestaurant.get(r._id) ?? []).find((h) => h.dayOfWeek === dow && h.enabled);
+      const sections = sectionsByRestaurant.get(r._id) ?? [];
       if (!day || sections.length === 0) {
         out.push({ restaurantId: r._id, open: false, freeSeats: 0, estimated: false });
         continue;
       }
+      const slots = await ctx.db
+        .query("slots")
+        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", r._id).eq("date", date))
+        .collect();
       if (slots.length > 0) {
         const freeSeats = slots.reduce((sum, s) => sum + (s.closed ? 0 : s.remaining), 0);
         out.push({ restaurantId: r._id, open: true, freeSeats, estimated: false });

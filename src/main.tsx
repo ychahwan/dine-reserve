@@ -85,19 +85,39 @@ class RootErrorBoundary extends React.Component<
   }
 }
 
-const convex = new ConvexReactClient(import.meta.env.VITE_CONVEX_URL as string);
+// Fail fast instead of rendering a blank page behind the error boundary
+// when the deployment is missing its Convex URL (L-41).
+const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined;
+if (!CONVEX_URL) {
+  throw new Error("VITE_CONVEX_URL is not set — cannot connect to the backend.");
+}
+const convex = new ConvexReactClient(CONVEX_URL);
+
+/**
+ * RouteSyncer bridges route changes with an embedding preview shell.
+ * M-40: the bridge only activates for an explicitly allow-listed embed
+ * origin (VITE_EMBED_ORIGIN) — otherwise it stays fully inert so route
+ * paths (e.g. /auth?phone=…, invite codes) never leak to arbitrary parents,
+ * and inbound messages are accepted only from that same origin.
+ */
+const EMBED_ORIGIN = (
+  import.meta.env.VITE_EMBED_ORIGIN as string | undefined
+)?.replace(/\/$/, "");
 
 function RouteSyncer() {
   const location = useLocation();
   useEffect(() => {
+    if (!EMBED_ORIGIN) return;
     window.parent.postMessage(
       { type: "iframe-route-change", path: location.pathname },
-      "*",
+      EMBED_ORIGIN,
     );
   }, [location.pathname]);
 
   useEffect(() => {
+    if (!EMBED_ORIGIN) return;
     function handleMessage(event: MessageEvent) {
+      if (event.origin !== EMBED_ORIGIN) return;
       if (event.data?.type === "navigate") {
         if (event.data.direction === "back") window.history.back();
         if (event.data.direction === "forward") window.history.forward();
@@ -113,8 +133,9 @@ function RouteSyncer() {
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <RootErrorBoundary>        <ConvexAuthProvider client={convex}>
-          <NotificationHandler>
           <BrowserRouter>
+          {/* Inside the router so push-tap handlers can use navigate() */}
+          <NotificationHandler>
           <RouteSyncer />
           <Suspense fallback={<RouteLoading />}>
             <Routes>
@@ -221,20 +242,15 @@ createRoot(document.getElementById("root")!).render(
                   </RequireAuth>
                 }
               />
-              {/* Group invites */}
-              <Route
-                path="/invite/:code"
-                element={
-                  <RequireAuth>
-                    <Invite />
-                  </RequireAuth>
-                }
-              />
+              {/* Group invites — public on purpose: anonymous visitors view the
+                  invite first and are sent to /auth only when they confirm
+                  (H-22). The backend enforces auth on byCode/confirmGuest. */}
+              <Route path="/invite/:code" element={<Invite />} />
               <Route path="*" element={<NotFound />} />
             </Routes>
           </Suspense>
-        </BrowserRouter>
         </NotificationHandler>
+        </BrowserRouter>
         <Toaster />
       </ConvexAuthProvider>
     </RootErrorBoundary>

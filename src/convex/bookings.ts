@@ -20,6 +20,17 @@ export function generateCode(len = 6): string {
 
 type SlotLike = { _id: Id<"slots">; sectionId: Id<"sections">; time: string; total: number; remaining: number; closed: boolean };
 
+type BookingSource = { source?: "online" | "walk_in" | "qr_scan" | "host_created" };
+
+/**
+ * H-2 symmetry guard: walk-in–sourced bookings ("walk_in" | "qr_scan" |
+ * "host_created") are created outside the slot ledger, so their cancellation
+ * must never restore seats — that would mint seats that were never taken.
+ */
+function restoresSeats(booking: BookingSource): boolean {
+  return booking.source === undefined || booking.source === "online";
+}
+
 async function findBestSlot(slots: SlotLike[], sectionId: string, time: string): Promise<SlotLike | null> {
   const matches = slots.filter((s) => s.sectionId === sectionId && s.time === time && !s.closed);
   if (matches.length === 0) return null;
@@ -118,9 +129,13 @@ export async function attemptBooking(
     return h * 60 + m;
   };
   const requestedMin = toMinutes(args.time);
+  // KB-12 wrap: measure the gap circularly so post-midnight continuations
+  // (e.g. requesting 23:30, slot at 00:15) are reachable for late-night venues.
   const laterTimes = [...new Set(slots.map((s) => s.time))]
-    .filter((t) => t > args.time && toMinutes(t) - requestedMin <= 120)
-    .sort();
+    .map((t) => ({ t, diff: (toMinutes(t) - requestedMin + 1440) % 1440 }))
+    .filter(({ diff }) => diff > 0 && diff <= 120)
+    .sort((a, b) => a.diff - b.diff)
+    .map(({ t }) => t);
   for (const time of laterTimes) {
     for (const section of candidates) {
       const slot = await findBestSlot(slots, section._id, time);
@@ -293,10 +308,15 @@ export const myBookings = query({
     if (userId === null) return [];
     // PERF-FIX: Added pagination limit (default 30, max 100)
     const effectiveLimit = Math.min(Math.max(limit ?? 30, 1), 100);
+    const n = new Date();
+    const today = `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, "0")}-${String(n.getDate()).padStart(2, "0")}`;
+    // L-3: drop past bookings while scanning so the N taken are all upcoming —
+    // otherwise far-future trips fall off the list as recent history accumulates.
     const bookings = await ctx.db
       .query("bookings")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .order("desc")
+      .filter((q) => q.gte(q.field("date"), today))
       .take(effectiveLimit);
     const restaurants = await Promise.all(
       bookings.map((b) => ctx.db.get(b.restaurantId)),
@@ -389,6 +409,9 @@ export const stats = query({
     }
 
     const totalFinished = completed + noShow;
+    // M-3: average party size must divide by non-cancelled bookings only —
+    // cancelled rows contribute no covers but were in the denominator before.
+    const nonCancelled = inWindow.length - cancelled;
     const waitlist = await ctx.db
       .query("waitlist")
       .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
@@ -413,7 +436,7 @@ export const stats = query({
       cancelled,
       noShowRate: totalFinished > 0 ? Math.round((noShow / totalFinished) * 100) : 0,
       cancellationRate: inWindow.length > 0 ? Math.round((cancelled / inWindow.length) * 100) : 0,
-      avgParty: inWindow.length > 0 ? Math.round((covers / inWindow.length) * 10) / 10 : 0,
+      avgParty: nonCancelled > 0 ? Math.round((covers / nonCancelled) * 10) / 10 : 0,
       byDay: last14,
       topTimes: [...byHour.entries()]
         .sort((a, b) => b[1] - a[1])
@@ -440,7 +463,9 @@ export const cancelBooking = mutation({
     if (booking.userId !== userId && !owner) throw new Error("You cannot cancel this booking.");
     if (booking.status === "cancelled") return booking;
 
-    if (booking.sectionId) {
+    // H-2: walk-in–sourced bookings never consumed slot ledger seats, so
+    // restoring any here would mint phantom availability.
+    if (booking.sectionId && restoresSeats(booking)) {
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         // restore seats with a ceiling at total capacity
@@ -461,16 +486,19 @@ export const cancelBooking = mutation({
       type: "booking_cancelled",
     });
     const restaurant = await ctx.db.get(booking.restaurantId);
-    await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
-      to: booking.phone ?? "",
-      event: "cancelled",
-      restaurantName: restaurant?.name ?? "",
-      city: restaurant?.city ?? "",
-      date: booking.date,
-      time: booking.time,
-      partySize: booking.partySize,
-      code: booking.code,
-    });
+    // L-1: only schedule the SMS when there is a phone number to send to.
+    if (booking.phone) {
+      await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
+        to: booking.phone,
+        event: "cancelled",
+        restaurantName: restaurant?.name ?? "",
+        city: restaurant?.city ?? "",
+        date: booking.date,
+        time: booking.time,
+        partySize: booking.partySize,
+        code: booking.code,
+      });
+    }
 
     // seats freed up — notify the next diner on the waitlist, if any
     const freed = await notifyWaitlistForFreedSeats(ctx, {
@@ -480,7 +508,7 @@ export const cancelBooking = mutation({
       time: booking.time,
       partySize: booking.partySize,
     });
-    if (freed) {
+    if (freed && freed.to) {
       await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
     }
     return await ctx.db.get(bookingId);
@@ -513,7 +541,24 @@ export const updateStatus = mutation({
     if (!(await isRestaurantOwner(ctx, userId, booking.restaurantId))) {
       throw new Error("Only the restaurant owner can change booking status.");
     }
-    if (booking.status === status) return booking;
+    // Widened alias so the H-1 guard below doesn't let TS narrow the status
+    // used by the transition logic further down.
+    const prevStatus: "confirmed" | "completed" | "no_show" | "cancelled" = booking.status;
+    if (prevStatus === status) return booking;
+
+    // H-1: cancelled / completed bookings are closed for good — reviving them
+    // (or flipping completed → anything) re-opens seats that were already
+    // returned or consumed, which oversells the slot. Same for no_show →
+    // confirmed. A fresh booking is required.
+    if (prevStatus === "cancelled" || prevStatus === "completed" || (prevStatus === "no_show" && status === "confirmed")) {
+      throw new Error(
+        prevStatus === "cancelled"
+          ? "This booking was cancelled and can't be reopened — create a new booking."
+          : prevStatus === "completed"
+            ? "This booking is already completed and can't be changed — create a new booking."
+            : "This booking was marked as a no-show — create a new booking for this diner.",
+      );
+    }
 
     // completing a booking earns the diner loyalty points (once)
     if (status === "completed" && booking.status !== "completed") {
@@ -527,8 +572,9 @@ export const updateStatus = mutation({
       await ctx.scheduler.runAfter(0, internal.dinerNotify.onBookingCompleted, { bookingId });
     }
 
-    // cancelling returns seats to availability
-    if (status === "cancelled" && booking.sectionId && booking.status !== "cancelled") {
+    // cancelling returns seats to availability (H-2: never for walk-in–
+    // sourced bookings — they never took seats from the ledger)
+    if (status === "cancelled" && booking.sectionId && booking.status !== "cancelled" && restoresSeats(booking)) {
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
@@ -554,7 +600,7 @@ export const updateStatus = mutation({
         time: booking.time,
         partySize: booking.partySize,
       });
-      if (freed) {
+      if (freed && freed.to) {
         await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
       }
     }
@@ -585,8 +631,9 @@ export const releaseBooking = mutation({
       throw new Error("This booking is no longer active.");
     }
 
-    // restore seats to the pool (same path as cancellation)
-    if (booking.sectionId) {
+    // restore seats to the pool (same path as cancellation; H-2: never for
+    // walk-in–sourced bookings — they never took seats from the ledger)
+    if (booking.sectionId && restoresSeats(booking)) {
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
@@ -605,7 +652,7 @@ export const releaseBooking = mutation({
       time: booking.time,
       partySize: booking.partySize,
     });
-    if (freed) {
+    if (freed && freed.to) {
       await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
     }
 

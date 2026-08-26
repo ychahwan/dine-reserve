@@ -1,8 +1,9 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { createAccount, modifyAccountCredentials } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
-import { mutation, MutationCtx, query } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
+import { internalMutation, mutation, MutationCtx, query } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { FEATURES } from "./schema";
 import { parseOrThrow, restaurantArgsSchema } from "./validation";
 import { checkRateLimit } from "./rateLimit";
@@ -112,23 +113,34 @@ export const auditLog = query({
     if (userId === null) return [];
     const user = await ctx.db.get(userId);
     if (user?.role !== "admin") return [];
-    let entries = await ctx.db
-      .query("adminAuditLog")
-      .order("desc")
-      .take(500);
-    if (action) {
-      entries = entries.filter((e) => e.action === action);
+    // L-12: walk the log newest-first in pages and filter as we go — a bare
+    // take(500) fills up with non-matching rows so older matching entries
+    // silently vanish from search results.
+    const q = search?.toLowerCase();
+    const matches: Doc<"adminAuditLog">[] = [];
+    const PAGE = 250;
+    let cursor: string | null = null;
+    outer: for (let page = 0; page < 8; page++) {
+      const batch = await ctx.db
+        .query("adminAuditLog")
+        .order("desc")
+        .paginate({ numItems: PAGE, cursor });
+      for (const e of batch.page) {
+        if (action && e.action !== action) continue;
+        if (q) {
+          const hit =
+            e.action.toLowerCase().includes(q) ||
+            (e.details && e.details.toLowerCase().includes(q)) ||
+            (e.targetUserId && String(e.targetUserId).toLowerCase().includes(q));
+          if (!hit) continue;
+        }
+        matches.push(e);
+        if (matches.length >= 500) break outer;
+      }
+      if (batch.isDone) break;
+      cursor = batch.continueCursor;
     }
-    if (search) {
-      const q = search.toLowerCase();
-      entries = entries.filter(
-        (e) =>
-          e.action.toLowerCase().includes(q) ||
-          (e.details && e.details.toLowerCase().includes(q)) ||
-          (e.targetUserId && String(e.targetUserId).toLowerCase().includes(q)),
-      );
-    }
-    return entries;
+    return matches;
   },
 });
 
@@ -187,6 +199,14 @@ export const registerRestaurant = mutation({
       shouldLinkViaEmail: false,
       shouldLinkViaPhone: true,
     });
+
+    // M-10: createAccount may have LINKED an existing user (shouldLinkViaPhone).
+    // If that account is an admin, refuse rather than stripping its role.
+    if (user.role === "admin") {
+      throw new Error(
+        "That phone belongs to an admin account and cannot become a restaurant owner.",
+      );
+    }
 
     await ctx.db.patch(user._id, {
       role: "owner",
@@ -262,6 +282,10 @@ export const tagAsRestaurant = mutation({
       .withIndex("phone", (q) => q.eq("phone", cleanPhone))
       .first();
     if (!user) throw new Error("No account found with that phone number.");
+    // M-10: tagging must never strip the admin role (mirrors users.onboard).
+    if (user.role === "admin") {
+      throw new Error("That account is an admin and cannot be tagged as a restaurant.");
+    }
 
     await ctx.db.patch(user._id, {
       role: "owner",
@@ -343,6 +367,10 @@ export const ensureOwnerPassword = mutation({
       .withIndex("phone", (q) => q.eq("phone", cleanPhone))
       .first();
     if (!user) throw new Error("No account found with that phone number.");
+    // M-10: never demote an existing admin to owner.
+    if (user.role === "admin") {
+      throw new Error("That account is an admin; its role cannot be changed.");
+    }
 
     await setPasswordForUser(ctx, user._id, cleanPhone, tempPassword);
     await ctx.db.patch(user._id, { mustChangePassword: true, role: "owner", onboarded: true });
@@ -454,9 +482,32 @@ export const createUser = mutation({
   },
 });
 
+/** GDPR cascades per invocation — full cascades blow transaction limits (M-16). */
+const BULK_DELETE_BATCH = 5;
+
+/**
+ * Scheduled continuation of bulkDeleteUsers: cascade-deletes one small batch
+ * per invocation until the queue is drained.
+ */
+export const bulkDeleteUsersStep = internalMutation({
+  args: { userIds: v.array(v.id("users")) },
+  handler: async (ctx, { userIds }) => {
+    const batch = userIds.slice(0, BULK_DELETE_BATCH);
+    for (const userId of batch) await cascadeDeleteUser(ctx, userId);
+    const rest = userIds.slice(batch.length);
+    if (rest.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.admin.bulkDeleteUsersStep, {
+        userIds: rest,
+      });
+    }
+  },
+});
+
 /**
  * Admin-only: bulk delete multiple users (GDPR-style erasure).
  * Skips admins and users who own restaurants. Returns counts.
+ * M-16: eligibility is validated up front (cheap reads), then the expensive
+ * cascades run in small batches across scheduled invocations.
  */
 export const bulkDeleteUsers = mutation({
   args: { userIds: v.array(v.id("users")) },
@@ -469,7 +520,8 @@ export const bulkDeleteUsers = mutation({
       windowMs: 60 * 60_000,
     });
     const limited = userIds.slice(0, 50);
-    let deleted = 0;
+
+    const deletable: Id<"users">[] = [];
     const skipped: { id: string; reason: string }[] = [];
     for (const userId of limited) {
       if (userId === adminUserId) { skipped.push({ id: userId, reason: "self" }); continue; }
@@ -481,13 +533,22 @@ export const bulkDeleteUsers = mutation({
         .withIndex("by_owner", (q) => q.eq("ownerId", userId))
         .collect();
       if (owned.length > 0) { skipped.push({ id: userId, reason: "owns_restaurants" }); continue; }
-      await cascadeDeleteUser(ctx, userId);
-      deleted++;
+      deletable.push(userId);
     }
+
+    const firstBatch = deletable.slice(0, BULK_DELETE_BATCH);
+    for (const userId of firstBatch) await cascadeDeleteUser(ctx, userId);
+    const rest = deletable.slice(firstBatch.length);
+    if (rest.length > 0) {
+      await ctx.scheduler.runAfter(0, internal.admin.bulkDeleteUsersStep, {
+        userIds: rest,
+      });
+    }
+
     await logAdminAction(ctx, adminUserId, "bulkDeleteUsers", {
-      details: JSON.stringify({ requested: userIds.length, deleted, skipped: skipped.length }),
+      details: JSON.stringify({ requested: userIds.length, deleted: deletable.length, skipped: skipped.length }),
     });
-    return { deleted, skipped };
+    return { deleted: deletable.length, skipped };
   },
 });
 
@@ -586,9 +647,43 @@ export const deleteRestaurant = mutation({
   },
 });
 
+/** Audit rows deleted per invocation — keeps each transaction bounded (M-15). */
+const AUDIT_BATCH = 500;
+
+/**
+ * Scheduled continuation of clearAuditLog: drains one batch; reschedules
+ * itself until the log is empty, then writes the traceability marker.
+ */
+export const clearAuditLogStep = internalMutation({
+  args: {
+    adminUserId: v.id("users"),
+    clearedSoFar: v.number(),
+  },
+  handler: async (ctx, { adminUserId, clearedSoFar }) => {
+    const rows = await ctx.db.query("adminAuditLog").take(AUDIT_BATCH);
+    for (const row of rows) await ctx.db.delete(row._id);
+    const cleared = clearedSoFar + rows.length;
+    if (rows.length === AUDIT_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.admin.clearAuditLogStep, {
+        adminUserId,
+        clearedSoFar: cleared,
+      });
+      return;
+    }
+    await ctx.db.insert("adminAuditLog", {
+      adminUserId,
+      action: "clearAuditLog",
+      details: JSON.stringify({ clearedRows: cleared }),
+      createdAt: Date.now(),
+    });
+  },
+});
+
 /**
  * Admin-only: wipe the audit log. Records a single "clearAuditLog" entry
  * (with the number of cleared rows) so the clearing itself stays traceable.
+ * M-15: deletion is batched across scheduled invocations instead of
+ * collecting + deleting the entire log in one transaction.
  */
 export const clearAuditLog = mutation({
   args: {},
@@ -600,15 +695,24 @@ export const clearAuditLog = mutation({
       limit: 10,
       windowMs: 60 * 60_000, // 10 per hour
     });
-    const all = await ctx.db.query("adminAuditLog").collect();
-    for (const row of all) await ctx.db.delete(row._id);
+    const rows = await ctx.db.query("adminAuditLog").take(AUDIT_BATCH);
+    for (const row of rows) await ctx.db.delete(row._id);
+    if (rows.length === AUDIT_BATCH) {
+      // More remain — continue in scheduled batches (the marker row is
+      // written by the final step, after the drain completes).
+      await ctx.scheduler.runAfter(0, internal.admin.clearAuditLogStep, {
+        adminUserId: userId,
+        clearedSoFar: rows.length,
+      });
+      return { cleared: rows.length };
+    }
     await ctx.db.insert("adminAuditLog", {
       adminUserId: userId,
       action: "clearAuditLog",
-      details: JSON.stringify({ clearedRows: all.length }),
+      details: JSON.stringify({ clearedRows: rows.length }),
       createdAt: Date.now(),
     });
-    return { cleared: all.length };
+    return { cleared: rows.length };
   },
 });
 
@@ -663,6 +767,9 @@ export const setUserPassword = mutation({
 
     await setPasswordForUser(ctx, userId, phone, newPassword);
     await ctx.db.patch(userId, { mustChangePassword: true });
+    // M-11: kick existing sessions so a hijacker's session doesn't survive
+    // the admin password reset (same policy as setUserDisabled).
+    await invalidateUserSessions(ctx, userId);
 
     await logAdminAction(ctx, adminUserId, "setUserPassword", {
       targetUserId: userId as unknown as string,

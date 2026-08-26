@@ -103,7 +103,7 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function MyBookings() {
   const { t } = useTranslation();
-  const bookings = useQuery(api.bookings.myBookings);
+  const bookings = useQuery(api.bookings.myBookings, {});
   const cancelBooking = useMutation(api.bookings.cancelBooking);
   const waitlist = useQuery(api.waitlist.myWaitlist);
   const cancelWaitlist = useMutation(api.waitlist.cancel);
@@ -133,11 +133,12 @@ export default function MyBookings() {
   }, []);
   useEffect(() => {
     if (!bookings) return;
+    // Rebuild the cache from the current confirmed set on every run so codes
+    // for cancelled / completed / no-show bookings never linger offline.
     const recent = (bookings as any[])
       .filter((b) => b.status === "confirmed")
-      .slice(0, 5);
-    if (recent.length === 0) return;
-    const next = { ...cachedBookings };
+      .slice(0, 10);
+    const next: Record<string, { code: string; restaurantName: string; date: string; time: string }> = {};
     for (const b of recent) {
       next[b._id as string] = {
         code: (b as any).code,
@@ -146,16 +147,12 @@ export default function MyBookings() {
         time: (b as any).time,
       };
     }
-    // keep only the newest 10 to bound storage
-    const ordered = Object.entries(next).sort((a, b) => (b[1].date + b[1].time).localeCompare(a[1].date + a[1].time));
-    const trimmed = Object.fromEntries(ordered.slice(0, 10));
-    setCachedBookings(trimmed);
+    setCachedBookings(next);
     try {
-      localStorage.setItem("kamix:offline-bookings", JSON.stringify(trimmed));
+      localStorage.setItem("kamix:offline-bookings", JSON.stringify(next));
     } catch {
       /* quota — ignore */
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bookings]);
 
   // In-app confirmation (native window.confirm is blocked in the sandboxed
@@ -1164,7 +1161,10 @@ export default function MyBookings() {
             </DialogDescription>
           </DialogHeader>
           {billSplitBooking && (
-            <BillSplit bookingId={billSplitBooking._id as never} />
+            <BillSplit
+              bookingId={billSplitBooking._id as never}
+              hostUserId={billSplitBooking.userId}
+            />
           )}
         </DialogContent>
       </Dialog>

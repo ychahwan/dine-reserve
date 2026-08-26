@@ -9,6 +9,7 @@ import { Badge } from "./ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
 import { CheckCircle, XCircle, Clock, Users, MapPin, Hash } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import { formatDistanceToNow } from "date-fns";
 
@@ -17,37 +18,46 @@ interface WalkInApprovalProps {
 }
 
 export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
+  const { t } = useTranslation();
   const [rejectDialogOpen, setRejectDialogOpen] = useState(false);
   const [rejectReason, setRejectReason] = useState("");
   const [selectedRequestId, setSelectedRequestId] = useState<Id<"walkInRequests"> | null>(null);
+  // L-26: guard against double-submit while a mutation is in flight.
+  const [busyId, setBusyId] = useState<Id<"walkInRequests"> | null>(null);
 
   const pendingWalkIns = useQuery(api.walkIn.pendingWalkIns, { restaurantId });
   const approveWalkIn = useMutation(api.walkIn.approveWalkIn);
   const rejectWalkIn = useMutation(api.walkIn.rejectWalkIn);
 
   const handleApprove = async (requestId: Id<"walkInRequests">) => {
+    if (busyId) return;
+    setBusyId(requestId);
     try {
       const result = await approveWalkIn({ requestId });
-      toast.success(`Walk-in approved! Booking code: ${result.code}`);
+      toast.success(t("walkin.hostApprovedToast", { code: result.code }));
     } catch (error: any) {
-      toast.error(error.message || "Failed to approve walk-in");
+      toast.error(error.message || t("walkin.errApprove"));
+    } finally {
+      setBusyId(null);
     }
   };
 
   const handleReject = async () => {
-    if (!selectedRequestId) return;
-
+    if (!selectedRequestId || busyId) return;
+    setBusyId(selectedRequestId);
     try {
       await rejectWalkIn({
         requestId: selectedRequestId,
         reason: rejectReason || undefined,
       });
-      toast.success("Walk-in request rejected");
+      toast.success(t("walkin.hostRejectedToast"));
       setRejectDialogOpen(false);
       setRejectReason("");
       setSelectedRequestId(null);
     } catch (error: any) {
-      toast.error(error.message || "Failed to reject walk-in");
+      toast.error(error.message || t("walkin.errReject"));
+    } finally {
+      setBusyId(null);
     }
   };
 
@@ -61,7 +71,7 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
       <Card>
         <CardContent className="p-8 text-center">
           <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
-          <p className="text-muted-foreground">Loading walk-in requests...</p>
+          <p className="text-muted-foreground">{t("walkin.hostLoading")}</p>
         </CardContent>
       </Card>
     );
@@ -72,10 +82,10 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold flex items-center gap-2">
           <MapPin className="h-5 w-5" />
-          Walk-in Requests
+          {t("walkin.hostTitle")}
         </h3>
         <Badge variant="secondary">
-          {pendingWalkIns.length} pending
+          {t("walkin.hostPending", { count: pendingWalkIns.length })}
         </Badge>
       </div>
 
@@ -83,7 +93,7 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
         <Card>
           <CardContent className="p-8 text-center">
             <CheckCircle className="h-12 w-12 text-green-500 mx-auto mb-4" />
-            <p className="text-muted-foreground">No pending walk-in requests</p>
+            <p className="text-muted-foreground">{t("walkin.hostEmpty")}</p>
           </CardContent>
         </Card>
       ) : (
@@ -96,17 +106,17 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
                     <div className="flex items-center gap-2">
                       <h4 className="font-medium">{request.userName || request.name}</h4>
                       <Badge variant="outline" className="text-xs">
-                        {request.source === "qr_scan" ? "QR Scan" : "App Check-in"}
+                        {request.source === "qr_scan" ? t("walkin.sourceQR") : t("walkin.sourceApp")}
                       </Badge>
                     </div>
                     <div className="flex items-center gap-4 text-sm text-muted-foreground">
                       <span className="flex items-center gap-1">
                         <Hash className="h-4 w-4" />
-                        Table {request.tableNumber}
+                        {t("walkin.tableLabel", { table: request.tableNumber })}
                       </span>
                       <span className="flex items-center gap-1">
                         <Users className="h-4 w-4" />
-                        Party of {request.partySize}
+                        {t("walkin.partyOfSize", { count: request.partySize })}
                       </span>
                       <span className="flex items-center gap-1">
                         <Clock className="h-4 w-4" />
@@ -118,19 +128,21 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
                   <div className="flex items-center gap-2">
                     <Button
                       size="sm"
+                      disabled={busyId !== null}
                       onClick={() => handleApprove(request._id)}
                       className="bg-green-600 hover:bg-green-700"
                     >
                       <CheckCircle className="h-4 w-4 mr-1" />
-                      Approve
+                      {t("walkin.approve")}
                     </Button>
                     <Button
                       size="sm"
                       variant="destructive"
+                      disabled={busyId !== null}
                       onClick={() => openRejectDialog(request._id)}
                     >
                       <XCircle className="h-4 w-4 mr-1" />
-                      Reject
+                      {t("walkin.reject")}
                     </Button>
                   </div>
                 </div>
@@ -144,14 +156,14 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
       <Dialog open={rejectDialogOpen} onOpenChange={setRejectDialogOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Reject Walk-in Request</DialogTitle>
+            <DialogTitle>{t("walkin.rejectDialogTitle")}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
-              <Label htmlFor="rejectReason">Reason (optional)</Label>
+              <Label htmlFor="rejectReason">{t("walkin.reasonOptional")}</Label>
               <Input
                 id="rejectReason"
-                placeholder="e.g., Restaurant is full, Table not available"
+                placeholder={t("walkin.reasonPlaceholder")}
                 value={rejectReason}
                 onChange={(e) => setRejectReason(e.target.value)}
               />
@@ -161,15 +173,17 @@ export function WalkInApproval({ restaurantId }: WalkInApprovalProps) {
                 onClick={() => setRejectDialogOpen(false)}
                 variant="outline"
                 className="flex-1"
+                disabled={busyId !== null}
               >
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button
                 onClick={handleReject}
                 variant="destructive"
                 className="flex-1"
+                disabled={busyId !== null}
               >
-                Reject Request
+                {t("walkin.rejectConfirm")}
               </Button>
             </div>
           </div>

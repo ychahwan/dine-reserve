@@ -25,10 +25,10 @@ import {
   Wand2,
 } from "lucide-react";
 import { useState } from "react";
-import { Link, useNavigate } from "react-router";
+import { useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
-import { today } from "@/lib/format";
 import { DEMO_RESTAURANT_NAMES } from "@/lib/demo";
+import { useToday } from "@/components/OwnerRestaurantTabs";
 import { toast } from "sonner";
 
 type FeatureKey = "inside" | "outside" | "bar" | "smoking" | "parking" | "liveMusic";
@@ -83,13 +83,18 @@ export default function OwnerDashboard() {
   const handleCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    // L-37: HTML `required` accepts whitespace-only values — trim-validate first.
+    if (!name.trim() || !cuisine.trim() || !city.trim() || !address.trim()) {
+      setError("Name, cuisine, city and address are required.");
+      return;
+    }
     setSaving(true);
     try {
       const id = await createRestaurant({
-        name,
-        cuisine,
-        city,
-        address,
+        name: name.trim(),
+        cuisine: cuisine.trim(),
+        city: city.trim(),
+        address: address.trim(),
         phone: phone || undefined,
         priceRange: priceRange || undefined,
         description: description || undefined,
@@ -256,9 +261,11 @@ export default function OwnerDashboard() {
 /** Card that loads its own today-bookings count so the list stays cheap. */
 function OwnerRestaurantCard({ id }: { id: string }) {
   const data = useQuery(api.restaurants.get, { id: id as never });
+  const navigate = useNavigate();
+  const todayKey = useToday();
   const todays = useQuery(api.bookings.byRestaurant, {
     restaurantId: id as never,
-    date: today(),
+    date: todayKey,
   });
   const loadDemoRules = useMutation(api.demoRules.ensureDemoRules);
   const [demoLoading, setDemoLoading] = useState(false);
@@ -285,7 +292,21 @@ function OwnerRestaurantCard({ id }: { id: string }) {
   };
 
   return (
-    <Link to={`/owner/restaurant/${r._id}`} className="block">
+    // L-37: a button can't be nested inside a Link — make the card a plain
+    // div that navigates, keeping the demo button a real, accessible button.
+    <div
+      role="link"
+      tabIndex={0}
+      aria-label={`Open ${r.name}`}
+      onClick={() => navigate(`/owner/restaurant/${r._id}`)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          navigate(`/owner/restaurant/${r._id}`);
+        }
+      }}
+      className="block cursor-pointer rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
       <Card className="group overflow-hidden rounded-2xl border-border/70 p-0 transition-all hover:-translate-y-0.5 hover:shadow-md">
         <div className="flex items-center gap-4 p-4">
           {r.imageUrl ? (
@@ -330,6 +351,6 @@ function OwnerRestaurantCard({ id }: { id: string }) {
           <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5">→</span>
         </div>
       </Card>
-    </Link>
+    </div>
   );
 }

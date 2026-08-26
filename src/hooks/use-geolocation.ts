@@ -1,5 +1,5 @@
 import { Geolocation, Position } from "@capacitor/geolocation";
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 
 interface LocationCoords {
   latitude: number;
@@ -50,13 +50,17 @@ export function useGeolocation(
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const defaultOptions = {
-    enableHighAccuracy: true,
-    timeout: 15000,
-    maximumAge: 60000, // Cache for 1 minute
-    autoFetch: false,
-    ...options,
-  };
+  // Stable merged options — recreating them every render re-fired effects
+  // and churned callback identities (M-35a).
+  const geoOptions = useRef({
+    enableHighAccuracy: options?.enableHighAccuracy ?? true,
+    timeout: options?.timeout ?? 15000,
+    maximumAge: options?.maximumAge ?? 60000,
+    autoFetch: options?.autoFetch ?? false,
+  }).current;
+
+  // Track every active watch id so unmount stops GPS polling (M-35b).
+  const watchesRef = useRef<Set<string>>(new Set());
 
   const processPosition = useCallback((pos: Position): LocationCoords => {
     return {
@@ -85,9 +89,9 @@ export function useGeolocation(
     setError(null);
     try {
       const pos = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: defaultOptions.enableHighAccuracy,
-        timeout: defaultOptions.timeout,
-        maximumAge: defaultOptions.maximumAge,
+        enableHighAccuracy: geoOptions.enableHighAccuracy,
+        timeout: geoOptions.timeout,
+        maximumAge: geoOptions.maximumAge,
       });
       const coords = processPosition(pos);
       setPosition(coords);
@@ -101,41 +105,60 @@ export function useGeolocation(
     } finally {
       setLoading(false);
     }
-  }, [defaultOptions, processPosition]);
+  }, [geoOptions, processPosition]);
 
   const watchPosition = useCallback(async (): Promise<string> => {
     try {
       const watchId = await Geolocation.watchPosition(
         {
-          enableHighAccuracy: defaultOptions.enableHighAccuracy,
-          timeout: defaultOptions.timeout,
-          maximumAge: defaultOptions.maximumAge,
+          enableHighAccuracy: geoOptions.enableHighAccuracy,
+          timeout: geoOptions.timeout,
+          maximumAge: geoOptions.maximumAge,
         },
-        (pos) => {
+        (pos, err) => {
+          // Surface watch errors instead of silently ignoring them.
+          if (err) {
+            setError(err?.message || "Failed to watch position");
+            return;
+          }
           if (pos) {
             setPosition(processPosition(pos));
           }
         },
       );
+      watchesRef.current.add(watchId.toString());
       return watchId.toString();
     } catch (err: any) {
       setError(err?.message || "Failed to watch position");
       return "";
     }
-  }, [defaultOptions, processPosition]);
+  }, [geoOptions, processPosition]);
 
   const clearWatch = useCallback(async (watchId: string): Promise<void> => {
     try {
       await Geolocation.clearWatch({ id: watchId });
     } catch (err: any) {
       console.error("Failed to clear watch:", err);
+    } finally {
+      watchesRef.current.delete(watchId);
     }
+  }, []);
+
+  // Stop every still-active watch when the hook unmounts (M-35b).
+  useEffect(() => {
+    const watches = watchesRef.current;
+    return () => {
+      for (const id of watches) {
+        void Geolocation.clearWatch({ id }).catch(() => undefined);
+      }
+      watches.clear();
+    };
   }, []);
 
   // Auto-fetch on mount if enabled
   useEffect(() => {
-    if (defaultOptions.autoFetch) {
-      getCurrentPosition();
+    if (geoOptions.autoFetch) {
+      void getCurrentPosition();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 

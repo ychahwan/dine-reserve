@@ -71,6 +71,9 @@ export default function Account() {
   const [dietary, setDietary] = useState<string[]>([]);
   const [seating, setSeating] = useState<string[]>([]);
   const [occasions, setOccasions] = useState<string[]>([]);
+  // L-41: once the user edits locally, reactive user-doc updates must not
+  // clobber their in-progress changes with server state.
+  const [profileDirty, setProfileDirty] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -97,6 +100,7 @@ export default function Account() {
   const [delError, setDelError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (profileDirty) return;
     if (user?.name !== undefined) setName(user.name ?? "");
     if (user?.prefs) {
       setDietary(user.prefs.dietary ?? []);
@@ -107,7 +111,7 @@ export default function Account() {
       setSeating([]);
       setOccasions([]);
     }
-  }, [user?.name, user?.prefs]);
+  }, [user?.name, user?.prefs, profileDirty]);
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -118,6 +122,7 @@ export default function Account() {
         name,
         prefs: { dietary, seating: seating as ("inside" | "outside" | "bar")[], occasions },
       });
+      setProfileDirty(false);
       toast.success(t("account.updated"));
     } catch (err) {
       setError(err instanceof Error ? err.message : t("account.errSave"));
@@ -167,6 +172,9 @@ export default function Account() {
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
     setPwError(null);
+    // M-42: don't submit until we know whether a current password is needed —
+    // otherwise the backend rejects mid-flow and the field pops in late.
+    if (hasPassword === undefined) return;
     if (newPassword.length < 8) {
       setPwError(t("account.pwMin"));
       return;
@@ -192,8 +200,10 @@ export default function Account() {
     }
   };
 
-  const toggleIn = (list: string[], set: (v: string[]) => void, value: string) =>
+  const toggleIn = (list: string[], set: (v: string[]) => void, value: string) => {
+    setProfileDirty(true);
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
+  };
 
   const handleRemoveFavorite = async (id: string, name: string) => {
     try {
@@ -362,7 +372,10 @@ export default function Account() {
                 <Input
                   id="acc-name"
                   value={name}
-                  onChange={(e) => setName(e.target.value)}
+                  onChange={(e) => {
+                    setProfileDirty(true);
+                    setName(e.target.value);
+                  }}
                   placeholder={t("account.namePlaceholder")}
                   disabled={saving}
                 />
@@ -580,7 +593,7 @@ export default function Account() {
                 <Button
                   type="submit"
                   variant="outline"
-                  disabled={pwBusy || newPassword.length < 8 || newPassword !== confirmPassword}
+                  disabled={pwBusy || hasPassword === undefined || newPassword.length < 8 || newPassword !== confirmPassword}
                   className="w-full sm:w-auto"
                 >
                   {pwBusy && <Loader2 className="mr-2 size-4 animate-spin" />}

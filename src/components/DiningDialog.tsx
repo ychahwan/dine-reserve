@@ -28,6 +28,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import { formatDate, formatPrice, formatTime, today } from "@/lib/format";
 import { toast } from "sonner";
@@ -88,6 +89,9 @@ type BillLineLike = {
   note?: string;
 };
 
+/** Cross-agent contract: bill rows carry a stable backend id for React keys. */
+type BillRowWithId = BillLineLike & { _rowId?: string };
+
 /** A cart line: quantity + per-item customization (ingredients to drop, note). */
 type CartEntry = {
   qty: number;
@@ -95,39 +99,39 @@ type CartEntry = {
   note?: string;
 };
 
-/** Epoch-millisecond timestamp -> "5:30 PM" (formatTime only takes "HH:mm" strings). */
-const formatClock = (ts: number) =>
-  new Date(ts).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
+/** Epoch-millisecond timestamp -> localized "5:30 PM" (formatTime only takes "HH:mm" strings). */
+const formatClockIn = (ts: number, locale: string) =>
+  new Date(ts).toLocaleTimeString(locale, { hour: "numeric", minute: "2-digit" });
 
-const ORDER_STATUS_META: Record<string, { label: string; cls: string }> = {
-  open: { label: "Sent to kitchen", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  preparing: { label: "Preparing", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  served: { label: "Served", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
-  completed: { label: "Completed", cls: "bg-muted text-muted-foreground" },
-  cancelled: { label: "Cancelled", cls: "bg-destructive/10 text-destructive" },
+const ORDER_STATUS_META: Record<string, { key: string; cls: string }> = {
+  open: { key: "dine.statusOpen", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
+  preparing: { key: "dine.statusPreparing", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+  served: { key: "dine.statusServed", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
+  completed: { key: "dine.statusCompleted", cls: "bg-muted text-muted-foreground" },
+  cancelled: { key: "dine.statusCancelled", cls: "bg-destructive/10 text-destructive" },
 };
 
-const ASSIST_OPTIONS: { value: string; label: string; icon: LucideIcon }[] = [
-  { value: "water", label: "More water", icon: GlassWater },
-  { value: "napkins", label: "Napkins", icon: Sparkles },
-  { value: "utensils", label: "Cutlery", icon: Utensils },
-  { value: "order_status", label: "Order status", icon: ChefHat },
-  { value: "bill", label: "Bring the bill", icon: Receipt },
-  { value: "help", label: "Need help", icon: Hand },
-  { value: "custom", label: "Custom…", icon: BellRing },
+const ASSIST_OPTIONS: { value: string; key: string; icon: LucideIcon }[] = [
+  { value: "water", key: "dine.assistWater", icon: GlassWater },
+  { value: "napkins", key: "dine.assistNapkins", icon: Sparkles },
+  { value: "utensils", key: "dine.assistUtensils", icon: Utensils },
+  { value: "order_status", key: "dine.assistOrderStatus", icon: ChefHat },
+  { value: "bill", key: "dine.assistBill", icon: Receipt },
+  { value: "help", key: "dine.assistHelp", icon: Hand },
+  { value: "custom", key: "dine.assistCustom", icon: BellRing },
 ];
 
-const MENU_REQUEST_STATUS: Record<string, { label: string; cls: string }> = {
-  new: { label: "New", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  in_progress: { label: "In progress", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  fulfilled: { label: "Fulfilled", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
-  declined: { label: "Declined", cls: "bg-muted text-muted-foreground" },
+const MENU_REQUEST_STATUS: Record<string, { key: string; cls: string }> = {
+  new: { key: "dine.statusNew", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
+  in_progress: { key: "dine.statusInProgress", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
+  fulfilled: { key: "dine.statusFulfilled", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
+  declined: { key: "dine.statusDeclined", cls: "bg-muted text-muted-foreground" },
 };
 
-function groupItems(items: MenuItemLike[]): [string, MenuItemLike[]][] {
+function groupItems(items: MenuItemLike[], fallbackLabel: string): [string, MenuItemLike[]][] {
   const map = new Map<string, MenuItemLike[]>();
   for (const it of items) {
-    const key = it.category?.trim() || "Signature";
+    const key = it.category?.trim() || fallbackLabel;
     const arr = map.get(key);
     if (arr) arr.push(it);
     else map.set(key, [it]);
@@ -136,9 +140,13 @@ function groupItems(items: MenuItemLike[]): [string, MenuItemLike[]][] {
 }
 
 /** "No onion, no garlic" style summary for a customized line. */
-function removalSummary(removed: string[] | undefined, note?: string): string | null {
+function removalSummary(
+  removed: string[] | undefined,
+  note: string | undefined,
+  t: (key: string, opts?: Record<string, unknown>) => string,
+): string | null {
   const parts: string[] = [];
-  if (removed && removed.length > 0) parts.push(`no ${removed.join(", no ")}`);
+  if (removed && removed.length > 0) parts.push(t("dine.withoutList", { list: removed.join(", ") }));
   if (note && note.trim()) parts.push(note.trim());
   return parts.length > 0 ? parts.join(" · ") : null;
 }
@@ -157,6 +165,8 @@ export function DiningDialog({
   booking: DineBooking | null;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t, i18n } = useTranslation();
+  const formatClock = (ts: number) => formatClockIn(ts, i18n.language);
   const restaurantData = useQuery(
     api.restaurants.get,
     booking ? { id: booking.restaurantId as never } : "skip",
@@ -216,7 +226,7 @@ export function DiningDialog({
     () => allItems.filter((i) => i.available),
     [allItems],
   );
-  const grouped = useMemo(() => groupItems(availableItems), [availableItems]);
+  const grouped = useMemo(() => groupItems(availableItems, t("dine.signatureFallback")), [availableItems, t]);
 
   const cartCount = Object.values(cart).reduce((s, e) => s + e.qty, 0);
   const cartTotal = Object.entries(cart).reduce((sum, [id, entry]) => {
@@ -260,10 +270,12 @@ export function DiningDialog({
     if (!booking || busy) return;
     setBusy("checkin");
     try {
-      await checkIn({ bookingId: booking._id as never });
-      toast.success("Checked in! The team knows you're here.");
+      // KB-04: pass the diner's local date so day-of-visit checks near
+      // midnight aren't rejected by the UTC server clock.
+      await checkIn({ bookingId: booking._id as never, clientDate: today() });
+      toast.success(t("dine.checkedInToast"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not check in.");
+      toast.error(err instanceof Error ? err.message : t("dine.errCheckIn"));
     } finally {
       setBusy(null);
     }
@@ -283,11 +295,11 @@ export function DiningDialog({
         })),
         note: orderNote.trim() || undefined,
       });
-      toast.success("Order sent to the kitchen — they'll confirm shortly.");
+      toast.success(t("dine.orderSentToast"));
       setCart({});
       setOrderNote("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not send the order.");
+      toast.error(err instanceof Error ? err.message : t("dine.errPlaceOrder"));
     } finally {
       setBusy(null);
     }
@@ -298,9 +310,9 @@ export function DiningDialog({
     setBusy(orderId);
     try {
       await cancelOrder({ orderId: orderId as never });
-      toast.success("Order cancelled.");
+      toast.success(t("dine.orderCancelledToast"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not cancel the order.");
+      toast.error(err instanceof Error ? err.message : t("dine.errCancelOrder"));
     } finally {
       setBusy(null);
     }
@@ -315,10 +327,10 @@ export function DiningDialog({
         template: assistTemplate as never,
         note: assistNote.trim() || undefined,
       });
-      toast.success("Request sent — the team will be right over.");
+      toast.success(t("dine.assistSentToast"));
       setAssistNote("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not send the request.");
+      toast.error(err instanceof Error ? err.message : t("dine.errAssist"));
     } finally {
       setBusy(null);
     }
@@ -329,9 +341,9 @@ export function DiningDialog({
     setBusy(id);
     try {
       await cancelAssist({ id: id as never });
-      toast.success("Request withdrawn.");
+      toast.success(t("dine.assistWithdrawnToast"));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not cancel the request.");
+      toast.error(err instanceof Error ? err.message : t("dine.errCancelAssist"));
     } finally {
       setBusy(null);
     }
@@ -340,7 +352,7 @@ export function DiningDialog({
   const handleCreateMenuRequest = async () => {
     if (!booking || busy) return;
     if (!menuName.trim()) {
-      toast.error("Tell us what you'd like.");
+      toast.error(t("dine.menuReqNeeded"));
       return;
     }
     setBusy("menu");
@@ -351,11 +363,11 @@ export function DiningDialog({
         name: menuName.trim(),
         description: menuDesc.trim() || undefined,
       });
-      toast.success("Request sent — the kitchen will review it.");
+      toast.success(t("dine.menuReqSentToast"));
       setMenuName("");
       setMenuDesc("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not send the request.");
+      toast.error(err instanceof Error ? err.message : t("dine.errMenuRequest"));
     } finally {
       setBusy(null);
     }
@@ -380,17 +392,21 @@ export function DiningDialog({
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-background">
       <div className="flex items-center gap-2 border-b border-border px-3 py-3 sm:px-4">
-        <Button variant="ghost" size="icon" onClick={handleBack} aria-label="Back">
+        <Button variant="ghost" size="icon" onClick={handleBack} aria-label={t("common.back")}>
           <ArrowLeft className="size-5" />
         </Button>
         <div className="min-w-0 flex-1">
           <p className="truncate text-base font-semibold tracking-tight">
-            {booking.restaurant?.name ?? "Your table"}
+            {booking.restaurant?.name ?? t("dine.yourTable")}
           </p>
           <p className="truncate text-xs text-muted-foreground">
-            {`${formatDate(booking.date)} · ${formatTime(booking.time)} · ${booking.partySize} ${
-              booking.partySize === 1 ? "guest" : "guests"
-            } · code ${booking.code}`}
+            {t("dine.headerMeta", {
+              date: formatDate(booking.date),
+              time: formatTime(booking.time),
+              count: booking.partySize,
+              guests: t("common.guest", { count: booking.partySize }),
+              code: booking.code,
+            })}
           </p>
         </div>
       </div>
@@ -412,20 +428,20 @@ export function DiningDialog({
         {booking &&
           (booking.checkedInAt ? (
             <div className="flex items-center gap-2 rounded-xl border border-emerald-600/30 bg-emerald-600/10 px-3.5 py-2.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
-              <CheckCircle2 className="size-4" /> Checked in at {formatClock(booking.checkedInAt)} —
-              the team knows you&apos;re here.
+              <CheckCircle2 className="size-4" />{" "}
+              {t("dine.checkedInAt", { time: formatClock(booking.checkedInAt) })}
             </div>
           ) : isToday ? (
             <div className="flex items-center justify-between gap-3 rounded-xl border border-primary/30 bg-primary/5 px-3.5 py-2.5">
               <div className="text-sm">
-                <p className="font-medium">Arriving today?</p>
+                <p className="font-medium">{t("dine.arrivingToday")}</p>
                 <p className="text-xs text-muted-foreground">
-                  Let the restaurant know you&apos;re here so they can seat you right away.
+                  {t("dine.arrivingTodayHint")}
                 </p>
               </div>
               <Button size="sm" onClick={handleCheckIn} disabled={busy === "checkin"}>
                 {busy === "checkin" ? <Spinner className="size-3.5" /> : <MapPin className="size-3.5" />}
-                I&apos;m here
+                {t("dine.imHere")}
               </Button>
             </div>
           ) : null)}
@@ -433,9 +449,9 @@ export function DiningDialog({
         {/* Tabs */}
         <div className="no-scrollbar horizontal-rail mt-2 flex gap-2 overflow-x-auto pb-1">
           {[
-            { key: "order" as const, label: "Order", icon: ShoppingBag, count: orders?.length },
-            { key: "assist" as const, label: "Ask the team", icon: Hand, count: (assists ?? []).filter((a) => a.status === "open").length },
-            { key: "menu" as const, label: "Menu ideas", icon: Utensils, count: menuReqs?.length },
+            { key: "order" as const, label: t("dine.tabOrder"), icon: ShoppingBag, count: orders?.length },
+            { key: "assist" as const, label: t("dine.tabAssist"), icon: Hand, count: (assists ?? []).filter((a) => a.status === "open").length },
+            { key: "menu" as const, label: t("dine.tabMenuIdeas"), icon: Utensils, count: menuReqs?.length },
           ].map((t) => (
             <button
               key={t.key}
@@ -468,21 +484,21 @@ export function DiningDialog({
             {orders !== undefined && orders.length > 0 && (
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Your orders · live
+                  {t("dine.ordersLive")}
                 </p>
                 {orders.map((o: OrderLike) => {
                   const meta = ORDER_STATUS_META[o.status] ?? ORDER_STATUS_META.open;
                   return (
                     <div key={o._id} className="rounded-xl border border-border/70 bg-card px-3.5 py-3">
                       <div className="flex items-center justify-between gap-2">
-                        <Badge className={cn("gap-1", meta.cls)}>{meta.label}</Badge>
+                        <Badge className={cn("gap-1", meta.cls)}>{t(meta.key)}</Badge>
                         <span className="text-xs text-muted-foreground">
                           {formatClock(o.createdAt)}
                         </span>
                       </div>
                       <div className="mt-2 space-y-1">
                         {o.items.map((line, i) => {
-                          const summary = removalSummary(line.removeIngredients, line.note);
+                          const summary = removalSummary(line.removeIngredients, line.note, t);
                           return (
                             <div key={i} className="flex items-center justify-between gap-2 text-sm">
                               <span className="min-w-0 text-muted-foreground">
@@ -500,7 +516,7 @@ export function DiningDialog({
                       </div>
                       <div className="mt-2 flex items-center justify-between border-t border-border/60 pt-2">
                         <span className="text-xs text-muted-foreground">
-                          {o.note ? `“${o.note}”` : "Total"}
+                          {o.note ? `“${o.note}”` : t("dine.total")}
                         </span>
                         <span className="text-sm font-semibold">{formatPrice(o.totalCents)}</span>
                       </div>
@@ -513,7 +529,7 @@ export function DiningDialog({
                             disabled={busy === o._id}
                             onClick={() => handleCancelOrder(o._id)}
                           >
-                            Cancel order
+                            {t("dine.cancelOrder")}
                           </Button>
                         </div>
                       )}
@@ -533,9 +549,9 @@ export function DiningDialog({
                 >
                   <div className="flex items-center gap-2">
                     <Receipt className="size-4 text-primary" />
-                    <span className="text-sm font-medium">Your bill</span>
+                    <span className="text-sm font-medium">{t("dine.yourBill")}</span>
                     <span className="text-xs text-muted-foreground">
-                      · {bill.orderCount} order{bill.orderCount === 1 ? "" : "s"}
+                      · {t("dine.orderCount", { count: bill.orderCount })}
                     </span>
                   </div>
                   <div className="flex items-center gap-2">
@@ -553,10 +569,11 @@ export function DiningDialog({
                   <div className="border-t border-border/60 px-4 py-3">
                     <div className="space-y-1.5">
                       {bill.lines.map((line: BillLineLike) => {
-                        const summary = removalSummary(line.removeIngredients, line.note);
+                        const summary = removalSummary(line.removeIngredients, line.note, t);
+                        const row = line as BillRowWithId;
                         return (
                           <div
-                            key={`${line.name}-${summary ?? "plain"}`}
+                            key={`${row._rowId ?? line.name}-${summary ?? "plain"}`}
                             className="flex items-center justify-between gap-2 text-sm"
                           >
                             <span className="min-w-0 flex-1 text-muted-foreground">
@@ -574,20 +591,20 @@ export function DiningDialog({
                       })}
                     </div>
                     <p className="mt-3 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                      <Receipt className="size-3" /> Saved to this booking — pay at the table.
+                      <Receipt className="size-3" /> {t("dine.savedToBooking")}
                     </p>
 
                     {/* Per-user breakdown */}
                     {bill.breakdown && bill.breakdown.length > 1 && (
                       <div className="mt-3 border-t border-border/60 pt-3">
                         <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                          Split by person
+                          {t("dine.splitByPerson")}
                         </p>
                         <div className="space-y-1.5">
                           {bill.breakdown.map((person: { userId: string; name: string; orderCount: number; subtotalCents: number }) => (
                             <div key={person.userId} className="flex items-center justify-between text-xs">
                               <span className="text-muted-foreground">
-                                {person.name} ({person.orderCount} items)
+                                {person.name} ({t("dine.personItems", { count: person.orderCount })})
                               </span>
                               <span className="font-medium">{formatPrice(person.subtotalCents)}</span>
                             </div>
@@ -602,14 +619,14 @@ export function DiningDialog({
 
             {restaurantData === undefined ? (
               <div className="flex items-center justify-center gap-2 py-10 text-sm text-muted-foreground">
-                <Spinner className="size-4" /> Loading menu…
+                <Spinner className="size-4" /> {t("dine.loadingMenu")}
               </div>
             ) : grouped.length === 0 ? (
               <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
                 <ChefHat className="mx-auto size-8 text-muted-foreground/50" />
-                <p className="mt-2 text-sm font-medium">No menu items available yet</p>
+                <p className="mt-2 text-sm font-medium">{t("dine.noMenuYet")}</p>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  Want something specific? Use the “Menu ideas” tab and the kitchen will review it.
+                  {t("dine.noMenuHint")}
                 </p>
               </div>
             ) : (
@@ -626,7 +643,7 @@ export function DiningDialog({
                       {items.map((item) => {
                         const entry = cart[item._id];
                         const customizable = (item.ingredients ?? []).length > 0;
-                        const summary = entry ? removalSummary(entry.removed, entry.note) : null;
+                        const summary = entry ? removalSummary(entry.removed, entry.note, t) : null;
                         return (
                           <div
                             key={item._id}
@@ -663,7 +680,8 @@ export function DiningDialog({
                                 className="shrink-0"
                                 onClick={() => handleAdd(item)}
                               >
-                                <Plus className="size-3.5" /> {customizable ? "Customize" : "Add"}
+                                <Plus className="size-3.5" />{" "}
+                                {customizable ? t("dine.customize") : t("dine.add")}
                               </Button>
                             ) : (
                               <div className="flex shrink-0 items-center gap-1.5">
@@ -678,7 +696,7 @@ export function DiningDialog({
                                   <Button
                                     variant="ghost"
                                     size="icon-sm"
-                                    aria-label="Customize"
+                                    aria-label={t("dine.customize")}
                                     className="text-muted-foreground"
                                     onClick={() => setCustomizing({ item, existing: entry })}
                                   >
@@ -701,13 +719,13 @@ export function DiningDialog({
               <div className="sticky bottom-0 -mx-1 rounded-2xl border border-border bg-card p-3.5 shadow-sm">
                 <div className="flex items-center justify-between text-sm">
                   <span className="font-medium">
-                    {cartCount} {cartCount === 1 ? "item" : "items"}
+                    {t("dine.cartCount", { count: cartCount })}
                   </span>
                   <span className="text-base font-bold">{formatPrice(cartTotal)}</span>
                 </div>
                 <div className="mt-2 space-y-1.5">
                   {cartItems.map(({ item, entry }) => {
-                    const summary = removalSummary(entry.removed, entry.note);
+                    const summary = removalSummary(entry.removed, entry.note, t);
                     return (
                       <div key={item!._id} className="flex items-center justify-between gap-2 text-xs text-muted-foreground">
                         <span className="min-w-0">
@@ -721,14 +739,14 @@ export function DiningDialog({
                 </div>
                 <div className="mt-2 space-y-1.5">
                   <Label htmlFor="order-note" className="text-xs text-muted-foreground">
-                    Note for the kitchen <span className="font-normal">(optional)</span>
+                    {t("dine.noteForKitchen")} <span className="font-normal">{t("dine.optional")}</span>
                   </Label>
                   <Input
                     id="order-note"
                     value={orderNote}
                     onChange={(e) => setOrderNote(e.target.value)}
                     maxLength={200}
-                    placeholder="e.g. No onions on the pasta, extra parmesan"
+                    placeholder={t("dine.notePlaceholder")}
                   />
                 </div>
                 <Button className="mt-3 w-full" onClick={handlePlaceOrder} disabled={busy === "order"}>
@@ -737,7 +755,7 @@ export function DiningDialog({
                   ) : (
                     <Send className="size-4" />
                   )}
-                  Send order to the kitchen
+                  {t("dine.sendOrder")}
                 </Button>
               </div>
             )}
@@ -749,7 +767,7 @@ export function DiningDialog({
           <div className="space-y-4">
             <div>
               <p className="mb-2 text-xs font-medium text-muted-foreground">
-                One tap and the waiter or manager gets it instantly — no hunting for someone.
+                {t("dine.assistIntro")}
               </p>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                 {ASSIST_OPTIONS.map((o) => (
@@ -765,14 +783,14 @@ export function DiningDialog({
                     )}
                   >
                     <o.icon className="size-4 shrink-0 text-primary" />
-                    {o.label}
+                    {t(o.key)}
                   </button>
                 ))}
               </div>
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="assist-note" className="text-xs text-muted-foreground">
-                Add a detail <span className="font-normal">(optional)</span>
+                {t("dine.addDetail")} <span className="font-normal">{t("dine.optional")}</span>
               </Label>
               <Textarea
                 id="assist-note"
@@ -782,20 +800,20 @@ export function DiningDialog({
                 onChange={(e) => setAssistNote(e.target.value)}
                 placeholder={
                   assistTemplate === "custom"
-                    ? "e.g. Could we move to a quieter table?"
-                    : "e.g. Two glasses, please"
+                    ? t("dine.assistPlaceholderCustom")
+                    : t("dine.assistPlaceholder")
                 }
               />
             </div>
             <Button className="w-full" onClick={handleSendAssist} disabled={busy === "assist"}>
               {busy === "assist" ? <Spinner className="size-4" /> : <Send className="size-4" />}
-              Send to the team
+              {t("dine.sendToTeam")}
             </Button>
 
             {(assists ?? []).length > 0 && (
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Your requests
+                  {t("dine.yourRequests")}
                 </p>
                 {(assists ?? []).map((a) => (
                   <div
@@ -807,12 +825,15 @@ export function DiningDialog({
                   >
                     <div className="min-w-0">
                       <p className="text-sm font-medium">
-                        {ASSIST_OPTIONS.find((o) => o.value === a.template)?.label ?? a.template}
+                        {(() => {
+                          const opt = ASSIST_OPTIONS.find((o) => o.value === a.template);
+                          return opt ? t(opt.key) : a.template;
+                        })()}
                       </p>
                       {a.note && <p className="mt-0.5 text-xs text-muted-foreground">“{a.note}”</p>}
                       <p className="mt-1 text-[10px] text-muted-foreground">
                         {formatClock(a.createdAt)}
-                        {a.resolvedAt ? ` · handled at ${formatClock(a.resolvedAt)}` : ""}
+                        {a.resolvedAt ? ` · ${t("dine.handledAt", { time: formatClock(a.resolvedAt) })}` : ""}
                       </p>
                     </div>
                     <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -825,7 +846,7 @@ export function DiningDialog({
                               : "bg-muted text-muted-foreground",
                         )}
                       >
-                        {a.status === "open" ? "Sent" : a.status}
+                        {a.status === "open" ? t("dine.sent") : a.status}
                       </Badge>
                       {a.status === "open" && (
                         <Button
@@ -835,7 +856,7 @@ export function DiningDialog({
                           disabled={busy === a._id}
                           onClick={() => handleCancelAssist(a._id)}
                         >
-                          Withdraw
+                          {t("dine.withdraw")}
                         </Button>
                       )}
                     </div>
@@ -852,19 +873,19 @@ export function DiningDialog({
             <div className="space-y-3 rounded-xl border border-dashed border-border p-3.5">
               <div className="space-y-1.5">
                 <Label htmlFor="menu-name" className="text-xs font-medium">
-                  What would you like? *
+                  {t("dine.menuIdeaQuestion")}
                 </Label>
                 <Input
                   id="menu-name"
                   value={menuName}
                   onChange={(e) => setMenuName(e.target.value)}
                   maxLength={100}
-                  placeholder="e.g. Dairy-free tiramisù, matcha latte, garlic bread"
+                  placeholder={t("dine.menuIdeaPlaceholder")}
                 />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="menu-desc" className="text-xs font-medium">
-                  Details <span className="font-normal text-muted-foreground">(optional)</span>
+                  {t("dine.details")} <span className="font-normal text-muted-foreground">{t("dine.optional")}</span>
                 </Label>
                 <Textarea
                   id="menu-desc"
@@ -872,19 +893,19 @@ export function DiningDialog({
                   value={menuDesc}
                   maxLength={400}
                   onChange={(e) => setMenuDesc(e.target.value)}
-                  placeholder="e.g. No eggs please — my partner has an allergy."
+                  placeholder={t("dine.menuIdeaDescPlaceholder")}
                 />
               </div>
               <Button className="w-full" onClick={handleCreateMenuRequest} disabled={busy === "menu"}>
                 {busy === "menu" ? <Spinner className="size-4" /> : <Send className="size-4" />}
-                Send request to the kitchen
+                {t("dine.sendMenuRequest")}
               </Button>
             </div>
 
             {(menuReqs ?? []).length > 0 && (
               <div className="space-y-2">
                 <p className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
-                  Your requests
+                  {t("dine.yourRequests")}
                 </p>
                 {(menuReqs ?? []).map((m) => {
                   const meta = MENU_REQUEST_STATUS[m.status] ?? MENU_REQUEST_STATUS.new;
@@ -892,13 +913,13 @@ export function DiningDialog({
                     <div key={m._id} className="rounded-xl border border-border/70 bg-card px-3.5 py-3">
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-medium">{m.name}</p>
-                        <Badge className={cn(meta.cls)}>{meta.label}</Badge>
+                        <Badge className={cn(meta.cls)}>{t(meta.key)}</Badge>
                       </div>
                       {m.description && (
                         <p className="mt-1 text-xs text-muted-foreground">“{m.description}”</p>
                       )}
                       <p className="mt-1.5 text-[10px] text-muted-foreground">
-                        Sent {formatClock(m.createdAt)}
+                        {t("dine.sentAtTime", { time: formatClock(m.createdAt) })}
                       </p>
                     </div>
                   );
@@ -910,10 +931,10 @@ export function DiningDialog({
 
         <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-muted-foreground">
           <span className="flex items-center gap-1">
-            <Users className="size-3" /> Party of {booking?.partySize ?? 0}
+            <Users className="size-3" /> {t("dine.partyOf", { count: booking?.partySize ?? 0 })}
           </span>
           <span className="flex items-center gap-1">
-            <BellRing className="size-3" /> Live — updates arrive instantly
+            <BellRing className="size-3" /> {t("dine.liveUpdates")}
           </span>
         </div>
           </>
@@ -944,6 +965,7 @@ function CustomizeSheet({
   onClose: () => void;
   onConfirm: (entry: CartEntry) => void;
 }) {
+  const { t } = useTranslation();
   const [qty, setQty] = useState(initial?.qty ?? 1);
   const [removed, setRemoved] = useState<string[]>(initial?.removed ?? []);
   const [note, setNote] = useState(initial?.note ?? "");
@@ -971,9 +993,9 @@ function CustomizeSheet({
   return (
     <div className="flex flex-col">
       <div className="mb-1">
-        <p className="text-base font-semibold tracking-tight">Customize {item.name}</p>
+        <p className="text-base font-semibold tracking-tight">{t("dine.customizeTitle", { name: item.name })}</p>
         <p className="mt-1 text-sm text-muted-foreground">
-          Tap any ingredient to leave it out — the kitchen sees exactly what you want.
+          {t("dine.customizeHint")}
         </p>
       </div>
 
@@ -993,9 +1015,9 @@ function CustomizeSheet({
 
         {ingredients.length > 0 ? (
           <div>
-            <p className="text-sm font-medium">Leave something out?</p>
+            <p className="text-sm font-medium">{t("dine.leaveOut")}</p>
             <p className="mb-1.5 text-[11px] text-muted-foreground">
-              Tap an ingredient to remove it from this dish.
+              {t("dine.leaveOutHint")}
             </p>
             <div className="flex flex-wrap gap-1.5">
               {ingredients.map((ing) => {
@@ -1012,7 +1034,7 @@ function CustomizeSheet({
                         : "border-border bg-card text-muted-foreground hover:border-primary/40 hover:text-foreground",
                     )}
                   >
-                    {off ? "No " : ""}
+                    {off ? t("dine.noPrefix") : ""}
                     {ing}
                   </button>
                 );
@@ -1021,13 +1043,13 @@ function CustomizeSheet({
           </div>
         ) : (
           <p className="text-xs text-muted-foreground">
-            No ingredient list on this one — add a note below if you&apos;d like to change something.
+            {t("dine.noIngredients")}
           </p>
         )}
 
         <div className="space-y-1.5">
           <Label htmlFor="customize-note" className="text-xs text-muted-foreground">
-            Extra instructions <span className="font-normal">(optional)</span>
+            {t("dine.extraInstructions")} <span className="font-normal">{t("dine.optional")}</span>
           </Label>
           <Textarea
             id="customize-note"
@@ -1035,17 +1057,19 @@ function CustomizeSheet({
             value={note}
             maxLength={120}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="e.g. Extra parmesan on the side"
+            placeholder={t("dine.customizeNotePlaceholder")}
           />
         </div>
 
         <div className="flex gap-3">
           <Button variant="outline" className="flex-1" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </Button>
           <Button className="flex-1" onClick={handleConfirm}>
-            <Plus className="size-4" /> Add {qty > 1 ? `${qty} ` : ""}to order ·{" "}
-            {formatPrice(item.priceCents * qty)}
+            <Plus className="size-4" />{" "}
+            {qty > 1
+              ? t("dine.addMany", { count: qty, price: formatPrice(item.priceCents * qty) })
+              : t("dine.addOne", { price: formatPrice(item.priceCents * qty) })}
           </Button>
         </div>
       </div>

@@ -67,6 +67,8 @@ export function timesForWindow(start: string, end: string, step: number): string
 /** Legacy default: the 30-minute grid between open and close, end exclusive. */
 export function defaultGridTimes(open: string, close: string, step = 30): string[] {
   const startM = minutesOf(open);
+  // Degenerate step (0/negative) would loop forever — emit a single seating.
+  if (step <= 0) return [formatMinutes(startM)];
   // KB-12: same wrap-around fix — a late-night venue open 22:00 → 01:00
   // previously generated zero slots because `cur < endM` was false.
   let endM = minutesOf(close);
@@ -123,7 +125,9 @@ export function detectGap(
   if (sorted.length < 2) return null;
   let worst: { from: string; to: string; gapMin: number } | null = null;
   for (let i = 1; i < sorted.length; i++) {
-    const gap = minutesOf(sorted[i]) - minutesOf(sorted[i - 1]);
+    // Circular measurement so post-midnight windows (22:00 → 01:00) don't
+    // report a bogus ~21h gap across the wrap.
+    const gap = (((minutesOf(sorted[i]) - minutesOf(sorted[i - 1])) % 1440) + 1440) % 1440;
     if (gap > thresholdMin && (!worst || gap > worst.gapMin)) {
       worst = { from: sorted[i - 1], to: sorted[i], gapMin: gap };
     }

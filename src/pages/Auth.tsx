@@ -17,7 +17,7 @@ import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { LanguageSwitcher } from "@/components/LanguageSwitcher";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { useTranslation } from "react-i18next";
 import { AnimatePresence, motion } from "framer-motion";
 import {
@@ -35,14 +35,22 @@ interface AuthProps {
   redirectAfterAuth?: string;
 }
 
+/**
+ * Same-origin path check for post-auth redirects (M-38): rejects scheme-
+ * relative forms like "//host", "/\evil.com" and "\\evil.com" that WHATWG
+ * URL parsers treat as cross-origin, not just the plain "//" prefix.
+ */
+function safeReturnTo(returnTo: string | null | undefined): string | null {
+  if (!returnTo) return null;
+  return /^\/[^/\\]/.test(returnTo) ? returnTo : null;
+}
+
 function resolveRedirectAfterAuth(
   returnTo: string | null,
   fallback = "/dashboard",
 ) {
-  if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
-    return returnTo;
-  }
-  return fallback;
+  if (!returnTo) return fallback;
+  return safeReturnTo(returnTo) ?? fallback;
 }
 
 /** Canonical phone form: strip spaces, dashes, parens (matches backend). */
@@ -68,37 +76,32 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   // Normalize so signIn and the backend lookup use the same canonical form.
   const rawPrefill = searchParams.get("phone")?.trim();
   const prefillPhone = rawPrefill ? normalizePhone(rawPrefill) : undefined;
-  const [step, setStep] = useState<AuthStep>(
-    prefillPhone ? { phone: prefillPhone, mode: "otp" } : "enter-phone",
-  );
+  const [step, setStep] = useState<AuthStep>("enter-phone");
   const [password, setPassword] = useState("");
   const [otp, setOtp] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Check if phone has a password account (only query when we have a phone)
-  const phone = typeof step === "object" ? step.phone : undefined;
-  const hasPassword = useQuery(
-    api.users.hasPasswordAccount,
-    phone ? { phone } : "skip",
-  );
+  // M-41: the password-vs-OTP branch is decided by a single rate-limited
+  // mutation on phone submit (not a reactive query per keystroke), which
+  // shrinks the account-enumeration oracle to one call per attempt.
+  const checkPhoneAccount = useMutation(api.users.checkPhoneAccount);
 
   // Where should a freshly signed-in user land?
   //   1. Restaurant accounts that must set a new password go straight there.
   //   2. A validated same-origin returnTo wins.
   //   3. An existing profile role opens that profile's tabs.
   //   4. Fresh users go to onboarding (diner by default).
-  const resolveTarget = () => {
+  const resolveTarget = useCallback(() => {
     if (user?.mustChangePassword) return "/set-password";
-    const returnTo = searchParams.get("returnTo");
-    if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
-      return returnTo;
+    if (safeReturnTo(searchParams.get("returnTo"))) {
+      return safeReturnTo(searchParams.get("returnTo"))!;
     }
     if (user?.role === "admin") return "/admin";
     if (user?.role === "customer") return "/explore";
     if (user?.role === "owner") return "/owner";
     return resolveRedirectAfterAuth(null, redirectAfterAuth);
-  };
+  }, [user?.mustChangePassword, searchParams, user?.role, redirectAfterAuth]);
 
   useEffect(() => {
     // Don't auto-redirect while the post-first-login "set a password"
@@ -108,32 +111,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     if (!authLoading && isAuthenticated && user !== undefined && !isSetPassword) {
       navigate(resolveTarget());
     }
-  }, [authLoading, isAuthenticated, user, navigate, step]);
-
-  // Once we know whether the user has a password, route to the right step
-  useEffect(() => {
-    if (typeof step === "object" && step.mode === "otp" && hasPassword !== undefined) {
-      // If we just entered phone and know the password status
-      if (step.phone && hasPassword.exists) {
-        setStep({ phone: step.phone, mode: "password" });
-      }
-    }
-  }, [hasPassword, step]);
-
-  // Step 1: Submit phone number
-  const handlePhoneSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setIsLoading(true);
-    setError(null);
-    otpSentRef.current = false;
-    const formData = new FormData(event.currentTarget);
-    const phoneValue = normalizePhone(formData.get("phone") as string);
-    phoneRef.current = phoneValue;
-
-    // Set step to trigger the hasPassword query
-    setStep({ phone: phoneValue, mode: "otp" });
-    setIsLoading(false);
-  };
+  }, [authLoading, isAuthenticated, user, navigate, step, resolveTarget]);
 
   // Step 2a: Password login
   const handlePasswordSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -152,13 +130,26 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     }
   };
 
-  // Track whether OTP has already been auto-sent to prevent the infinite loop
-  // where setStep in handleSendOtp re-triggers this effect.
-  const otpSentRef = useRef(false);
+  // Step 1: Submit phone number — look up account type once (M-41) and
+  // branch straight to password vs OTP.
+  const handlePhoneSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setIsLoading(true);
+    setError(null);
+    otpSentRef.current = false;
+    const formData = new FormData(event.currentTarget);
+    await resolvePhone(normalizePhone(formData.get("phone") as string));
+  };
 
-  // Step 2b: Send OTP — uses a ref for the phone to avoid stale closures
-  // in the auto-send effect, and a 15s client-side timeout so the UI
-  // never stays stuck on "Sending code..." even if the backend hangs.
+  // Track whether OTP has already been sent to prevent duplicate SMS.
+  const otpSentRef = useRef(false);
+  // Generation counter for in-flight sends — a superseded send must not
+  // clobber newer UI state when it finally settles (M-39).
+  const sendGenRef = useRef(0);
+
+  // Uses a ref for the phone to avoid stale closures, and a 15s client-side
+  // timeout so the UI never stays stuck on "Sending code..." even if the
+  // backend hangs.
   const phoneRef = useRef("");
   useEffect(() => {
     if (typeof step === "object" && step.phone) phoneRef.current = step.phone;
@@ -166,37 +157,78 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
 
   const handleSendOtp = useCallback(async (force = false) => {
     const p = phoneRef.current;
-    if (!p || hasPassword?.exists) return;
+    if (!p) return;
     if (otpSentRef.current && !force) return;
     otpSentRef.current = true;
+    const gen = ++sendGenRef.current;
     setIsLoading(true);
     setError(null);
+    let timerId: ReturnType<typeof setTimeout> | undefined;
     try {
       const formData = new FormData();
       formData.set("phone", p);
-      const result = await Promise.race([
-        signIn("phone-otp", formData),
-        new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 15_000)),
+      // Safety net so a late rejection after the timeout already settled the
+      // race never becomes unhandled (M-39).
+      const sendPromise = signIn("phone-otp", formData);
+      void sendPromise.catch(() => undefined);
+      await Promise.race([
+        sendPromise,
+        new Promise((_, reject) => {
+          timerId = setTimeout(() => reject(new Error("timeout")), 15_000);
+        }),
       ]);
+      if (gen !== sendGenRef.current) return;
       setIsLoading(false);
     } catch (err) {
+      if (gen !== sendGenRef.current) return;
       console.error("OTP send error:", err);
-      setError(
-        err instanceof Error && err.message === "timeout"
-          ? t("auth.errSmsSlow")
-          : t("auth.errSendFailed")
-      );
-      otpSentRef.current = false;
+      const timedOut = err instanceof Error && err.message === "timeout";
+      setError(timedOut ? t("auth.errSmsSlow") : t("auth.errSendFailed"));
+      // On timeout the original request may still deliver — don't allow an
+      // immediate resend that would fire a second SMS (M-39).
+      if (!timedOut) otpSentRef.current = false;
       setIsLoading(false);
+    } finally {
+      clearTimeout(timerId);
     }
-  }, [signIn, hasPassword]);
+  }, [signIn, t]);
 
-  // Auto-send OTP when we determine user has no password
+  // Look up the phone once, then branch: password step vs OTP (auto-sent).
+  const resolvePhone = useCallback(
+    async (phoneValue: string) => {
+      phoneRef.current = phoneValue;
+      setIsLoading(true);
+      setError(null);
+      try {
+        const { exists } = await checkPhoneAccount({ phone: phoneValue });
+        if (exists) {
+          setStep({ phone: phoneValue, mode: "password" });
+          setIsLoading(false);
+        } else {
+          setStep({ phone: phoneValue, mode: "otp" });
+          // Sets its own loading/error state once done.
+          await handleSendOtp();
+        }
+      } catch (err) {
+        console.error("Phone lookup error:", err);
+        setError(err instanceof Error ? err.message : t("auth.errSendFailed"));
+        setIsLoading(false);
+      }
+    },
+    [checkPhoneAccount, handleSendOtp, t],
+  );
+
+  // Landing-page prefill (/auth?phone=…): run the same single lookup once.
+  const prefillResolvedRef = useRef<string | null>(null);
   useEffect(() => {
-    if (typeof step === "object" && step.mode === "otp" && step.phone && hasPassword && !hasPassword.exists && !otpSentRef.current) {
-      handleSendOtp();
+    if (
+      prefillPhone &&
+      prefillResolvedRef.current !== prefillPhone
+    ) {
+      prefillResolvedRef.current = prefillPhone;
+      void resolvePhone(prefillPhone);
     }
-  }, [hasPassword, step, handleSendOtp]);
+  }, [prefillPhone, resolvePhone]);
 
   // Step 2b: Verify OTP
   const handleOtpSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -548,7 +580,7 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
               )}
 
               {/* ─── Step 2b: OTP verify ─── */}
-              {typeof step === "object" && step.mode === "otp" && !hasPassword?.exists && (
+              {typeof step === "object" && step.mode === "otp" && (
                 <>
                   <CardHeader className="text-center">
                     <CardTitle className="flex items-center justify-center gap-2">

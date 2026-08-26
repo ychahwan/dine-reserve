@@ -1,24 +1,35 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, query, action, type MutationCtx } from "./_generated/server";
-import { api } from "./_generated/api";
+import {
+  action,
+  internalMutation,
+  internalQuery,
+  mutation,
+  query,
+  type MutationCtx,
+} from "./_generated/server";
+import { internal } from "./_generated/api";
 import { NOTIFICATION_TYPE } from "./schema";
 import type { Id, Doc } from "./_generated/dataModel";
+import { checkRateLimit } from "./rateLimit";
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Format today as YYYY-MM-DD in the server's local timezone. */
-function todayKey(): string {
-  return new Date().toISOString().slice(0, 10);
+/**
+ * Server "today" as "YYYY-MM-DD". Built from local clock components — the
+ * same way booking dates are produced elsewhere (lib/format, socialize) — so
+ * every module derives the same calendar day (L-13). Exported so
+ * socialize.ts shares this exact implementation.
+ */
+export function todayKey(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
+    now.getDate(),
+  ).padStart(2, "0")}`;
 }
 
-/**
- * Accept an optional client-supplied date so that diners near midnight can
- * still send alerts when their local date differs from UTC.  If the client
- * date is within ±1 day of the server's today, use it; otherwise fall back.
- */
 function resolveTodayKey(clientDate?: string): string {
   const serverToday = todayKey();
   if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate)) return serverToday;
@@ -35,23 +46,19 @@ function resolveTodayKey(clientDate?: string): string {
 
 type NotifyOpts = {
   restaurantId: Id<"restaurants">;
-  bookingId: Id<"bookings">;
+  bookingId?: Id<"bookings">;
   userId: Id<"users">;
   type: Doc<"notifications">["type"];
   message?: string;
 };
 
-/**
- * Insert a notification row for the restaurant dashboard.  Called inside other
- * mutations so it shares the same transaction.
- */
 export async function notifyRestaurant(
   ctx: MutationCtx,
   opts: NotifyOpts,
 ): Promise<Id<"notifications">> {
   return ctx.db.insert("notifications", {
     restaurantId: opts.restaurantId,
-    bookingId: opts.bookingId,
+    ...(opts.bookingId !== undefined ? { bookingId: opts.bookingId } : {}),
     userId: opts.userId,
     type: opts.type,
     message: opts.message,
@@ -61,7 +68,7 @@ export async function notifyRestaurant(
 }
 
 // ---------------------------------------------------------------------------
-// sendForBooking — diner sends a check-in alert (Idea #31)
+// sendForBooking
 // ---------------------------------------------------------------------------
 
 export const sendForBooking = mutation({
@@ -87,9 +94,17 @@ export const sendForBooking = mutation({
     if (booking.status !== "confirmed")
       throw new Error("This booking is no longer confirmed.");
 
-    // KB-04: use clientDate when available so diners near midnight aren't
-    // blocked by the UTC clock running a day ahead.
-    if (booking.date < resolveTodayKey(clientDate))
+    // H-7: alerts are only allowed ON the day of the booking (not days
+    // ahead), and throttled per user+booking so the owner feed can't be
+    // flooded.
+    await checkRateLimit(ctx, {
+      key: `sendForBooking:${bookingId}`,
+      userId,
+      limit: 10,
+      windowMs: 60 * 60_000,
+    });
+
+    if (booking.date !== resolveTodayKey(clientDate))
       throw new Error("You can send alerts on the day of your booking.");
 
     await notifyRestaurant(ctx, {
@@ -105,7 +120,7 @@ export const sendForBooking = mutation({
 });
 
 // ---------------------------------------------------------------------------
-// myAlerts — diner's own sent alerts (for the "notified" badge on cards)
+// myAlerts
 // ---------------------------------------------------------------------------
 
 export const myAlerts = query({
@@ -120,27 +135,43 @@ export const myAlerts = query({
       "special_request",
     ]);
 
-    const rows = await ctx.db
-      .query("notifications")
-      .withIndex("by_user", (q) => q.eq("userId", userId))
-      .order("desc")
-      .take(50);
-
-    return rows
-      .filter((r) => ALERT_TYPES.has(r.type))
-      .map((r) => ({
-        _id: r._id,
-        bookingId: r.bookingId,
-        type: r.type,
-        message: r.message,
-        createdAt: r.createdAt,
-      }));
+    // L-12: walk the feed in pages and filter as we go — a bare take(50)
+    // fills the page with non-alert rows so older matching alerts vanish.
+    const results: {
+      _id: Id<"notifications">;
+      bookingId: Id<"bookings"> | undefined;
+      type: string;
+      message: string | undefined;
+      createdAt: number;
+    }[] = [];
+    const PAGE_SIZE = 200;
+    let cursor: string | null = null;
+    for (let page = 0; page < 10 && results.length < 50; page++) {
+      const batch = await ctx.db
+        .query("notifications")
+        .withIndex("by_user", (q) => q.eq("userId", userId))
+        .order("desc")
+        .paginate({ numItems: PAGE_SIZE, cursor });
+      for (const r of batch.page) {
+        if (!ALERT_TYPES.has(r.type)) continue;
+        results.push({
+          _id: r._id,
+          bookingId: r.bookingId,
+          type: r.type,
+          message: r.message,
+          createdAt: r.createdAt,
+        });
+        if (results.length >= 50) break;
+      }
+      if (batch.isDone) break;
+      cursor = batch.continueCursor;
+    }
+    return results.slice(0, 50);
   },
 });
 
 // ---------------------------------------------------------------------------
-// forRestaurant — owner dashboard: all notifications for a restaurant,
-// optionally filtered by bookingId.  Joins with diner name + booking info.
+// forRestaurant
 // ---------------------------------------------------------------------------
 
 export const forRestaurant = query({
@@ -160,6 +191,10 @@ export const forRestaurant = query({
       .withIndex("by_restaurant", (i) => i.eq("restaurantId", restaurantId));
 
     if (bookingId) {
+      // H-4: the booking must belong to this restaurant, or an owner of A
+      // could read restaurant B's notifications by passing any booking id.
+      const booking = await ctx.db.get(bookingId);
+      if (!booking || booking.restaurantId !== restaurantId) return [];
       q = ctx.db
         .query("notifications")
         .withIndex("by_booking", (i) => i.eq("bookingId", bookingId));
@@ -196,7 +231,7 @@ export const forRestaurant = query({
 });
 
 // ---------------------------------------------------------------------------
-// unreadCount — owner tab badge
+// unreadCount
 // ---------------------------------------------------------------------------
 
 export const unreadCount = query({
@@ -222,7 +257,7 @@ export const unreadCount = query({
 });
 
 // ---------------------------------------------------------------------------
-// markRead — mark a single notification as read
+// markRead
 // ---------------------------------------------------------------------------
 
 export const markRead = mutation({
@@ -245,7 +280,7 @@ export const markRead = mutation({
 });
 
 // ---------------------------------------------------------------------------
-// markAllRead — mark all notifications for a restaurant as read
+// markAllRead
 // ---------------------------------------------------------------------------
 
 export const markAllRead = mutation({
@@ -279,16 +314,18 @@ export const markAllRead = mutation({
 // Firebase Cloud Messaging — push notification token management
 // ===========================================================================
 
-/**
- * Save a push notification token for a user
- */
 export const saveToken = mutation({
   args: {
     token: v.string(),
     platform: v.union(v.literal("android"), v.literal("ios"), v.literal("web")),
-    userId: v.id("users"),
   },
   handler: async (ctx, args) => {
+    // C-2: the token is always bound to the CALLER — userId is never accepted
+    // as an argument, or any client could route a victim's pushes to its own
+    // device.
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Please sign in.");
+
     const existing = await ctx.db
       .query("notificationTokens")
       .withIndex("by_token", (q) => q.eq("token", args.token))
@@ -296,7 +333,7 @@ export const saveToken = mutation({
 
     if (existing) {
       await ctx.db.patch(existing._id, {
-        userId: args.userId,
+        userId,
         platform: args.platform,
         lastUsed: Date.now(),
         active: true,
@@ -307,7 +344,7 @@ export const saveToken = mutation({
     return await ctx.db.insert("notificationTokens", {
       token: args.token,
       platform: args.platform,
-      userId: args.userId,
+      userId,
       createdAt: Date.now(),
       lastUsed: Date.now(),
       active: true,
@@ -315,29 +352,46 @@ export const saveToken = mutation({
   },
 });
 
-/**
- * Remove a push notification token
- */
 export const removeToken = mutation({
   args: {
     token: v.string(),
   },
   handler: async (ctx, args) => {
+    // L-9: public (called on logout) but restricted to the caller's own
+    // tokens so no one can deactivate another user's device.
+    const userId = await getAuthUserId(ctx);
+    if (userId === null) throw new Error("Please sign in.");
+
     const existing = await ctx.db
       .query("notificationTokens")
       .withIndex("by_token", (q) => q.eq("token", args.token))
       .first();
 
-    if (existing) {
-      await ctx.db.patch(existing._id, { active: false });
-    }
+    if (!existing || existing.userId !== userId)
+      throw new Error("Token not found.");
+    await ctx.db.patch(existing._id, { active: false });
   },
 });
 
-/**
- * Get all active tokens for a user
- */
 export const getUserTokens = query({
+  args: {
+    userId: v.id("users"),
+  },
+  handler: async (ctx, args) => {
+    // C-4: a caller may only enumerate their OWN tokens.
+    const authUserId = await getAuthUserId(ctx);
+    if (authUserId === null || authUserId !== args.userId) return [];
+
+    return await ctx.db
+      .query("notificationTokens")
+      .withIndex("by_user", (q) => q.eq("userId", args.userId))
+      .filter((q) => q.eq(q.field("active"), true))
+      .collect();
+  },
+});
+
+/** Internal twin of getUserTokens for push-sending to an arbitrary target. */
+export const _getUserTokensForPush = internalQuery({
   args: {
     userId: v.id("users"),
   },
@@ -351,9 +405,11 @@ export const getUserTokens = query({
 });
 
 /**
- * Get all active tokens (for broadcasting)
+ * Internal dump of every active token — C-3: never exposed as a public query
+ * (the former public `getAllActiveTokens` was an unauthenticated credential
+ * dump). Used only by the broadcast action.
  */
-export const getAllActiveTokens = query({
+export const _getAllActiveTokensForPush = internalQuery({
   handler: async (ctx) => {
     return await ctx.db
       .query("notificationTokens")
@@ -362,127 +418,7 @@ export const getAllActiveTokens = query({
   },
 });
 
-/**
- * Send a push notification to a specific user
- */
-export const sendToUser = action({
-  args: {
-    userId: v.id("users"),
-    title: v.string(),
-    body: v.string(),
-    data: v.optional(v.any()),
-  },
-  handler: async (ctx, args) => {
-    const tokens = await ctx.runQuery(api.notifications.getUserTokens, {
-      userId: args.userId,
-    });
-
-    if (tokens.length === 0) {
-      console.log("No active tokens for user:", args.userId);
-      return { sent: 0 };
-    }
-
-    const serverKey = process.env.FIREBASE_SERVER_KEY;
-    if (!serverKey) {
-      console.error("FIREBASE_SERVER_KEY not configured");
-      return { sent: 0, error: "Server key not configured" };
-    }
-
-    let sentCount = 0;
-    for (const tokenRecord of tokens) {
-      try {
-        const response = await fetch("https://fcm.googleapis.com/fcm/send", {
-          method: "POST",
-          headers: {
-            Authorization: `key=${serverKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            to: tokenRecord.token,
-            notification: {
-              title: args.title,
-              body: args.body,
-            },
-            data: args.data || {},
-          }),
-        });
-
-        if (response.ok) {
-          sentCount++;
-          await ctx.runMutation(api.notifications.updateTokenLastUsed, {
-            tokenId: tokenRecord._id,
-          });
-        }
-      } catch (error) {
-        console.error("Failed to send notification:", error);
-      }
-    }
-
-    return { sent: sentCount, total: tokens.length };
-  },
-});
-
-/**
- * Send a broadcast notification to all users
- */
-export const broadcast = action({
-  args: {
-    title: v.string(),
-    body: v.string(),
-    data: v.optional(v.any()),
-  },
-  handler: async (ctx, args) => {
-    const tokens = await ctx.runQuery(api.notifications.getAllActiveTokens);
-
-    if (tokens.length === 0) {
-      return { sent: 0 };
-    }
-
-    const serverKey = process.env.FIREBASE_SERVER_KEY;
-    if (!serverKey) {
-      return { sent: 0, error: "Server key not configured" };
-    }
-
-    const BATCH_SIZE = 500;
-    let sentCount = 0;
-
-    for (let i = 0; i < tokens.length; i += BATCH_SIZE) {
-      const batch = tokens.slice(i, i + BATCH_SIZE);
-      const registration_ids = batch.map((t) => t.token);
-
-      try {
-        const response = await fetch("https://fcm.googleapis.com/fcm/send", {
-          method: "POST",
-          headers: {
-            Authorization: `key=${serverKey}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            registration_ids,
-            notification: {
-              title: args.title,
-              body: args.body,
-            },
-            data: args.data || {},
-          }),
-        });
-
-        if (response.ok) {
-          sentCount += registration_ids.length;
-        }
-      } catch (error) {
-        console.error("Failed to send batch notification:", error);
-      }
-    }
-
-    return { sent: sentCount, total: tokens.length };
-  },
-});
-
-/**
- * Update token last used timestamp
- */
-export const updateTokenLastUsed = mutation({
+export const updateTokenLastUsed = internalMutation({
   args: {
     tokenId: v.id("notificationTokens"),
   },
@@ -493,10 +429,7 @@ export const updateTokenLastUsed = mutation({
   },
 });
 
-/**
- * Clean up old inactive tokens (run periodically)
- */
-export const cleanupTokens = mutation({
+export const cleanupTokens = internalMutation({
   args: {
     olderThanDays: v.optional(v.number()),
   },
@@ -521,5 +454,198 @@ export const cleanupTokens = mutation({
     }
 
     return { deleted };
+  },
+});
+
+// ===========================================================================
+// FCM HTTP v1 — push notification sending (Web Crypto API, no Node.js)
+// ===========================================================================
+
+/** Base64url-encode a string without padding. */
+function b64url(input: string): string {
+  return btoa(input)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+/** Import a PEM PKCS#8 private key for RS256 signing. */
+async function importPrivateKey(pem: string): Promise<CryptoKey> {
+  const body = pem
+    .replace("-----BEGIN PRIVATE KEY-----", "")
+    .replace("-----END PRIVATE KEY-----", "")
+    .replace(/\s+/g, "");
+  const der = Uint8Array.from(atob(body), (c) => c.charCodeAt(0));
+  return crypto.subtle.importKey(
+    "pkcs8",
+    der,
+    { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+}
+
+/** Get an OAuth2 access token via Google's JWT bearer flow (RFC 7523). */
+async function getAccessToken(saJson: string): Promise<string> {
+  const sa = JSON.parse(saJson);
+  const now = Math.floor(Date.now() / 1000);
+
+  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = b64url(
+    JSON.stringify({
+      iss: sa.client_email,
+      scope: "https://www.googleapis.com/auth/firebase.messaging",
+      aud: "https://oauth2.googleapis.com/token",
+      exp: now + 3600,
+      iat: now,
+    }),
+  );
+
+  const key = await importPrivateKey(sa.private_key);
+  const sig = await crypto.subtle.sign(
+    "RSASSA-PKCS1-v1_5",
+    key,
+    new TextEncoder().encode(`${header}.${claims}`),
+  );
+
+  const jwt = `${header}.${claims}.${b64url(String.fromCharCode(...new Uint8Array(sig)))}`;
+
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: `grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=${jwt}`,
+  });
+
+  if (!res.ok) throw new Error(`Token exchange failed: ${await res.text()}`);
+  const data = (await res.json()) as { access_token: string };
+  return data.access_token;
+}
+
+/** Send a single FCM v1 message. */
+async function sendFcmV1(
+  token: string,
+  title: string,
+  body: string,
+  data?: Record<string, string>,
+  accessToken?: string,
+  projectId?: string,
+): Promise<boolean> {
+  if (!accessToken || !projectId) return false;
+  try {
+    const res = await fetch(
+      `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          message: {
+            token,
+            notification: { title, body },
+            ...(data && { data }),
+          },
+        }),
+      },
+    );
+    if (!res.ok) {
+      console.error(`FCM v1 ${res.status}:`, await res.text());
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error("FCM send error:", err);
+    return false;
+  }
+}
+
+/** Resolve service account credentials (cached per invocation). */
+async function resolveCredentials() {
+  const saJson = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!saJson) return null;
+  const projectId = JSON.parse(saJson).project_id;
+  const accessToken = await getAccessToken(saJson);
+  return { projectId, accessToken };
+}
+
+/**
+ * Send a push notification to a specific user
+ */
+export const sendToUser = action({
+  args: {
+    userId: v.id("users"),
+    title: v.string(),
+    body: v.string(),
+    data: v.optional(v.any()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ sent: number; total?: number; error?: string }> => {
+    const tokens = await ctx.runQuery(internal.notifications._getUserTokensForPush, {
+      userId: args.userId,
+    });
+    if (tokens.length === 0) return { sent: 0 };
+
+    const creds = await resolveCredentials();
+    if (!creds) return { sent: 0, error: "FIREBASE_SERVICE_ACCOUNT not configured" };
+
+    let sent = 0;
+    for (const t of tokens) {
+      if (
+        await sendFcmV1(
+          t.token,
+          args.title,
+          args.body,
+          args.data as Record<string, string> | undefined,
+          creds.accessToken,
+          creds.projectId,
+        )
+      ) {
+        sent++;
+        await ctx.runMutation(internal.notifications.updateTokenLastUsed, {
+          tokenId: t._id,
+        });
+      }
+    }
+    return { sent, total: tokens.length };
+  },
+});
+
+/**
+ * Send a broadcast notification to all users
+ */
+export const broadcast = action({
+  args: {
+    title: v.string(),
+    body: v.string(),
+    data: v.optional(v.any()),
+  },
+  handler: async (
+    ctx,
+    args,
+  ): Promise<{ sent: number; total?: number; error?: string }> => {
+    const tokens = await ctx.runQuery(internal.notifications._getAllActiveTokensForPush);
+    if (tokens.length === 0) return { sent: 0 };
+
+    const creds = await resolveCredentials();
+    if (!creds) return { sent: 0, error: "FIREBASE_SERVICE_ACCOUNT not configured" };
+
+    let sent = 0;
+    for (const t of tokens) {
+      if (
+        await sendFcmV1(
+          t.token,
+          args.title,
+          args.body,
+          args.data as Record<string, string> | undefined,
+          creds.accessToken,
+          creds.projectId,
+        )
+      )
+        sent++;
+    }
+    return { sent, total: tokens.length };
   },
 });

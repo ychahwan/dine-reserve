@@ -1,4 +1,5 @@
 import { CustomerShell } from "@/components/CustomerShell";
+import { WalkInDialog } from "@/components/WalkInDialog";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -120,8 +121,8 @@ export default function RestaurantDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
-  const { user } = useAuth();
-  const { t } = useTranslation();
+  const { user, isLoading } = useAuth();
+  const { t, i18n } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: id as never });
   const reviewsData = useQuery(api.reviews.listForRestaurant, { restaurantId: id as never });
   const stories = useQuery(api.stories.forRestaurant, { restaurantId: id as never });
@@ -200,9 +201,15 @@ export default function RestaurantDetail() {
   const myQueueEntries = useQuery(api.queue.myEntries);
   const [queueEntryId, setQueueEntryId] = useState<string | null>(null);
   const [queuePosition, setQueuePosition] = useState<number | null>(null);
-  const [bookingResult, setBookingResult] = useState<{ code: string; name: string; time: string; section: string } | null>(null);
+  const [queueSlow, setQueueSlow] = useState(false);
+  const [queuedOccasion, setQueuedOccasion] = useState<string | null>(null);
+  const [bookingResult, setBookingResult] = useState<{ code: string; time: string; section: string; occasion: string | null } | null>(null);
   const [bookingError, setBookingError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+
+  // H-18: Explore cards link here with ?walkin=true to open the walk-in flow.
+  const wantsWalkIn = searchParams.get("walkin") === "true";
+  const [walkInOpen, setWalkInOpen] = useState(wantsWalkIn);
 
   // Waitlist for sold-out times
   const [waitlistSlot, setWaitlistSlot] = useState<{ sectionId: string; sectionName: string; time: string; remaining: number } | null>(null);
@@ -215,10 +222,23 @@ export default function RestaurantDetail() {
     setSelectedSlot(null);
   }, [date, seatPref, nonSmoking, partySize, refresh]);
 
-  const days = useMemo(
-    () => Array.from({ length: DAYS_TO_SHOW }, (_, i) => dateFromNow(i)),
-    [],
-  );
+  const [todayKey, setTodayKey] = useState(today());
+  useEffect(() => {
+    // L-29: keep the date strip anchored to "today" across midnight.
+    const iv = setInterval(() => setTodayKey(today()), 60_000);
+    return () => clearInterval(iv);
+  }, []);
+  const days = useMemo(() => {
+    const base = new Date(`${todayKey}T00:00:00`);
+    return Array.from({ length: DAYS_TO_SHOW }, (_, i) => {
+      const d = new Date(base);
+      d.setDate(d.getDate() + i);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    });
+  }, [todayKey]);
 
   const availableSlots = useMemo(() => {
     if (!availability || !availability.open) return [];
@@ -282,8 +302,11 @@ export default function RestaurantDetail() {
     if (!selectedSlot || !id) return;
     // KB-20: an anonymous visitor who fills the booking sheet shouldn't get a
     // raw "please sign in" error — send them to sign in and bring them back
-    // to this exact restaurant/date/party selection afterwards.
+    // to this exact restaurant/date/party selection afterwards. While auth is
+    // still resolving, do nothing (the button is disabled meanwhile) so a
+    // signed-in diner on a slow connection never loses their form state.
     if (!user) {
+      if (isLoading) return;
       const current = `${location.pathname}${location.search}`;
       navigate(`/auth?returnTo=${encodeURIComponent(current)}`);
       return;
@@ -307,6 +330,7 @@ export default function RestaurantDetail() {
       if (!res?.entry) throw new Error("Could not join the booking queue.");
       setQueueEntryId(res.entry._id);
       setQueuePosition(res.position ?? null);
+      setQueuedOccasion(occasion);
       setConfirmOpen(false);
     } catch (err) {
       setBookingError(err instanceof Error ? err.message : "Could not book that time.");
@@ -322,48 +346,61 @@ export default function RestaurantDetail() {
     [myQueueEntries, queueEntryId],
   );
 
-  // KB-28: if the scheduled queue drain never resolves the entry (a rare
-  // scheduler hiccup), the "Holding your table…" overlay would hang forever.
-  // After 45s, surface a friendly error with the option to try again.
+  // KB-28: if the scheduled queue drain is slower than usual, say so and
+  // offer an escape — but NEVER abandon the entry. The FIFO drain may still
+  // book the table after we stop showing the overlay, and the entry's own
+  // terminal state (booked/failed) is what declares success or failure.
   useEffect(() => {
     if (!queueEntryId) return;
-    const timer = setTimeout(() => {
-      setQueueEntryId(null);
-      setQueuePosition(null);
-      setBookingError(t("detail.errQueueTimeout"));
-      setSubmitting(false);
-      toast.error(t("detail.errQueueTimeout"));
-    }, 45_000);
+    const timer = setTimeout(() => setQueueSlow(true), 45_000);
     return () => clearTimeout(timer);
-  }, [queueEntryId, t]);
+  }, [queueEntryId]);
+
+  const clearQueueTracking = () => {
+    setQueueEntryId(null);
+    setQueuePosition(null);
+    setQueueSlow(false);
+    setSubmitting(false);
+  };
+
+  const leaveQueue = () => {
+    clearQueueTracking();
+    toast.info(t("detail.leftQueue"));
+  };
 
   useEffect(() => {
     if (!trackedEntry) return;
     if (trackedEntry.status === "booked" && trackedEntry.code) {
+      // L-23: capture the occasion into the result BEFORE resetting it, so
+      // the success screen's special-note branch actually renders.
       setBookingResult({
         code: trackedEntry.code,
-        name: trackedEntry.sectionName ?? "",
         time: trackedEntry.bookedTime ?? selectedSlot?.time ?? "",
         section: trackedEntry.sectionName ?? "",
+        occasion: queuedOccasion,
       });
-      setQueueEntryId(null);
-      setQueuePosition(null);
-      setSubmitting(false);
+      clearQueueTracking();
       setOccasion(null);
       setNotes("");
       toast.success(t("detail.bookedToast"));
     } else if (trackedEntry.status === "failed") {
       const msg = trackedEntry.error ?? t("detail.errNoTables");
       setBookingError(msg);
-      setQueueEntryId(null);
-      setQueuePosition(null);
-      setSubmitting(false);
+      clearQueueTracking();
       toast.error(msg);
     }
-  }, [trackedEntry]);
+  }, [trackedEntry, selectedSlot?.time, queuedOccasion, t]);
 
   const handleJoinWaitlist = async () => {
     if (!waitlistSlot || !id) return;
+    // M-26: mirror the booking flow's sign-in-and-return handling instead of
+    // surfacing a raw backend error for anonymous visitors.
+    if (!user) {
+      if (isLoading) return;
+      const current = `${location.pathname}${location.search}`;
+      navigate(`/auth?returnTo=${encodeURIComponent(current)}`);
+      return;
+    }
     setWaitlistSubmitting(true);
     setWaitlistError(null);
     try {
@@ -590,13 +627,13 @@ export default function RestaurantDetail() {
                   )}
                 >
                   <span className="text-[10px] font-medium uppercase opacity-80">
-                    {new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { weekday: "short" })}
+                    {new Date(`${d}T00:00:00`).toLocaleDateString(i18n.language, { weekday: "short" })}
                   </span>
                   <span className="text-lg font-bold leading-6">
                     {new Date(`${d}T00:00:00`).getDate()}
                   </span>
                   <span className="text-[10px] opacity-80">
-                    {new Date(`${d}T00:00:00`).toLocaleDateString("en-US", { month: "short" })}
+                    {new Date(`${d}T00:00:00`).toLocaleDateString(i18n.language, { month: "short" })}
                   </span>
                 </button>
               ))}
@@ -1112,6 +1149,16 @@ export default function RestaurantDetail() {
             <p className="mt-3 text-xs text-muted-foreground/80">
               {t("detail.queueHint")}
             </p>
+            {queueSlow && (
+              <>
+                <p className="mt-3 rounded-lg bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                  {t("detail.stillProcessing")}
+                </p>
+                <Button variant="outline" size="sm" className="mt-2" onClick={leaveQueue}>
+                  {t("detail.leaveQueue")}
+                </Button>
+              </>
+            )}
           </Card>
         </div>
       )}
@@ -1245,7 +1292,11 @@ export default function RestaurantDetail() {
               >
                 {t("common.cancel")}
               </Button>
-              <Button className="flex-1" onClick={handleConfirm} disabled={submitting || !name.trim()}>
+              <Button
+                className="flex-1"
+                onClick={handleConfirm}
+                disabled={submitting || !name.trim() || (!user && isLoading)}
+              >
                 {submitting ? <Spinner className="size-4" /> : t("detail.confirmBooking")}
               </Button>
             </div>
@@ -1336,7 +1387,7 @@ export default function RestaurantDetail() {
               <Button
                 className="flex-1"
                 onClick={handleJoinWaitlist}
-                disabled={waitlistSubmitting || !name.trim()}
+                disabled={waitlistSubmitting || !name.trim() || (!user && isLoading)}
               >
                 {waitlistSubmitting ? <Spinner className="size-4" /> : t("detail.joinWaitlist")}
               </Button>
@@ -1356,9 +1407,13 @@ export default function RestaurantDetail() {
             <p className="mt-1.5 text-sm text-muted-foreground">
               {t("detail.bookedSummary", { section: bookingResult.section || t("common.bestAvailable"), name: r.name, date: formatDate(date), time: formatTime(bookingResult.time) })}
             </p>
-            {occasion && (
+            {bookingResult?.occasion && (
               <p className="mt-3 rounded-xl bg-primary/5 px-3 py-2 text-xs font-medium text-primary">
-                {occasionEmoji(occasion)} {t("detail.specialNote", { name: r.name, occasion: occasion.toLowerCase() })}
+                {occasionEmoji(bookingResult.occasion)}{" "}
+                {t("detail.specialNote", {
+                  name: r.name,
+                  occasion: bookingResult.occasion.toLowerCase(),
+                })}
               </p>
             )}
             <div className="mt-4 rounded-2xl border border-dashed border-primary/40 bg-primary/5 py-3">
@@ -1403,6 +1458,14 @@ export default function RestaurantDetail() {
           </Card>
         </div>
       )}
+
+      {/* Walk-in check-in (H-18): auto-opened from Explore via ?walkin=true */}
+      <WalkInDialog
+        open={walkInOpen}
+        onOpenChange={setWalkInOpen}
+        restaurantId={r._id}
+        restaurantName={r.name}
+      />
     </CustomerShell>
   );
 }

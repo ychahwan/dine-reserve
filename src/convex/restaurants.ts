@@ -155,11 +155,11 @@ export const search = query({
 
     // PERF-FIX: Batch-fetch sections instead of N+1 per-restaurant queries
     if (args.seat || args.nonSmoking) {
-      const ids = filtered.map((r) => r._id);
+      const ids = new Set(filtered.map((r) => r._id));
       const allSections = await ctx.db.query("sections").collect();
       const sectionsByRestaurant = new Map<string, typeof allSections>();
       for (const s of allSections) {
-        if (ids.includes(s.restaurantId as any)) {
+        if (ids.has(s.restaurantId)) {
           const list = sectionsByRestaurant.get(s.restaurantId) ?? [];
           list.push(s);
           sectionsByRestaurant.set(s.restaurantId, list);
@@ -177,11 +177,11 @@ export const search = query({
     // PERF-FIX: Batch-fetch menu items instead of N+1 per-restaurant queries
     if (args.dietary && args.dietary.trim()) {
       const tag = args.dietary.trim().toLowerCase();
-      const ids = filtered.map((r) => r._id);
+      const ids = new Set(filtered.map((r) => r._id));
       const allItems = await ctx.db.query("menuItems").collect();
       const itemsByRestaurant = new Map<string, typeof allItems>();
       for (const item of allItems) {
-        if (ids.includes(item.restaurantId as any)) {
+        if (ids.has(item.restaurantId)) {
           const list = itemsByRestaurant.get(item.restaurantId) ?? [];
           list.push(item);
           itemsByRestaurant.set(item.restaurantId, list);

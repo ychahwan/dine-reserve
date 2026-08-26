@@ -8,7 +8,13 @@ import { encodeHexLowerCase } from "@oslojs/encoding";
 import { sha256 } from "@oslojs/crypto/sha2";
 import { v } from "convex/values";
 import { z } from "zod";
-import { mutation, query } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  query,
+  type MutationCtx,
+  type QueryCtx,
+} from "./_generated/server";
 import { api } from "./_generated/api";
 import { ROLES, SEAT_KIND, DINING_PREFS } from "./schema";
 import { parseOrThrow } from "./validation";
@@ -49,37 +55,69 @@ const profilePhoneSchema = z.string().trim().max(20, "Phone number is too long."
  * A unified "always show OTP" response would close the leak entirely but
  * would break the existing-password fast path, so we accept the tradeoff.
  */
+/**
+ * Shared lookup behind hasPasswordAccount / checkPhoneAccount.
+ */
+async function phoneHasPasswordAccount(
+  ctx: QueryCtx | MutationCtx,
+  normalized: string,
+): Promise<boolean> {
+  // Fast path: exact indexed lookup on the canonical form. New accounts
+  // are always stored canonical, so this hits for them.
+  const account = await ctx.db
+    .query("authAccounts")
+    .withIndex("providerAndAccountId", (q) =>
+      q.eq("provider", "password").eq("providerAccountId", normalized),
+    )
+    .first();
+  if (account) return true;
+
+  // Fallback: older accounts may have been stored verbatim (e.g. the OTP
+  // provider saved "+961 71 123 456" with spaces). Compare normalized
+  // values so those users still route to password login, not OTP. Bounded
+  // (KB-24): this runs unauthenticated on every phone submit, so cap the
+  // scan — `users.backfillPasswordAccounts` normalizes legacy rows, after
+  // which the fallback stops being hit.
+  // M-9: a cap-hit must NOT be reported as exists:true — that would route
+  // every new OTP user to password login once ≥2000 password accounts
+  // exist and lock them out of OTP sign-in entirely. Un-scanned remainder
+  // is treated as "no password account".
+  const passwordAccounts = await ctx.db
+    .query("authAccounts")
+    .withIndex("providerAndAccountId", (q) => q.eq("provider", "password"))
+    .take(2000);
+  return passwordAccounts.some(
+    (a) => normalizePhone(a.providerAccountId) === normalized,
+  );
+}
+
 export const hasPasswordAccount = query({
   args: { phone: v.string() },
   handler: async (ctx, { phone }) => {
     const normalized = normalizePhone(phone);
     if (!normalized) return { exists: false };
+    return { exists: await phoneHasPasswordAccount(ctx, normalized) };
+  },
+});
 
-    // Fast path: exact indexed lookup on the canonical form. New accounts
-    // are always stored canonical, so this hits for them.
-    const account = await ctx.db
-      .query("authAccounts")
-      .withIndex("providerAndAccountId", (q) =>
-        q.eq("provider", "password").eq("providerAccountId", normalized),
-      )
-      .first();
-    if (account) return { exists: true };
-
-    // Fallback: older accounts may have been stored verbatim (e.g. the OTP
-    // provider saved "+961 71 123 456" with spaces). Compare normalized
-    // values so those users still route to password login, not OTP. Bounded
-    // (KB-24): this runs unauthenticated on every phone submit, so cap the
-    // scan — `users.backfillPasswordAccounts` normalizes legacy rows, after
-    // which the fallback stops being hit.
-    const passwordAccounts = await ctx.db
-      .query("authAccounts")
-      .withIndex("providerAndAccountId", (q) => q.eq("provider", "password"))
-      .take(2000);
-    return {
-      exists: passwordAccounts.some(
-        (a) => normalizePhone(a.providerAccountId) === normalized,
-      ) || passwordAccounts.length === 2000, // un-scanned remainder: assume exists
-    };
+/**
+ * Rate-limited login-router check (the mutation Auth.tsx should call):
+ * answers exactly like hasPasswordAccount (including the M-9 fix) but
+ * throttles to 20 checks/hour per phone number so the pre-auth
+ * account-enumeration oracle can't be mass-probed.
+ */
+export const checkPhoneAccount = mutation({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    const normalized = normalizePhone(phone);
+    if (!normalized) return { exists: false };
+    await checkRateLimit(ctx, {
+      key: "checkPhoneAccount",
+      userId: normalized,
+      limit: 20,
+      windowMs: 60 * 60_000, // 20 per hour per phone
+    });
+    return { exists: await phoneHasPasswordAccount(ctx, normalized) };
   },
 });
 
@@ -89,8 +127,11 @@ export const hasPasswordAccount = query({
  * (normalized) form, so the `hasPasswordAccount` fallback scan disappears.
  * Run once via `npx convex run users:backfillPasswordAccounts`. Never
  * clobbers an id that's already taken; skips rows that are already canonical.
+ *
+ * H-8: internal — a maintenance rewrite of the credential table must never
+ * be invocable by arbitrary clients.
  */
-export const backfillPasswordAccounts = mutation({
+export const backfillPasswordAccounts = internalMutation({
   args: {},
   handler: async (ctx) => {
     const accounts = await ctx.db
@@ -360,8 +401,9 @@ export const startPhoneChange = mutation({
     });
 
     const clean = normalizePhone(newPhone);
-    if (!clean) throw new Error("Enter a phone number.");
-    if (clean.length < 8 || clean.length > 15) {
+    // M-13: enforce the shared E.164-ish format, not just length — a
+    // non-canonical login identity would break lookups and SMS delivery.
+    if (!clean || clean.length < 8 || clean.length > 15 || !/^\+\d+$/.test(clean)) {
       throw new Error("Enter a valid phone number.");
     }
     if (user.phone && normalizePhone(user.phone) === clean) {
@@ -584,6 +626,18 @@ export const deleteAccount = mutation({
 
     // Single use: delete the request, then wipe everything.
     await ctx.db.delete(pending._id);
+
+    // M-12: repeat the owned-restaurants guard at confirm time — the account
+    // may have been tagged as a restaurant owner between requesting and
+    // confirming (startAccountDelete checked, but that was earlier).
+    const owned = await ctx.db
+      .query("restaurants")
+      .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+      .collect();
+    if (owned.length > 0) {
+      throw new Error("You still own restaurants — delete those first (Owner dashboard).");
+    }
+
     await cascadeDeleteUser(ctx, userId);
     return { deleted: true };
   },

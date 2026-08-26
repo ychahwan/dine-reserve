@@ -142,9 +142,14 @@ export const remove = mutation({
       .collect();
     const reviewLedger = ledger.find((l) => l.source === "review");
     if (reviewLedger) {
+      // L-18: claw back unconditionally (floored at 0). Skipping the patch
+      // while still deleting the ledger row broke the idempotency guard and
+      // let delete/re-review cycles net-inflate points.
       const user = await ctx.db.get(review.userId);
-      if (user && (user.points ?? 0) >= reviewLedger.amount) {
-        await ctx.db.patch(review.userId, { points: (user.points ?? 0) - reviewLedger.amount });
+      if (user) {
+        await ctx.db.patch(user._id, {
+          points: Math.max(0, (user.points ?? 0) - reviewLedger.amount),
+        });
       }
       // KB-06: DELETE the ledger row instead of zeroing it. awardPoints is
       // idempotent by (userId, sourceId) and early-returns when a row exists

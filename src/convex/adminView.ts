@@ -68,8 +68,10 @@ export const overview = query({
       ctx.db.query("reviews").collect(),
     ]);
 
+    // M-17: revenue counts only completed orders — open/preparing/served are
+    // not yet money earned, cancelled never was.
     const revenueCents = orders
-      .filter((o) => o.status !== "cancelled")
+      .filter((o) => o.status === "completed")
       .reduce((s, o) => s + o.totalCents, 0);
 
     return {
@@ -114,8 +116,9 @@ export const listRestaurants = query({
           ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
           ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
         ]);
+        // M-17: completed orders only (see overview).
         const revenueCents = orders
-          .filter((o) => o.status !== "cancelled")
+          .filter((o) => o.status === "completed")
           .reduce((s, o) => s + o.totalCents, 0);
         return {
           ...r,
@@ -214,8 +217,9 @@ export const listUsers = query({
           ctx.db.query("dineOrders").withIndex("by_user", (q) => q.eq("userId", u._id)).collect(),
           ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", u._id)).collect(),
         ]);
+        // M-17: completed orders only (see overview).
         const totalSpendCents = orders
-          .filter((o) => o.status !== "cancelled")
+          .filter((o) => o.status === "completed")
           .reduce((s, o) => s + o.totalCents, 0);
         const owned = u.role === "owner" || u.role === "admin"
           ? await ctx.db.query("restaurants").withIndex("by_owner", (q) => q.eq("ownerId", u._id)).collect()

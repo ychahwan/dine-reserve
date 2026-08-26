@@ -37,7 +37,7 @@ import {
 import { ArrowLeft, Ban, Download, Loader2, MapPin, Phone, ShieldCheck, Star, Store, Trash2 } from "lucide-react";
 import { useMemo, useState } from "react";
 import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
-import { formatDate, formatPrice, formatTime } from "@/lib/format";
+import { dateFromNow, formatDate, formatPrice, formatTime, localDateKey, today } from "@/lib/format";
 import { toast } from "sonner";
 import {
   useTablePagination,
@@ -168,15 +168,14 @@ type MenuReqRow = Detail["menuRequests"][number];
 
 // ── Date presets ──
 
-function dateKey(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
-
+// Booking dates are local-calendar strings (see format.ts) — build keys from
+// local components so "Today" doesn't lag into yesterday for UTC+ zones
+// between local midnight and 03:00 (H-27).
 const DATE_PRESETS = [
-  { label: "Today", getRange: () => ({ from: dateKey(new Date()), to: dateKey(new Date()) }) },
-  { label: "Last 7 days", getRange: () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 6); return { from: dateKey(from), to: dateKey(to) }; } },
-  { label: "This month", getRange: () => { const now = new Date(); return { from: dateKey(new Date(now.getFullYear(), now.getMonth(), 1)), to: dateKey(now) }; } },
-  { label: "Last 30 days", getRange: () => { const to = new Date(); const from = new Date(); from.setDate(to.getDate() - 29); return { from: dateKey(from), to: dateKey(to) }; } },
+  { label: "Today", getRange: () => ({ from: today(), to: today() }) },
+  { label: "Last 7 days", getRange: () => ({ from: dateFromNow(-6), to: today() }) },
+  { label: "This month", getRange: () => { const now = new Date(); return { from: localDateKey(new Date(now.getFullYear(), now.getMonth(), 1)), to: today() }; } },
+  { label: "Last 30 days", getRange: () => ({ from: dateFromNow(-29), to: today() }) },
 ];
 
 // ── Main component ──

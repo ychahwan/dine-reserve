@@ -42,12 +42,31 @@ import {
   Users,
   Wand2,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { dateFromNow, formatDate, formatTime, isPastDate, occasionEmoji, today } from "@/lib/format";
 import { detectGap, gapLabel, stepLabel } from "@/lib/slotgen";
 import { DAY_ROWS, DAYS_TO_SHOW, KIND_LABEL, type Kind } from "@/lib/seating";
 import { toast } from "sonner";
+
+/**
+ * L-38: `today()` captured at mount goes stale across midnight in long-lived
+ * owner tabs — re-render when the local calendar day changes.
+ */
+// eslint-disable-next-line react-refresh/only-export-components -- shared by owner pages in this repo
+export function useToday(): string {
+  const [day, setDay] = useState(today());
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setDay((prev) => {
+        const now = today();
+        return prev === now ? prev : now;
+      });
+    }, 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+  return day;
+}
 
 // ---------------------------------------------------------------------------
 // Slot rules: service windows + one-off custom slots + diner preview
@@ -90,6 +109,7 @@ const RULE_PRESETS = [
 ];
 
 export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string; sections: SectionBrief[] }) {
+  const todayKey = useToday();
   const data = useQuery(api.slotRules.list, { restaurantId: restaurantId as never });
   const week = useQuery(api.slotRules.previewWeek, { restaurantId: restaurantId as never });
   const saveRule = useMutation(api.slotRules.saveRule);
@@ -98,9 +118,13 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
   const deleteCustomSlot = useMutation(api.slotRules.deleteCustomSlot);
 
   const [editing, setEditing] = useState<RuleDraft | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [custom, setCustom] = useState({ date: today(), time: "19:00", sectionId: "__all__", note: "" });
+  // L-38: rule editor and one-off slot form each get their own saving/error
+  // pair so a failure doesn't surface in (or disable) the sibling form.
+  const [saving, setSaving] = useState(false); // rule editor
+  const [error, setError] = useState<string | null>(null); // rule editor
+  const [customSaving, setCustomSaving] = useState(false);
+  const [customError, setCustomError] = useState<string | null>(null);
+  const [custom, setCustom] = useState({ date: todayKey, time: "19:00", sectionId: "__all__", note: "" });
   const [previewIdx, setPreviewIdx] = useState(0);
   // KB-15: window.confirm is blocked in the sandboxed preview iframe.
   const [deleteRuleConfirm, setDeleteRuleConfirm] = useState<{ id: string; name: string } | null>(null);
@@ -186,9 +210,9 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
   const handleDeleteRule = (r: (typeof rules)[number]) => setDeleteRuleConfirm({ id: r._id, name: r.name });
 
   const handleAddCustom = async () => {
-    setError(null);
-    if (!custom.time || isPastDate(custom.date)) { setError("Pick a future date and a time for the one-off slot."); return; }
-    setSaving(true);
+    setCustomError(null);
+    if (!custom.time || isPastDate(custom.date)) { setCustomError("Pick a future date and a time for the one-off slot."); return; }
+    setCustomSaving(true);
     try {
       await addCustomSlot({
         restaurantId: restaurantId as never,
@@ -197,12 +221,12 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
         sectionId: custom.sectionId === "__all__" ? undefined : (custom.sectionId as never),
         note: custom.note || undefined,
       });
-      setCustom({ date: today(), time: "19:00", sectionId: "__all__", note: "" });
+      setCustom({ date: todayKey, time: "19:00", sectionId: "__all__", note: "" });
       toast.success("One-off slot added");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not add one-off slot.");
+      setCustomError(err instanceof Error ? err.message : "Could not add one-off slot.");
     } finally {
-      setSaving(false);
+      setCustomSaving(false);
     }
   };
 
@@ -519,7 +543,7 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="space-y-1.5">
                 <Label htmlFor="c-date" className="text-xs">Date</Label>
-                <Input id="c-date" type="date" min={today()} value={custom.date} onChange={(e) => setCustom({ ...custom, date: e.target.value })} />
+                <Input id="c-date" type="date" min={todayKey} value={custom.date} onChange={(e) => setCustom({ ...custom, date: e.target.value })} />
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="c-time" className="text-xs">Time</Label>
@@ -542,9 +566,9 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
                 <Input id="c-note" value={custom.note} onChange={(e) => setCustom({ ...custom, note: e.target.value })} placeholder="e.g. Jazz night" />
               </div>
             </div>
-            {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
-            <Button size="sm" onClick={handleAddCustom} disabled={saving} className="w-full sm:w-auto">
-              {saving ? <Loader2 className="size-3.5 animate-spin" /> : <><Plus className="size-3.5" /> Add one-off slot</>}
+            {customError && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{customError}</p>}
+            <Button size="sm" onClick={handleAddCustom} disabled={customSaving} className="w-full sm:w-auto">
+              {customSaving ? <Loader2 className="size-3.5 animate-spin" /> : <><Plus className="size-3.5" /> Add one-off slot</>}
             </Button>
           </CardContent>
         </Card>
@@ -618,10 +642,18 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
 // ---------------------------------------------------------------------------
 
 export function AvailabilityTab({ restaurantId }: { restaurantId: string }) {
-  const [date, setDate] = useState(today());
+  const todayKey = useToday();
+  const [date, setDate] = useState(todayKey);
   const ensureForDate = useMutation(api.availability.ensureForDate);
   const setSlotClosed = useMutation(api.availability.setSlotClosed);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // Follow the calendar across midnight until the owner picks another day.
+  const autoDayRef = useRef(todayKey);
+  useEffect(() => {
+    if (autoDayRef.current === todayKey) return;
+    setDate((d) => (d === autoDayRef.current ? todayKey : d));
+    autoDayRef.current = todayKey;
+  }, [todayKey]);
 
   useEffect(() => {
     if (isPastDate(date)) return;
@@ -633,7 +665,8 @@ export function AvailabilityTab({ restaurantId }: { restaurantId: string }) {
     date,
   });
 
-  const days = useMemo(() => Array.from({ length: DAYS_TO_SHOW }, (_, i) => dateFromNow(i)), []);
+  // Recomputed per render so the strip stays anchored to the current day.
+  const days = Array.from({ length: DAYS_TO_SHOW }, (_, i) => dateFromNow(i));
 
   const toggle = async (slotId: string, closed: boolean) => {
     setBusyId(slotId);
@@ -729,8 +762,9 @@ export function AvailabilityTab({ restaurantId }: { restaurantId: string }) {
                       <button
                         key={sl._id}
                         onClick={() => toggle(sl._id, false)}
+                        disabled={busyId === sl._id}
                         className="rounded-xl border border-border bg-muted/40 p-2 text-center transition-all hover:bg-muted/70"
-                        title="Sold out — tap to reopen after a cancellation"
+                        title="Sold out — tap to close this time"
                       >
                         <span className="block text-xs font-semibold text-muted-foreground">{formatTime(sl.time)}</span>
                         <span className="block text-[10px] text-destructive">sold out</span>
@@ -779,7 +813,17 @@ export function AvailabilityTab({ restaurantId }: { restaurantId: string }) {
 // Bookings: owner view with status transitions
 // ---------------------------------------------------------------------------
 
+// L-31: map booking status to badge color — green only for confirmed,
+// destructive for no-shows, muted for terminal states.
+const STATUS_BADGE: Record<string, string> = {
+  confirmed: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+  completed: "bg-muted text-muted-foreground",
+  no_show: "bg-destructive/10 text-destructive",
+  cancelled: "bg-muted text-muted-foreground",
+};
+
 export function BookingsTab({ restaurantId }: { restaurantId: string }) {
+  const todayKey = useToday();
   const [scope, setScope] = useState<"today" | "week" | "all">("all");
   const [search, setSearch] = useState("");
   const [sortBy, setSortBy] = useState<"date" | "name" | "status">("date");
@@ -787,11 +831,11 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
 
   const bookings = useQuery(api.bookings.byRestaurant, {
     restaurantId: restaurantId as never,
-    date: scope === "today" ? today() : undefined,
+    date: scope === "today" ? todayKey : undefined,
   });
   const waitlist = useQuery(api.waitlist.byRestaurant, {
     restaurantId: restaurantId as never,
-    date: scope === "today" ? today() : undefined,
+    date: scope === "today" ? todayKey : undefined,
   });
   const updateStatus = useMutation(api.bookings.updateStatus);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -981,7 +1025,7 @@ export function BookingsTab({ restaurantId }: { restaurantId: string }) {
                       <CheckCircle2 className="size-3" /> Checked in
                     </Badge>
                   )}
-                  <Badge className="bg-emerald-600/10 text-emerald-700 dark:text-emerald-400">{b.status}</Badge>
+                  <Badge className={STATUS_BADGE[b.status] ?? "bg-muted text-muted-foreground"}>{b.status}</Badge>
                 </div>
               </div>
               <Separator className="my-3" />
@@ -1044,7 +1088,9 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
     if (!bookings) return undefined;
     const map = new Map<string, CustomerSummary>();
     for (const b of bookings) {
-      const key = b.phone ?? b.name; // group by phone if available, else name
+      // H-19: group by the stable user id (phone/name are display-only fields)
+      // so distinct guests sharing a name or phone aren't merged.
+      const key = b.userId || b.phone || b.name;
       const existing = map.get(key);
       if (existing) {
         existing.totalVisits++;
@@ -1114,7 +1160,18 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
     if (!filtered) return;
     const headers = ["Name", "Phone", "Email", "Total visits", "Total guests", "Last visit", "Statuses"];
     const rows = filtered.map((c) => [c.name, c.phone ?? "", c.email ?? "", c.totalVisits, c.totalGuests, c.lastVisit, c.statuses.join(", ")]);
-    const csv = [headers, ...rows].map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+    const csv = [headers, ...rows]
+      .map((row) =>
+        row
+          .map((v) => {
+            // H-21: neutralize spreadsheet formula prefixes (=,+,-,@) so
+            // diner-controlled cells can't execute when opened in Excel/Sheets.
+            const s = String(v);
+            return `"${(/^[=+\-@]/.test(s) ? `'${s}` : s).replace(/"/g, '""')}"`;
+          })
+          .join(","),
+      )
+      .join("\n");
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1165,7 +1222,7 @@ export function OwnerCustomersTab({ restaurantId }: { restaurantId: string }) {
       ) : (
         <div className="space-y-2">
           {filtered.map((c) => (
-            <Card key={c.phone ?? c.name} className={cn("rounded-2xl border-border/70 p-4 shadow-sm", blockedIds.has(c.userId) && "opacity-60")}>
+            <Card key={c.userId} className={cn("rounded-2xl border-border/70 p-4 shadow-sm", blockedIds.has(c.userId) && "opacity-60")}>
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <p className="flex items-center gap-2 font-semibold">

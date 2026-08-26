@@ -124,6 +124,8 @@ export const join = mutation({
     const name = args.name.trim().slice(0, 80);
     const restaurant = await ctx.db.get(args.restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
+    // M-1: every other entry point refuses suspended venues — so does the waitlist.
+    if (restaurant.disabled) throw new Error("This restaurant is currently unavailable.");
 
     // If a slot at this time still has room, point the diner at booking instead.
     const slots = await ctx.db

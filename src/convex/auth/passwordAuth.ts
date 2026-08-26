@@ -1,6 +1,6 @@
 import { Password } from "@convex-dev/auth/providers/Password";
 import { Phone } from "@convex-dev/auth/providers/Phone";
-import { sendOtpSms, generateOtpToken } from "./phoneOtp";
+import { sendOtpSms, generateOtpToken, enforceOtpSendRateLimit } from "./phoneOtp";
 
 /**
  * Password authentication provider that uses phone number as the identifier.
@@ -23,10 +23,12 @@ export const passwordAuth = Password({
   }),
   reset: Phone({
     id: "password-reset",
-    maxAge: 60 * 15, // 15 minutes
+    maxAge: 60 * 10, // 10 minutes (H-11: shorter window shrinks brute-force time)
     generateVerificationToken: generateOtpToken,
-    async sendVerificationRequest({ identifier: phone, token }) {
-      await sendOtpSms(phone, token);
+    // H-10/H-11: thread ctx (appSettings Twilio creds) + per-phone send cap.
+    async sendVerificationRequest({ identifier: phone, token }, ctx) {
+      await enforceOtpSendRateLimit(ctx, phone);
+      await sendOtpSms(phone, token, ctx);
     },
   }) as never,
 });

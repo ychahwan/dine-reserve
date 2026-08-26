@@ -35,8 +35,9 @@ export async function invalidateUserSessions(ctx: MutationCtx, userId: Id<"users
  *
  * Cascades: bookings (+ their dine orders, assist requests, notifications,
  * presence, gifts), waitlist, dine-in history, messages, reviews, loyalty
- * ledger, notification inbox, pending phone changes, auth accounts and
- * sessions.
+ * ledger, notification inbox, pending phone changes, walk-in requests, FCM
+ * tokens, AI conversations + messages, booking-queue entries, auth accounts
+ * and sessions.
  *
  * NOTE: does NOT check for owned restaurants — callers decide that policy
  * (the admin flow refuses while restaurants exist; the self-service flow is
@@ -63,7 +64,10 @@ export async function cascadeDeleteUser(ctx: MutationCtx, userId: Id<"users">) {
   }
 
   // Remaining user-scoped rows (outside bookings).
-  const [reviews, waitlist, dineOrders, assists, menuReqs, presence, notifs, dn, ledger, phoneReqs, delReqs] =
+  // H-13: also covers walkInRequests, notificationTokens (FCM tokens must not
+  // outlive "permanent deletion"), AI conversations + messages, and
+  // bookingQueue entries.
+  const [reviews, waitlist, dineOrders, assists, menuReqs, presence, notifs, dn, ledger, phoneReqs, delReqs, walkIns, pushTokens, aiConvs, aiMsgs, queueEntries] =
     await Promise.all([
       ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
@@ -76,8 +80,13 @@ export async function cascadeDeleteUser(ctx: MutationCtx, userId: Id<"users">) {
       ctx.db.query("loyaltyLedger").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       ctx.db.query("phoneChangeRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
       ctx.db.query("accountDeleteRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("walkInRequests").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("notificationTokens").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("aiConversations").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("aiMessages").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("bookingQueue").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
     ]);
-  for (const rows of [reviews, waitlist, dineOrders, assists, menuReqs, presence, notifs, dn, ledger, phoneReqs, delReqs]) {
+  for (const rows of [reviews, waitlist, dineOrders, assists, menuReqs, presence, notifs, dn, ledger, phoneReqs, delReqs, walkIns, pushTokens, aiConvs, aiMsgs, queueEntries]) {
     for (const row of rows) await ctx.db.delete(row._id);
   }
 
@@ -102,8 +111,9 @@ export async function cascadeDeleteUser(ctx: MutationCtx, userId: Id<"users">) {
  * Permanently delete a restaurant and everything attached to it: sections,
  * hours, slots, rules, custom slots, menus + items (releasing uploaded photos
  * from storage), bookings + all dine-in data, waitlist, notifications,
- * reviews, stories, gifts, menu requests, presence. Also removes it from
- * every diner's favorites.
+ * reviews, stories, gifts, menu requests, presence, table QR codes, walk-in
+ * requests and booking-queue entries. Also removes it from every diner's
+ * favorites.
  *
  * Shared by the owner-facing restaurants.remove AND the admin moderation
  * console (admin.deleteRestaurant) so the two paths can never drift.
@@ -114,7 +124,7 @@ export async function cascadeDeleteRestaurant(ctx: MutationCtx, restaurantId: Id
     .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
     .collect();
 
-  const [hours, slots, rules, customSlots, menus, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, bookings, orders, assists] =
+  const [hours, slots, rules, customSlots, menus, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, bookings, orders, assists, qrCodes, walkIns, queueEntries] =
     await Promise.all([
       ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
       ctx.db.query("slots").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId)).collect(),
@@ -131,9 +141,15 @@ export async function cascadeDeleteRestaurant(ctx: MutationCtx, restaurantId: Id
       ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
       ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
       ctx.db.query("assistRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("tableQRCodes").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("walkInRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      // M-19: bookingQueue has no by_restaurant index — by_slot is
+      // (restaurantId, date, time), and an eq on the leading field is a valid
+      // prefix scan.
+      ctx.db.query("bookingQueue").withIndex("by_slot", (q) => q.eq("restaurantId", restaurantId)).collect(),
     ]);
 
-  for (const rows of [hours, slots, rules, customSlots, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, orders, assists]) {
+  for (const rows of [hours, slots, rules, customSlots, waitlist, notifs, reviews, stories, gifts, menuReqs, presence, orders, assists, qrCodes, walkIns, queueEntries]) {
     for (const row of rows) await ctx.db.delete(row._id);
   }
   for (const b of bookings) {

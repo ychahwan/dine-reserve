@@ -1,4 +1,5 @@
 import { internalMutation, MutationCtx } from "./_generated/server";
+import { v } from "convex/values";
 import { Id } from "./_generated/dataModel";
 
 /**
@@ -34,24 +35,26 @@ export async function checkRateLimit(
   const windowStart = Math.floor(now / windowMs) * windowMs;
   const rateKey = `${key}:${userId}`;
 
-  // KB-07: `.first()` (not `.unique()`) — two concurrent first-hits for the
-  // same (key, window) can both insert before either sees the other, and a
-  // later `.unique()` would then throw and turn the limiter into a hard
-  // error for that user. `.first()` is order-agnostic and the count logic
-  // below stays correct: worst case a concurrent pair increments two rows,
-  // which only ever over-counts toward the limit (fail-safe), never under.
-  const existing = await ctx.db
+  // L-17: concurrent first hits could each insert their own row while the
+  // decision read a single row (`.first()`), so the effective limit was up
+  // to 2× under a concurrent burst. Sum every row recorded for this key in
+  // the current window before deciding — whichever way concurrent inserts
+  // land, the total is accurate and existing keys' semantics mid-window are
+  // unchanged. Worst case two rows exist for one window; they are both
+  // counted here and merged on the next increment.
+  const rows = await ctx.db
     .query("rateLimits")
-    .withIndex("by_key_window", (q) =>
-      q.eq("key", rateKey).eq("windowStart", windowStart),
-    )
-    .first();
+    .withIndex("by_key_window", (q) => q.eq("key", rateKey))
+    .collect();
+  const currentWindow = rows.filter((r) => r.windowStart === windowStart);
+  const total = currentWindow.reduce((s, r) => s + r.count, 0);
 
-  if (existing) {
-    if (existing.count >= limit) {
-      throw new Error("You're doing that too often. Please try again later.");
-    }
-    await ctx.db.patch(existing._id, { count: existing.count + 1 });
+  if (total >= limit) {
+    throw new Error("You're doing that too often. Please try again later.");
+  }
+  const first = currentWindow[0];
+  if (first) {
+    await ctx.db.patch(first._id, { count: first.count + 1 });
   } else {
     await ctx.db.insert("rateLimits", {
       key: rateKey,
@@ -60,6 +63,18 @@ export async function checkRateLimit(
     });
   }
 }
+
+export const checkOtpSendRateLimit = internalMutation({
+  args: { phone: v.string() },
+  handler: async (ctx, { phone }) => {
+    await checkRateLimit(ctx, {
+      key: "otpSend",
+      userId: phone,
+      limit: 5,
+      windowMs: 15 * 60_000,
+    });
+  },
+});
 
 /**
  * Garbage-collect stale rate-limit rows (N-7 / P-6). Every window older than

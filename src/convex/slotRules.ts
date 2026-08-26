@@ -25,7 +25,8 @@ function validateRule(args: { name: string; days: number[]; start: string; end: 
   if (args.days.some((d) => d < 0 || d > 6)) throw new Error("Invalid day.");
   if (!TIME_RE.test(args.start) || !TIME_RE.test(args.end)) throw new Error("Invalid time.");
   if (!Number.isFinite(args.step) || args.step < 0 || args.step > 240 || args.step % 5 !== 0) {
-    throw new Error("Interval must be between 5 and 240 minutes.");
+    // L-5: step=0 is legitimate (fixed seating) — the message must say so.
+    throw new Error("Interval must be 0 (one fixed seating) or between 5 and 240 minutes.");
   }
 }
 

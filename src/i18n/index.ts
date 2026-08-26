@@ -12,7 +12,7 @@ const STORAGE_KEY = "kamix.lang";
 /** Best-effort language guess from the browser, defaulting to English. */
 export function detectLanguage(): Lang {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(STORAGE_KEY)?.toLowerCase();
     if (saved && (SUPPORTED_LANGS as readonly string[]).includes(saved)) {
       return saved as Lang;
     }

@@ -109,7 +109,14 @@ export default function AdminRestaurants() {
     const disabled = filtered.filter((r) => r.disabled).length;
     const totalBookings = filtered.reduce((s, r) => s + r.bookingCount, 0);
     const totalRevenue = filtered.reduce((s, r) => s + r.revenueCents, 0);
-    const avgRating = total > 0 ? filtered.filter((r) => r.rating.count > 0).reduce((s, r) => s + r.rating.avg, 0) / Math.max(1, filtered.filter((r) => r.rating.count > 0).length) : 0;
+    // Weighted by review count — averaging per-restaurant means treats a
+    // 5-review venue the same as a 500-review one.
+    const rated = filtered.filter((r) => r.rating.count > 0);
+    const weightSum = rated.reduce((s, r) => s + r.rating.count, 0);
+    const avgRating =
+      weightSum > 0
+        ? rated.reduce((s, r) => s + r.rating.avg * r.rating.count, 0) / weightSum
+        : 0;
     return { total, active, disabled, totalBookings, totalRevenue, avgRating };
   }, [filtered]);
 

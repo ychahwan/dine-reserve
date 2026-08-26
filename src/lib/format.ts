@@ -27,11 +27,14 @@ export function publicAppUrl(): string {
   return configured || origin;
 }
 
+/** Display currency — all money is stored in these minor units (cents). */
+export const PRICE_CURRENCY = "USD";
+
 /** Format cents as a price string. */
 export function formatPrice(cents: number): string {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
-    currency: "USD",
+    currency: PRICE_CURRENCY,
     minimumFractionDigits: cents % 100 === 0 ? 0 : 2,
   }).format(cents / 100);
 }
@@ -63,6 +66,14 @@ export function dateFromNow(days: number): string {
 /** Today's YYYY-MM-DD */
 export function today(): string {
   return dateFromNow(0);
+}
+
+/** Local-calendar YYYY-MM-DD for a timestamp/Date (matches booking date keys). */
+export function localDateKey(input: Date | number): string {
+  const d = input instanceof Date ? input : new Date(input);
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}-${m}-${day}`;
 }
 
 export function isPastDate(date: string): boolean {

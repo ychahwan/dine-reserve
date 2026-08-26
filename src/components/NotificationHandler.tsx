@@ -3,6 +3,9 @@ import { usePushNotifications } from "@/hooks/use-push-notifications";
 import { useMutation } from "convex/react";
 import { api } from "@/convex/_generated/api";
 import { useAuth } from "@/hooks/use-auth";
+import { Capacitor } from "@capacitor/core";
+import { useNavigate } from "react-router";
+import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 interface NotificationHandlerProps {
@@ -11,22 +14,24 @@ interface NotificationHandlerProps {
 
 /**
  * Handles push notification registration and lifecycle.
- * Wrap this around your app to enable push notifications.
+ * Wrap this around your app (inside the router) to enable push notifications.
  */
 export function NotificationHandler({ children }: NotificationHandlerProps) {
   const { user } = useAuth();
+  const navigate = useNavigate();
+  const { t } = useTranslation();
   const saveToken = useMutation(api.notifications.saveToken);
   const removeToken = useMutation(api.notifications.removeToken);
 
   const handleNotificationReceived = useCallback(
     (notification: { title?: string; body?: string }) => {
       // Show in-app toast when notification received while app is open
-      toast.info(notification.title || "New Notification", {
+      toast.info(notification.title || t("notif.pushTitle"), {
         description: notification.body,
         duration: 5000,
       });
     },
-    [],
+    [t],
   );
 
   const handleNotificationAction = useCallback(
@@ -34,12 +39,12 @@ export function NotificationHandler({ children }: NotificationHandlerProps) {
       // Handle notification tap - navigate based on data
       const data = action.notification?.data;
       if (data?.type === "booking_confirmed" && data?.bookingId) {
-        window.location.href = `/my-bookings`;
+        navigate("/bookings");
       } else if (data?.type === "waitlist_alert" && data?.restaurantId) {
-        window.location.href = `/restaurant/${data.restaurantId}`;
+        navigate(`/restaurant/${data.restaurantId}`);
       }
     },
-    [],
+    [navigate],
   );
 
   const { token, registered, register } = usePushNotifications({
@@ -47,13 +52,13 @@ export function NotificationHandler({ children }: NotificationHandlerProps) {
     onNotificationAction: handleNotificationAction,
   });
 
-  // Save token to backend when user is logged in and token is available
+  // Save token to backend when user is logged in and token is available.
+  // The backend derives the owner from the session — never send a userId.
   useEffect(() => {
     if (user && token && registered) {
       saveToken({
         token,
-        platform: "android",
-        userId: user._id,
+        platform: Capacitor.getPlatform() as "android" | "ios" | "web",
       }).catch(console.error);
     }
   }, [user, token, registered, saveToken]);
@@ -80,12 +85,13 @@ export function NotificationHandler({ children }: NotificationHandlerProps) {
  */
 export function NotificationPermissionButton() {
   const { register, registered, loading } = usePushNotifications();
+  const { t } = useTranslation();
 
   if (registered) {
     return (
       <div className="flex items-center gap-2 text-sm text-green-600">
         <span>✓</span>
-        <span>Notifications enabled</span>
+        <span>{t("notif.pushEnabled")}</span>
       </div>
     );
   }
@@ -99,12 +105,12 @@ export function NotificationPermissionButton() {
       {loading ? (
         <>
           <span className="animate-spin">⟳</span>
-          <span>Enabling...</span>
+          <span>{t("notif.enabling")}</span>
         </>
       ) : (
         <>
           <span>🔔</span>
-          <span>Enable Notifications</span>
+          <span>{t("notif.enablePush")}</span>
         </>
       )}
     </button>

@@ -123,7 +123,7 @@ export const recommendDinner = action({
 
     const requestedDate = date ?? new Date().toISOString().slice(0, 10);
     const [bookings, orders, reviews, favorites, restaurants, availability, agentConfig] = await Promise.all([
-      ctx.runQuery(api.bookings.myBookings),
+      ctx.runQuery(api.bookings.myBookings, {}),
       ctx.runQuery(api.dining.myOrders, {}),
       ctx.runQuery(api.reviews.myReviewable),
       ctx.runQuery(api.users.myFavorites),
@@ -305,13 +305,14 @@ export const ownerInsights = action({
     // restaurant id should fail loudly rather than analyze someone else's.
     if (!restaurant?.restaurant) throw new Error("Restaurant not found.");
 
-    const dataPack = {
-      restaurant: {
-        name: restaurant.restaurant.name,
-        cuisine: restaurant.restaurant.cuisine,
-        city: restaurant.restaurant.city,
-        priceRange: restaurant.restaurant.priceRange,
-      },
+  const dataPack = {
+    restaurant: {
+      name: restaurant.restaurant.name,
+      cuisine: restaurant.restaurant.cuisine,
+      // M-22: owner-authored free text is sanitized before prompt build.
+      city: sanitizeUntrustedText(restaurant.restaurant.city, 60),
+      priceRange: sanitizeUntrustedText(restaurant.restaurant.priceRange, 8),
+    },
       stats: {
         rangeDays: stats?.rangeDays,
         totalBookings: stats?.totalBookings,
@@ -330,12 +331,19 @@ export const ownerInsights = action({
         avgSpendPerCoverCents: analytics?.avgSpendPerCoverCents,
         revenueCents: analytics?.revenueCents,
         projectedRevenueCents: analytics?.projectedRevenueCents,
-        topDiners: analytics?.topDiners?.slice(0, 5),
+        // H-12: strip phone numbers and raw user ids — diner PII must not
+        // be sent to the third-party model provider.
+        topDiners: analytics?.topDiners?.slice(0, 5).map((d: any) => ({
+          name: d.name,
+          visits: d.visits,
+          covers: d.covers,
+          spendCents: d.spendCents,
+        })),
         heatmap: analytics?.heatmap?.slice(0, 20),
       },
       waitTimes: wait,
       recentOrders: orders?.slice(0, 10).map((o: any) => ({
-        items: o.items.map((i: any) => `${i.quantity}× ${i.name}`),
+        items: o.items.map((i: any) => `${i.quantity}× ${sanitizeUntrustedText(i.name, 100)}`),
         totalCents: o.totalCents,
       })),
       reviews: {
@@ -424,11 +432,12 @@ function buildContextPack(data: {
     .map((b) => ({
       restaurant: b.restaurant?.name ?? "Unknown",
       cuisine: b.restaurant?.cuisine ?? "",
-      city: b.restaurant?.city ?? "",
+      city: sanitizeUntrustedText(b.restaurant?.city, 60),
       date: b.date,
       time: b.time,
       partySize: b.partySize,
-      occasion: b.occasion,
+      // M-22: diner free text — sanitize before it reaches the prompt.
+      occasion: sanitizeUntrustedText(b.occasion, 40),
     }));
 
   // KB-09: resolve order restaurant ids to real names (the ids are opaque to
@@ -438,7 +447,7 @@ function buildContextPack(data: {
   );
   const topOrders = data.orders.slice(0, 20).map((o) => ({
     restaurant: restaurantNameById.get(o.restaurantId) ?? "Unknown",
-    items: o.items.map((i: any) => i.name),
+    items: o.items.map((i: any) => sanitizeUntrustedText(i.name, 100)),
     totalCents: o.totalCents,
   }));
 
@@ -453,9 +462,11 @@ function buildContextPack(data: {
     id: r._id,
     name: r.name,
     cuisine: r.cuisine,
-    city: r.city,
-    neighborhood: r.neighborhood,
-    priceRange: r.priceRange,
+    // M-22: owner-authored free text — sanitize before prompt build.
+    city: sanitizeUntrustedText(r.city, 60),
+    neighborhood: sanitizeUntrustedText(r.neighborhood, 60),
+    priceRange: sanitizeUntrustedText(r.priceRange, 8),
+    // features are strict booleans (schema-enforced) — no free text to sanitize
     features: r.features,
   }));
 

@@ -33,7 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { api } from "@/convex/_generated/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, localDateKey } from "@/lib/format";
 import { filterAdminReviews } from "@/lib/admin-review-filters";
 import {
   useTablePagination,
@@ -122,9 +122,11 @@ export default function AdminReviews() {
     0,
   );
   const allFilteredSelected = filtered.length > 0 && selectedFilteredCount === filtered.length;
+  // H-26: prune against the FILTERED rows — ids selected under other filters
+  // must not ride along into a destructive bulk delete.
   const selectedReviewIds = useMemo(
-    () => [...selected].filter((id) => reviews?.some((review) => review._id === id)),
-    [reviews, selected],
+    () => [...selected].filter((id) => filtered.some((review) => review._id === id)),
+    [filtered, selected],
   );
 
   const toggleAllFiltered = () => {
@@ -393,10 +395,10 @@ export default function AdminReviews() {
                     </div>
                   </TableCell>
                   <TableCell><Stars rating={review.rating} /></TableCell>
-                  <TableCell className="whitespace-nowrap text-muted-foreground">
-                    {formatDate(new Date(review.createdAt).toISOString().slice(0, 10))}
-                  </TableCell>
-                  <TableCell className="max-w-sm">
+                   <TableCell className="whitespace-nowrap text-muted-foreground">
+                     {formatDate(localDateKey(review.createdAt))}
+                   </TableCell>
+                   <TableCell className="max-w-sm">
                     <p className="line-clamp-2 text-sm text-muted-foreground">
                       {review.text ?? <span className="italic opacity-60">No comment</span>}
                     </p>
@@ -461,7 +463,7 @@ export default function AdminReviews() {
                 </p>
                 <div className="flex items-center justify-between gap-3">
                   <span className="text-xs text-muted-foreground">
-                    {formatDate(new Date(review.createdAt).toISOString().slice(0, 10))}
+                    {formatDate(localDateKey(review.createdAt))}
                   </span>
                   <Button variant="outline" size="sm" asChild>
                     <Link

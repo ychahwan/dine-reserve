@@ -27,9 +27,12 @@ export const sendBookingSms = action({
     code: v.optional(v.string()),
   },
   handler: async (ctx, { to, event, restaurantName, city, date, time, partySize, code }) => {
+    // L-16: omit the code segment entirely when there is no code (never
+    // render a literal "Code: undefined").
+    const codePart = code ? ` Code: ${code}.` : "";
     const body =
       event === "confirmed"
-        ? `Kamix: your table for ${partySize} at ${restaurantName} (${city}) on ${date} at ${time} is confirmed. Code: ${code}. See you soon!`
+        ? `Kamix: your table for ${partySize} at ${restaurantName} (${city}) on ${date} at ${time} is confirmed.${codePart} See you soon!`
         : `Kamix: your booking at ${restaurantName} on ${date} at ${time} has been cancelled.`;
     return await sendTwilioMessage(to, body, ctx);
   },
@@ -49,7 +52,8 @@ export const sendBookingReminder = action({
     code: v.optional(v.string()),
   },
   handler: async (ctx, { to, restaurantName, city, date, time, partySize, code }) => {
-    const body = `Kamix reminder: ${restaurantName} (${city}) tomorrow at ${time} for ${partySize}. Code: ${code}. Reply or cancel in the app if plans change — see you soon!`;
+    const codePart = code ? ` Code: ${code}.` : "";
+    const body = `Kamix reminder: ${restaurantName} (${city}) tomorrow at ${time} for ${partySize}.${codePart} Reply or cancel in the app if plans change — see you soon!`;
     return await sendTwilioMessage(to, body, ctx);
   },
 });

@@ -38,12 +38,14 @@ export const post = mutation({
     if (!(await isOwnerOf(ctx, userId, restaurantId))) {
       throw new Error("Only the restaurant owner can post stories.");
     }
-    const clean = text.trim().slice(0, 240);
+    // L-19: slice by Unicode code points so surrogate pairs (emoji) are
+    // never split mid-character.
+    const clean = [...text.trim()].slice(0, 240).join("");
     if (!clean) throw new Error("Write something first.");
     const id = await ctx.db.insert("stories", {
       restaurantId,
       text: clean,
-      emoji: emoji?.trim().slice(0, 4) || undefined,
+      emoji: [...(emoji?.trim() ?? "")].slice(0, 4).join("") || undefined,
       createdAt: Date.now(),
     });
     // Idea #4: notify diners who saved this restaurant (fire-and-forget)

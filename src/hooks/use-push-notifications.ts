@@ -56,6 +56,10 @@ export function usePushNotifications(
   const optionsRef = useRef(options);
   optionsRef.current = options;
 
+  // Deferred resolution: register() awaits the token delivered asynchronously
+  // by the "registration" listener instead of returning stale state (H-24).
+  const pendingResolveRef = useRef<((token: string | null) => void) | null>(null);
+
   const requestPermissions = useCallback(async (): Promise<boolean> => {
     try {
       const result = await PushNotifications.requestPermissions();
@@ -77,18 +81,28 @@ export function usePushNotifications(
         return null;
       }
 
-      // Register for push notifications
+      const tokenPromise = new Promise<string | null>((resolve) => {
+        pendingResolveRef.current = resolve;
+      });
+
+      // Register for push notifications — the listener resolves the deferred.
       await PushNotifications.register();
 
-      // Wait for token (handled in listener)
-      return token;
+      // Safety valve so the caller never hangs forever if the OS never fires
+      // registration (the late token still lands in state via the listener).
+      const result = await Promise.race([
+        tokenPromise,
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
+      ]);
+      return result;
     } catch (err: any) {
       setRegistrationError(err?.message || "Failed to register for push notifications");
       return null;
     } finally {
+      pendingResolveRef.current = null;
       setLoading(false);
     }
-  }, [requestPermissions, token]);
+  }, [requestPermissions]);
 
   const unregister = useCallback(async (): Promise<void> => {
     try {
@@ -126,6 +140,9 @@ export function usePushNotifications(
       (token: Token) => {
         setToken(token.value);
         setRegistered(true);
+        // Resolve any in-flight register() call.
+        pendingResolveRef.current?.(token.value);
+        pendingResolveRef.current = null;
       },
     );
 
@@ -134,6 +151,8 @@ export function usePushNotifications(
       "registrationError",
       (error: any) => {
         setRegistrationError(error?.message || "Registration failed");
+        pendingResolveRef.current?.(null);
+        pendingResolveRef.current = null;
       },
     );
 

@@ -190,26 +190,35 @@ export const ensureDemoRules = mutation({
     force: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
-    // Wiping an owner's configured windows requires an authenticated caller;
-    // the cron (no args) is unaffected.
-    if (args.force) {
+    // M-20: any non-cron invocation requires authentication. The scheduled
+    // run passes no args and stays open as a retrofit no-op; a caller
+    // passing any argument is driving the mutation by hand and must be
+    // signed in — otherwise the availability rebuild becomes an
+    // unauthenticated write vector.
+    const isManual =
+      args.force !== undefined ||
+      args.restaurant !== undefined ||
+      args.daysAhead !== undefined;
+    if (isManual) {
       const userId = await getAuthUserId(ctx);
       if (userId === null) throw new Error("You must be signed in.");
 
       // KB-10: `force` replaces windows — any signed-in user could otherwise
       // destroy a restaurant's configured service windows by name. Require
       // the caller to own every targeted restaurant (or be a platform admin).
-      const caller = await ctx.db.get(userId);
-      const isAdmin = caller?.role === "admin";
-      const targets = args.restaurant
-        ? DEMO_DEFS.filter((d) => d.name === args.restaurant)
-        : DEMO_DEFS;
-      const restaurants = await ctx.db.query("restaurants").collect();
-      for (const def of targets) {
-        const restaurant = restaurants.find((r) => r.name === def.name);
-        if (!restaurant) continue;
-        if (!isAdmin && restaurant.ownerId !== userId) {
-          throw new Error("You can only load example windows for a restaurant you own.");
+      if (args.force) {
+        const caller = await ctx.db.get(userId);
+        const isAdmin = caller?.role === "admin";
+        const targets = args.restaurant
+          ? DEMO_DEFS.filter((d) => d.name === args.restaurant)
+          : DEMO_DEFS;
+        const restaurants = await ctx.db.query("restaurants").collect();
+        for (const def of targets) {
+          const restaurant = restaurants.find((r) => r.name === def.name);
+          if (!restaurant) continue;
+          if (!isAdmin && restaurant.ownerId !== userId) {
+            throw new Error("You can only load example windows for a restaurant you own.");
+          }
         }
       }
     }

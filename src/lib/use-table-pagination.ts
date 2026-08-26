@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 export type SortDirection = "asc" | "desc";
 
@@ -13,9 +13,22 @@ export function useTablePagination<TItem, TSortKey extends string>(options: {
   sortDirection: SortDirection;
   pageSize?: number;
   initialPage?: number;
+  /** Extra reset trigger (e.g. serialized filter state). Changing it goes back to page 0. */
+  resetKey?: string;
 }) {
-  const { items, sortKey, sortDirection, pageSize = 20, initialPage = 0 } = options;
+  const { items, sortKey, sortDirection, pageSize = 20, initialPage = 0, resetKey } = options;
   const [page, setPage] = useState(initialPage);
+
+  // M-31: a stale page index after filtering/sorting shows clamped wrong rows —
+  // go back to the first page whenever the data shape or filters change.
+  const shapeKey = `${resetKey ?? ""}|${items.length}|${sortKey}|${sortDirection}`;
+  const lastShapeKeyRef = useRef(shapeKey);
+  useEffect(() => {
+    if (lastShapeKeyRef.current !== shapeKey) {
+      lastShapeKeyRef.current = shapeKey;
+      setPage(initialPage);
+    }
+  }, [shapeKey, initialPage]);
 
   const totalItems = items.length;
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));

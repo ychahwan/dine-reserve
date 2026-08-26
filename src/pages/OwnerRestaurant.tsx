@@ -2,7 +2,13 @@ import { OwnerShell } from "@/components/OwnerShell";
 import { OwnerMenuTab } from "@/components/OwnerMenuTab";
 import { OwnerNotificationsTab } from "@/components/OwnerNotificationsTab";
 import { OwnerInsightsTab } from "@/components/OwnerInsightsTab";
-import { AvailabilityTab, BookingsTab, OwnerCustomersTab, SlotRulesTab } from "@/components/OwnerRestaurantTabs";
+import {
+  AvailabilityTab,
+  BookingsTab,
+  OwnerCustomersTab,
+  SlotRulesTab,
+  useToday,
+} from "@/components/OwnerRestaurantTabs";
 import {
   DiningTabCount,
   OwnerAssistsTab,
@@ -58,7 +64,6 @@ import {
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { cn } from "@/lib/utils";
-import { today } from "@/lib/format";
 import { DAY_ROWS, KIND_LABEL, type Kind } from "@/lib/seating";
 import { toast } from "sonner";
 
@@ -308,7 +313,9 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
   });
   const [policyHours, setPolicyHours] = useState(0);
   const [socEnabled, setSocEnabled] = useState(true);
-  const [socMinVisits, setSocMinVisits] = useState(0);
+  // L-34: keep the raw input string so partial input ("", "-") can't push NaN
+  // into the payload — parse and clamp once below.
+  const [socMinVisits, setSocMinVisits] = useState("0");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -336,49 +343,75 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
     });
     setPolicyHours(r.cancellationPolicyHours ?? 0);
     setSocEnabled(r.socialize?.enabled ?? true);
-    setSocMinVisits(r.socialize?.minVisits ?? 0);
+    setSocMinVisits(String(r.socialize?.minVisits ?? 0));
   }, [data]);
 
   const totalCapacity = (data?.sections ?? []).reduce((sum, s) => sum + s.capacity, 0);
   const menuCount = data?.menuDocs.length ?? 0;
+  const todayKey = useToday();
   const todays = useQuery(api.bookings.byRestaurant, {
     restaurantId: restaurantId as never,
-    date: today(),
+    date: todayKey,
   });
   const todayCount = (todays ?? []).filter((b) => b.status !== "cancelled").length;
+
+  // L-34: single parse/clamp point for the Socialize min-visits input.
+  const socMinVisitsNum = Number.isFinite(Number(socMinVisits))
+    ? Math.max(0, Math.min(50, Number(socMinVisits)))
+    : 0;
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    // L-37: HTML `required` accepts whitespace-only values — trim-validate first.
+    if (!form.name.trim() || !form.cuisine.trim() || !form.city.trim() || !form.address.trim()) {
+      setError("Name, cuisine, city and address are required.");
+      return;
+    }
     setSaving(true);
+    // L-35: label each sequential sub-save so a mid-failure says which part
+    // saved and which didn't.
+    const step = async (label: string, run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (err) {
+        throw new Error(`${label}: ${err instanceof Error ? err.message : "failed"}`);
+      }
+    };
     try {
-      await update({
-        id: restaurantId as never,
-        name: form.name,
-        cuisine: form.cuisine,
-        city: form.city,
-        address: form.address,
-        phone: form.phone || undefined,
-        priceRange: form.priceRange || undefined,
-        description: form.description || undefined,
-        imageUrl: form.imageUrl || undefined,
-        features: {
-          inside: features.inside,
-          outside: features.outside,
-          bar: features.bar,
-          smoking: features.smoking,
-          parking: features.parking,
-          liveMusic: features.liveMusic,
-          soloFriendly: features.soloFriendly,
-        },
-      });
-      await setCancellationPolicy({ restaurantId: restaurantId as never, hours: policyHours });
-      await updateSocialize({
-        restaurantId: restaurantId as never,
-        enabled: socEnabled,
-        minVisits: socMinVisits,
-        blockedUserIds: (data?.restaurant.socialize?.blockedUserIds ?? []) as never[],
-      });
+      await step("Profile", () =>
+        update({
+          id: restaurantId as never,
+          name: form.name.trim(),
+          cuisine: form.cuisine.trim(),
+          city: form.city.trim(),
+          address: form.address.trim(),
+          phone: form.phone || undefined,
+          priceRange: form.priceRange || undefined,
+          description: form.description || undefined,
+          imageUrl: form.imageUrl || undefined,
+          features: {
+            inside: features.inside,
+            outside: features.outside,
+            bar: features.bar,
+            smoking: features.smoking,
+            parking: features.parking,
+            liveMusic: features.liveMusic,
+            soloFriendly: features.soloFriendly,
+          },
+        }),
+      );
+      await step("Cancellation policy", () =>
+        setCancellationPolicy({ restaurantId: restaurantId as never, hours: policyHours }),
+      );
+      await step("Socialize room", () =>
+        updateSocialize({
+          restaurantId: restaurantId as never,
+          enabled: socEnabled,
+          minVisits: socMinVisitsNum,
+          blockedUserIds: (data?.restaurant.socialize?.blockedUserIds ?? []) as never[],
+        }),
+      );
       toast.success("Restaurant updated");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not save changes.");
@@ -517,11 +550,11 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
                         min={0}
                         max={50}
                         value={socMinVisits}
-                        onChange={(e) => setSocMinVisits(Math.max(0, Math.min(50, Number(e.target.value))))}
+                        onChange={(e) => setSocMinVisits(e.target.value)}
                         className="h-8 w-20 rounded-lg text-sm"
                       />
                       <span className="text-xs text-muted-foreground">
-                        {socMinVisits === 0 ? "Any confirmed diner" : `${socMinVisits}+ completed visit${socMinVisits === 1 ? "" : "s"}`}
+                        {socMinVisitsNum === 0 ? "Any confirmed diner" : `${socMinVisitsNum}+ completed visit${socMinVisitsNum === 1 ? "" : "s"}`}
                       </span>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
@@ -567,7 +600,8 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
   const deleteSection = useMutation(api.restaurants.deleteSection);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ name: "", kind: "inside" as Kind, smoking: false, capacity: 24, description: "" });
+  // L-34: hold the raw capacity string so clearing the field doesn't snap to 1.
+  const [form, setForm] = useState({ name: "", kind: "inside" as Kind, smoking: false, capacity: "24", description: "" });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // KB-15: window.confirm is blocked in the sandboxed preview iframe —
@@ -589,22 +623,32 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
     }
   };
 
-  const resetForm = () => setForm({ name: "", kind: "inside", smoking: false, capacity: 24, description: "" });
+  const resetForm = () => setForm({ name: "", kind: "inside", smoking: false, capacity: "24", description: "" });
 
   const startEdit = (s: (typeof sections)[number]) => {
     setEditingId(s._id);
-    setForm({ name: s.name, kind: s.kind, smoking: s.smoking, capacity: s.capacity, description: s.description ?? "" });
+    setForm({ name: s.name, kind: s.kind, smoking: s.smoking, capacity: String(s.capacity), description: s.description ?? "" });
   };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    // L-34/L-37: trim-validate the name and parse/clamp capacity once on submit.
+    if (!form.name.trim()) {
+      setError("Give the seating area a name.");
+      return;
+    }
+    const capacity = Math.floor(Number(form.capacity));
+    if (!Number.isFinite(capacity) || capacity < 1 || capacity > 500) {
+      setError("Capacity must be between 1 and 500 seats.");
+      return;
+    }
     setSaving(true);
     const payload = {
-      name: form.name,
+      name: form.name.trim(),
       kind: form.kind,
       smoking: form.smoking,
-      capacity: form.capacity,
+      capacity,
       description: form.description || undefined,
     };
     try {
@@ -701,7 +745,7 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
                   min={1}
                   max={500}
                   value={form.capacity}
-                  onChange={(e) => setForm({ ...form, capacity: Number(e.target.value) || 1 })}
+                  onChange={(e) => setForm({ ...form, capacity: e.target.value })}
                 />
               </div>
               <div className="flex items-end pb-1">

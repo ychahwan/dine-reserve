@@ -1,6 +1,6 @@
 import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
@@ -16,10 +16,34 @@ export function RequireAuth({ children }: { children: ReactNode }) {
     }
   }, [isAuthenticated, user?.disabled, signOut]);
 
+  // M-34: an authenticated session whose user doc is gone resolves
+  // user === null. Rendering children crashes on user._id dereferences, and
+  // redirecting to /auth bounce-loops (AuthPage redirects authed users back).
+  // Sign out once and hold a clear message until the session actually ends.
+  const signedOutRef = useRef(false);
+  const orphaned = isAuthenticated && !isLoading && user === null;
+  useEffect(() => {
+    if (orphaned && !signedOutRef.current) {
+      signedOutRef.current = true;
+      void signOut().catch(() => undefined);
+    }
+  }, [orphaned, signOut]);
+
   if (isLoading) {
     return (
       <main className="flex min-h-screen items-center justify-center bg-background">
         <Loader2 className="size-6 animate-spin text-muted-foreground" />
+      </main>
+    );
+  }
+
+  if (orphaned) {
+    return (
+      <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
+        <p className="text-lg font-semibold">This account no longer exists.</p>
+        <p className="text-sm text-muted-foreground">
+          You are being signed out. Contact support if you think this is a mistake.
+        </p>
       </main>
     );
   }

@@ -19,12 +19,14 @@ import {
 import { useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { formatDate, formatTime } from "@/lib/format";
+import { Trans, useTranslation } from "react-i18next";
 import { toast } from "sonner";
 
 export default function Invite() {
   const { code } = useParams<{ code: string }>();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const data = useQuery(api.bookings.byCode, { code: code ?? "" });
   const confirmGuest = useMutation(api.bookings.confirmGuest);
   const [confirming, setConfirming] = useState(false);
@@ -46,13 +48,13 @@ export default function Invite() {
       await confirmGuest({
         bookingId: data.booking._id as never,
         code: code ?? "",
-        name: user?.name ?? "Guest",
+        name: user?.name ?? t("invite.guestName"),
       });
       setConfirmed(true);
-      toast.success("You're on the list — see you there!");
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not confirm your seat.");
-      toast.error(err instanceof Error ? err.message : "Could not confirm your seat.");
+      toast.success(t("invite.confirmedToast"));
+    } catch {
+      setError(t("invite.errConfirm"));
+      toast.error(t("invite.errConfirm"));
     } finally {
       setConfirming(false);
     }
@@ -63,7 +65,7 @@ export default function Invite() {
       <CustomerShell>
         <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground">
           <Spinner className="size-6" />
-          <p className="text-sm">Looking up this invitation…</p>
+          <p className="text-sm">{t("invite.lookingUp")}</p>
         </div>
       </CustomerShell>
     );
@@ -74,13 +76,12 @@ export default function Invite() {
       <CustomerShell>
         <div className="flex flex-col items-center gap-3 px-4 py-24 text-center">
           <CalendarCheck2 className="size-10 text-muted-foreground/60" />
-          <p className="font-medium">Invitation not found</p>
+          <p className="font-medium">{t("invite.notFound")}</p>
           <p className="max-w-xs text-sm text-muted-foreground">
-            This booking code isn't active. Ask your friend to re-share the invite, or book your own
-            table.
+            {t("invite.notFoundBody")}
           </p>
           <Button asChild>
-            <Link to="/explore">Find a table</Link>
+            <Link to="/explore">{t("invite.findTable")}</Link>
           </Button>
         </div>
       </CustomerShell>
@@ -105,7 +106,7 @@ export default function Invite() {
             <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
             <div className="absolute bottom-3 left-4 right-4 text-white">
               <p className="text-lg font-bold tracking-tight drop-shadow">
-                {restaurant?.name ?? "A table"}
+                {restaurant?.name ?? t("invite.aTable")}
               </p>
               {restaurant && (
                 <p className="flex items-center gap-1 text-xs text-white/90">
@@ -121,19 +122,22 @@ export default function Invite() {
                 <div className="flex size-14 items-center justify-center rounded-full bg-emerald-600/10 text-emerald-600">
                   <Check className="size-7" />
                 </div>
-                <p className="text-lg font-bold tracking-tight">You're confirmed!</p>
+                <p className="text-lg font-bold tracking-tight">{t("invite.confirmedTitle")}</p>
                 <p className="max-w-xs text-sm text-muted-foreground">
-                  Your name is on the list for {restaurant?.name ?? "the table"} — see you there.
+                  <Trans
+                    i18nKey="invite.confirmedBody"
+                    values={{ name: restaurant?.name ?? t("invite.aTable") }}
+                  />
                 </p>
                 <Button asChild className="mt-2">
-                  <Link to="/bookings">View my bookings</Link>
+                  <Link to="/bookings">{t("invite.viewBookings")}</Link>
                 </Button>
               </div>
             ) : (
               <>
                 <div className="flex items-center gap-2">
                   <UserPlus className="size-4 text-primary" />
-                  <p className="text-sm font-semibold">You're invited to dinner</p>
+                  <p className="text-sm font-semibold">{t("invite.invitedTitle")}</p>
                 </div>
                 <div className="rounded-2xl bg-muted/40 p-4 text-sm">
                   <div className="flex items-center gap-2">
@@ -145,7 +149,7 @@ export default function Invite() {
                   <div className="mt-2 flex items-center gap-2">
                     <Users className="size-4 text-muted-foreground" />
                     <span>
-                      {booking.partySize + guests.length} going
+                      {t("invite.going", { count: booking.partySize + guests.length })}
                       {booking.sectionName ? ` · ${booking.sectionName}` : ""}
                     </span>
                   </div>
@@ -154,7 +158,7 @@ export default function Invite() {
                 {guests.length > 0 && (
                   <div>
                     <p className="mb-1.5 text-xs font-medium uppercase tracking-widest text-muted-foreground">
-                      Already confirmed
+                      {t("invite.alreadyConfirmed")}
                     </p>
                     <div className="flex flex-wrap gap-1.5">
                       {guests.map((g, i) => (
@@ -172,11 +176,10 @@ export default function Invite() {
 
                 <Button className="w-full" size="lg" onClick={handleConfirm} disabled={confirming}>
                   {confirming ? <Spinner className="size-4" /> : <UserPlus className="size-4" />}
-                  {confirming ? "Confirming…" : "Confirm my seat"}
+                  {confirming ? t("invite.confirming") : t("invite.confirmSeat")}
                 </Button>
                 <p className="flex items-center justify-center gap-1 text-center text-[11px] text-muted-foreground">
-                  <Clock className="size-3" /> Seats are confirmed live against the restaurant's
-                  availability — no double-booking, ever.
+                  <Clock className="size-3" /> {t("invite.liveSeats")}
                 </p>
               </>
             )}

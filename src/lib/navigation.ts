@@ -109,12 +109,23 @@ function openAppleMaps(dest: string, origin?: { lat: number; lng: number }): voi
 
 /**
  * Open Waze with directions.
+ * Waze's deep link only routes reliably to lat,lng — fall back to a text
+ * search when the restaurant has no known coordinates.
  */
-function openWaze(dest: string, origin?: { lat: number; lng: number }): void {
+function openWaze(
+  dest: string,
+  origin?: { lat: number; lng: number },
+  destCoords?: { lat: number; lng: number },
+): void {
+  if (destCoords) {
+    // q=lat,lng is Waze's documented search shape for exact locations.
+    const url = `https://www.waze.com/ul?q=${destCoords.lat},${destCoords.lng}&navigate=yes`;
+    window.open(url, "_blank");
+    return;
+  }
   const destEncoded = encodeURIComponent(dest);
   if (origin) {
-    // Waze navigate URL
-    const url = `https://www.waze.com/ul?ll=${destEncoded}&navigate=yes`;
+    const url = `https://www.waze.com/ul?ll=${origin.lat},${origin.lng}&q=${destEncoded}&navigate=yes`;
     window.open(url, "_blank");
   } else {
     const url = `https://www.waze.com/ul?q=${destEncoded}`;
@@ -124,14 +135,23 @@ function openWaze(dest: string, origin?: { lat: number; lng: number }): void {
 
 /**
  * Open OpenStreetMap with directions.
+ * OSM's route planner needs coordinate pairs — without them, defer to Google
+ * Maps which geocodes free-text addresses.
  */
-function openOSM(dest: string, origin?: { lat: number; lng: number }): void {
-  const destEncoded = encodeURIComponent(dest);
+function openOSM(
+  dest: string,
+  origin?: { lat: number; lng: number },
+  destCoords?: { lat: number; lng: number },
+): void {
+  if (!destCoords) {
+    openGoogleMaps(dest, origin);
+    return;
+  }
   if (origin) {
-    const url = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${origin.lat},${origin.lng};${destEncoded}`;
+    const url = `https://www.openstreetmap.org/directions?engine=fossgis_osrm_car&route=${origin.lat},${origin.lng};${destCoords.lat},${destCoords.lng}`;
     window.open(url, "_blank");
   } else {
-    const url = `https://www.openstreetmap.org/search?query=${destEncoded}`;
+    const url = `https://www.openstreetmap.org/?mlat=${destCoords.lat}&mlon=${destCoords.lng}#map=17/${destCoords.lat}/${destCoords.lng}`;
     window.open(url, "_blank");
   }
 }
@@ -155,11 +175,18 @@ export async function openNavigation(options: NavigationOptions): Promise<void> 
     address,
     city,
     neighborhood,
+    lat,
+    lng,
     provider: requestedProvider,
   } = options;
 
   const provider = requestedProvider ?? detectProvider();
   const fullAddress = buildFullAddress(address, city, neighborhood);
+  // Coordinate-aware providers (Waze/OSM) only get offered/routed with real coords.
+  const destCoords =
+    typeof lat === "number" && typeof lng === "number"
+      ? { lat, lng }
+      : undefined;
 
   // Try to get user's location for turn-by-turn directions
   const userLocation = await getUserLocation();
@@ -169,10 +196,10 @@ export async function openNavigation(options: NavigationOptions): Promise<void> 
       openAppleMaps(fullAddress, userLocation ?? undefined);
       break;
     case "waze":
-      openWaze(fullAddress, userLocation ?? undefined);
+      openWaze(fullAddress, userLocation ?? undefined, destCoords);
       break;
     case "osm":
-      openOSM(fullAddress, userLocation ?? undefined);
+      openOSM(fullAddress, userLocation ?? undefined, destCoords);
       break;
     case "google":
     default:
@@ -184,11 +211,12 @@ export async function openNavigation(options: NavigationOptions): Promise<void> 
 /**
  * Quick access: open a map provider picker.
  * Shows available options and lets the user choose.
+ * Coordinate-only providers are hidden unless destination coordinates exist.
  */
-export function getAvailableProviders(): { id: MapProvider; name: string; icon: string }[] {
+export function getAvailableProviders(hasCoords = false): { id: MapProvider; name: string; icon: string }[] {
   return [
     { id: "google", name: "Google Maps", icon: "🗺️" },
     { id: "waze", name: "Waze", icon: "📍" },
-    { id: "osm", name: "OpenStreetMap", icon: "🌍" },
+    ...(hasCoords ? [{ id: "osm" as MapProvider, name: "OpenStreetMap", icon: "🌍" }] : []),
   ];
 }

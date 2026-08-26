@@ -23,6 +23,7 @@ import {
   Table,
   TableBody,
   TableCell,
+  TableHead,
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
@@ -94,13 +95,19 @@ export default function AdminAudit() {
   const [busy, setBusy] = useState(false);
   const { sort, toggleSort } = useSort<SortKey>({ key: "when", direction: "desc" });
 
-  // Get unique action values for the filter dropdown
-  const allEntries = useQuery(api.admin.auditLog, {});
+  // Get unique action values for the filter dropdown.
+  // M-32: reuse the primary (already-loaded) query for facets; only hit a
+  // second unbounded query as a fallback when it comes back empty.
+  const allEntries = useQuery(
+    api.admin.auditLog,
+    entries !== undefined && entries.length > 0 ? "skip" : {},
+  );
   const actionOptions = useMemo(() => {
-    if (!allEntries) return [];
-    const actions = new Set(allEntries.map((e) => e.action));
+    const source = entries && entries.length > 0 ? entries : allEntries;
+    if (!source) return [];
+    const actions = new Set(source.map((e) => e.action));
     return Array.from(actions).sort();
-  }, [allEntries]);
+  }, [entries, allEntries]);
 
   // Client-side date range filter
   const dateFiltered = useMemo(() => {
@@ -128,6 +135,16 @@ export default function AdminAudit() {
     pageSize: 25,
   });
 
+  // H-26: only entries matching the current filters may be bulk-deleted —
+  // selections made under other filters are ignored, not silently included.
+  const selectedVisibleIds = useMemo(
+    () => sorted.filter((e) => selected.has(e._id)).map((e) => e._id),
+    [sorted, selected],
+  );
+
+  // H-25: select-all is scoped to the current page's items.
+  const allPageSelected = pageItems.length > 0 && pageItems.every((e) => selected.has(e._id));
+
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
       const next = new Set(prev);
@@ -138,18 +155,21 @@ export default function AdminAudit() {
   };
 
   const toggleSelectAll = () => {
-    if (selected.size === pageItems.length) {
-      setSelected(new Set());
-    } else {
-      setSelected(new Set(pageItems.map((e) => e._id)));
-    }
+    setSelected((prev) => {
+      const next = new Set(prev);
+      for (const e of pageItems) {
+        if (allPageSelected) next.delete(e._id);
+        else next.add(e._id);
+      }
+      return next;
+    });
   };
 
   const handleBulkDelete = async () => {
-    if (busy || selected.size === 0) return;
+    if (busy || selectedVisibleIds.length === 0) return;
     setBusy(true);
     try {
-      const res = await deleteEntries({ ids: Array.from(selected) as never[] });
+      const res = await deleteEntries({ ids: selectedVisibleIds as never[] });
       toast.success(`${res.deleted} entries deleted.`);
       setSelected(new Set());
       setConfirmDelete(false);
@@ -183,7 +203,7 @@ export default function AdminAudit() {
     toast.success(`Exported ${toExport.length} entries to CSV.`);
   };
 
-  if (entries === undefined || allEntries === undefined) {
+  if (entries === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
         <Spinner className="size-4" /> Loading audit log…
@@ -201,14 +221,14 @@ export default function AdminAudit() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          {selected.size > 0 && (
+          {selectedVisibleIds.length > 0 && (
             <Button
               variant="outline"
               className="text-destructive hover:bg-destructive/10 hover:text-destructive"
               disabled={busy}
               onClick={() => setConfirmDelete(true)}
             >
-              <Trash2 className="size-4" /> Delete ({selected.size})
+              <Trash2 className="size-4" /> Delete ({selectedVisibleIds.length})
             </Button>
           )}
           <Button variant="outline" onClick={handleExport} disabled={entries.length === 0}>
@@ -270,13 +290,13 @@ export default function AdminAudit() {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableCell className="w-10">
+                  <TableHead className="w-10">
                     <Checkbox
-                      checked={selected.size === pageItems.length && pageItems.length > 0}
+                      checked={allPageSelected}
                       onCheckedChange={toggleSelectAll}
                       aria-label="Select all"
                     />
-                  </TableCell>
+                  </TableHead>
                   <SortableHead label="Action" sortKey="action" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
                   <SortableHead label="Target" sortKey="target" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
                   <SortableHead label="Details" sortKey="details" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
@@ -324,7 +344,7 @@ export default function AdminAudit() {
       <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && !busy && setConfirmDelete(false)}>
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Delete {selected.size} entries?</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">Delete {selectedVisibleIds.length} entries?</AlertDialogTitle>
             <AlertDialogDescription>
               These entries will be permanently removed. This action cannot be undone.
             </AlertDialogDescription>

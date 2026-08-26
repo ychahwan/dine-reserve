@@ -15,7 +15,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/convex/_generated/api";
-import { formatDate } from "@/lib/format";
+import { formatDate, localDateKey } from "@/lib/format";
 import { useMutation, useQuery } from "convex/react";
 import { ArrowLeft, CalendarDays, Loader2, MessageSquareQuote, Store, Trash2, UserRound } from "lucide-react";
 import { useState } from "react";
@@ -80,7 +80,9 @@ export default function AdminReviewDetail() {
     );
   }
 
-  const date = formatDate(new Date(review.createdAt).toISOString().slice(0, 10));
+  // Local-calendar rendering — UTC slicing showed the previous day for
+  // evening timestamps in UTC+ zones.
+  const date = formatDate(localDateKey(review.createdAt));
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-6">

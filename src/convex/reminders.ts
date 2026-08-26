@@ -49,10 +49,9 @@ export const scheduleRemindersForDate = internalMutation({
     const confirmed = candidates.filter(
       (b) => b.status === "confirmed" && !b.reminderSent,
     );
-    const bookings = confirmed;
 
     let scheduled = 0;
-    for (const booking of candidates) {
+    for (const booking of confirmed) {
       if (!booking.phone) continue; // nothing to text
       const restaurant = await ctx.db.get(booking.restaurantId);
       if (!restaurant) continue;

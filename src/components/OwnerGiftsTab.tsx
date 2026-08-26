@@ -1,4 +1,14 @@
 import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -76,6 +86,10 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  // L-32: confirm destructive deletes in-app with an in-flight guard
+  // (window.confirm is blocked in the sandboxed preview iframe).
+  const [deleteConfirm, setDeleteConfirm] = useState<{ id: string; name: string } | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const startEdit = (g: NonNullable<typeof gifts>[number]) => {
     setDraft({
@@ -100,7 +114,8 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
     const priceCents = Math.round(Number(draft.price) * 100);
     if (!draft.name.trim()) { setError("Give the gift a name, e.g. “Aperol spritz”."); return; }
     if (!draft.emoji.trim()) { setError("Pick an emoji for the gift."); return; }
-    if (!Number.isFinite(priceCents) || priceCents < 0) { setError("Enter a valid price."); return; }
+    // L-32: require a positive price — Number("") === 0 must not publish free gifts.
+    if (!Number.isFinite(priceCents) || priceCents <= 0) { setError("Enter a valid price greater than $0."); return; }
     setSaving(true);
     try {
       await saveGiftType({
@@ -121,12 +136,19 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
     }
   };
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string, name: string) => setDeleteConfirm({ id, name });
+
+  const confirmDelete = async () => {
+    if (!deleteConfirm || deleting) return;
+    setDeleting(true);
     try {
-      await deleteGiftType({ id: id as never });
+      await deleteGiftType({ id: deleteConfirm.id as never });
       toast.success("Gift removed from the catalog");
+      setDeleteConfirm(null);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not remove the gift.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -212,7 +234,7 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
                       size="icon-sm"
                       aria-label="Delete gift"
                       className="text-destructive"
-                      onClick={() => handleDelete(g._id)}
+                      onClick={() => handleDelete(g._id, g.name)}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -410,6 +432,39 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
           </div>
         )}
       </div>
+
+      {/* L-32: in-app delete confirmation (window.confirm is blocked in the
+          sandboxed preview iframe) */}
+      <AlertDialog
+        open={!!deleteConfirm}
+        onOpenChange={(open) => {
+          if (!open && !deleting) setDeleteConfirm(null);
+        }}
+      >
+        <AlertDialogContent className="max-w-sm rounded-3xl">
+          <AlertDialogHeader>
+            <AlertDialogTitle className="tracking-tight">
+              Delete “{deleteConfirm?.name}”?
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              Diners will no longer be able to send this gift. Orders already placed are kept.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-white hover:bg-destructive/90"
+              disabled={deleting}
+              onClick={(e) => {
+                e.preventDefault();
+                confirmDelete();
+              }}
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

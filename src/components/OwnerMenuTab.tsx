@@ -106,10 +106,11 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
   };
 
   const handleAddMenu = async () => {
+    if (saving) return; // H-20: the Enter handler bypasses the button's disabled={saving}
     if (!newMenuName.trim()) return;
     setSaving(true);
     try {
-      await createMenu({ restaurantId: restaurantId as never, name: newMenuName });
+      await createMenu({ restaurantId: restaurantId as never, name: newMenuName.trim() });
       setNewMenuName("");
       toast.success("Menu added");
     } catch (err) {
@@ -349,7 +350,29 @@ function ItemFormDialog({
   const [ingInput, setIngInput] = useState("");
   const [spice, setSpice] = useState<string>("");
   const [currentImage, setCurrentImage] = useState<string | null>(null);
-  const [newUpload, setNewUpload] = useState<{ storageId: string; preview: string } | null>(null);
+  // L-33: local photo previews are object URLs — track and revoke the current
+  // one whenever it's replaced, discarded, or the dialog closes/unmounts.
+  const [newUpload, setNewUploadState] = useState<{ storageId: string; preview: string } | null>(null);
+  const previewRef = useRef<string | null>(null);
+  const setNewUpload = (next: { storageId: string; preview: string } | null) => {
+    if (previewRef.current && previewRef.current !== (next?.preview ?? null)) {
+      URL.revokeObjectURL(previewRef.current);
+    }
+    previewRef.current = next?.preview ?? null;
+    setNewUploadState(next);
+  };
+  useEffect(() => {
+    if (open || !previewRef.current) return;
+    URL.revokeObjectURL(previewRef.current);
+    previewRef.current = null;
+    setNewUploadState(null);
+  }, [open]);
+  useEffect(
+    () => () => {
+      if (previewRef.current) URL.revokeObjectURL(previewRef.current);
+    },
+    [],
+  );
   const [urlInput, setUrlInput] = useState("");
   const [removeImage, setRemoveImage] = useState(false);
   const [uploading, setUploading] = useState(false);

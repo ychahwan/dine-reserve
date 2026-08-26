@@ -109,8 +109,15 @@ function lineSummary(line: { removeIngredients?: string[]; note?: string }): str
 
 /** Live badge count for the tab bar (Orders / Requests / Menu ideas). */
 export function DiningTabCount({ restaurantId, kind }: { restaurantId: string; kind: "orders" | "assists" | "menuRequests" }) {
-  const counts = useQuery(api.dining.openCounts, { restaurantId: restaurantId as never });
-  const n = counts?.[kind] ?? 0;
+  // L-30: the Orders badge must match the tab's Active filter, which includes
+  // served — backend openCounts only counts open|preparing, so count orders
+  // client-side to keep badge and tab consistent.
+  const orders = useQuery(api.dining.restaurantOrders, kind === "orders" ? { restaurantId: restaurantId as never } : "skip");
+  const counts = useQuery(api.dining.openCounts, kind === "orders" ? "skip" : { restaurantId: restaurantId as never });
+  const n =
+    kind === "orders"
+      ? ((orders ?? []) as OrderWithMeta[]).filter((o) => o.status === "open" || o.status === "preparing" || o.status === "served").length
+      : counts?.[kind] ?? 0;
   if (n === 0) return null;
   return (
     <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4 bg-destructive text-white">

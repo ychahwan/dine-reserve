@@ -118,7 +118,12 @@ export default function AdminUsers() {
 
   // Selection helpers
   const allPageSelected = pageItems.length > 0 && pageItems.every((u) => selected.has(u._id));
-  const someSelected = selected.size > 0;
+  // H-26: only rows matching the current filters may be bulk-deleted —
+  // selections made under other filters are ignored, not silently included.
+  const selectedVisibleIds = useMemo(
+    () => [...selected].filter((id) => filteredRows.some((u) => u._id === id)),
+    [selected, filteredRows],
+  );
 
   const toggleSelectAll = () => {
     if (allPageSelected) {
@@ -146,10 +151,10 @@ export default function AdminUsers() {
   };
 
   const handleBulkDelete = async () => {
-    if (selected.size === 0 || busy) return;
+    if (selectedVisibleIds.length === 0 || busy) return;
     setBusy(true);
     try {
-      const ids = Array.from(selected) as never[];
+      const ids = selectedVisibleIds as never[];
       const res = await bulkDelete({ userIds: ids });
       if (res.deleted > 0) {
         toast.success(`Deleted ${res.deleted} user${res.deleted === 1 ? "" : "s"}.`);
@@ -214,14 +219,14 @@ export default function AdminUsers() {
           <Button size="sm" onClick={() => setAddOpen(true)}>
             <UserPlus className="size-3.5" /> Add user
           </Button>
-          {someSelected && (
+          {selectedVisibleIds.length > 0 && (
             <Button
               variant="destructive"
               size="sm"
               onClick={() => setConfirmBulkDelete(true)}
               disabled={busy}
             >
-              <Trash2 className="size-3.5" /> Delete ({selected.size})
+              <Trash2 className="size-3.5" /> Delete ({selectedVisibleIds.length})
             </Button>
           )}
         </div>
@@ -378,7 +383,7 @@ export default function AdminUsers() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="size-5 text-destructive" /> Delete {selected.size} user{selected.size === 1 ? "" : "s"}?
+              <Trash2 className="size-5 text-destructive" /> Delete {selectedVisibleIds.length} user{selectedVisibleIds.length === 1 ? "" : "s"}?
             </DialogTitle>
             <DialogDescription>
               This will permanently delete all data for the selected users (bookings, orders, reviews, loyalty, auth accounts). Users who own restaurants will be skipped.
@@ -390,7 +395,7 @@ export default function AdminUsers() {
             </Button>
             <Button variant="destructive" onClick={handleBulkDelete} disabled={busy}>
               {busy ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
-              Delete {selected.size} user{selected.size === 1 ? "" : "s"}
+              Delete {selectedVisibleIds.length} user{selectedVisibleIds.length === 1 ? "" : "s"}
             </Button>
           </DialogFooter>
         </DialogContent>

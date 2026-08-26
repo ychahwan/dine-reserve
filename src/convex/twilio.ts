@@ -12,7 +12,7 @@
  * console Settings page can change them at runtime without a redeploy.
  */
 
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 
 /** Result of a send attempt. `sent: true` only on an HTTP 2xx. */
 export type TwilioSendResult = {
@@ -44,7 +44,7 @@ async function twilioConfig(ctx: { runQuery: (q: any, a: any) => Promise<any> } 
   const setting = async (key: string): Promise<string | undefined> => {
     if (ctx) {
       try {
-        const row = await ctx.runQuery(api.settings.getSettingDb, { key });
+        const row = await ctx.runQuery(internal.settings.getSettingDb, { key });
         if (row?.value) return row.value;
       } catch {
         // fall through to env
@@ -95,7 +95,11 @@ export async function sendTwilioMessage(
 ): Promise<TwilioSendResult> {
   const cfg = await twilioConfig(ctx);
   if (!cfg) return { sent: false, skipped: true, reason: "twilio not configured" };
-  if (!to || !/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
+  // Normalize phone to E.164 format: strip spaces/dashes, ensure + prefix
+  if (!to) return { sent: false, skipped: true, reason: "invalid phone" };
+  const cleaned = to.replace(/[\s\-()]/g, "");
+  to = cleaned.startsWith("+") ? cleaned : "+" + cleaned.replace(/^0+/, "");
+  if (!/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
 
   const params = new URLSearchParams();
   params.set("To", to);

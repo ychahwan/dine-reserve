@@ -11,6 +11,7 @@
 import type * as admin from "../admin.js";
 import type * as adminAi from "../adminAi.js";
 import type * as adminView from "../adminView.js";
+import type * as admin_fix from "../admin_fix.js";
 import type * as ai from "../ai.js";
 import type * as aiPolicy from "../aiPolicy.js";
 import type * as analytics from "../analytics.js";
@@ -44,6 +45,7 @@ import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
 import type * as validation from "../validation.js";
 import type * as waitlist from "../waitlist.js";
+import type * as walkIn from "../walkIn.js";
 
 import type {
   ApiFromModules,
@@ -55,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   admin: typeof admin;
   adminAi: typeof adminAi;
   adminView: typeof adminView;
+  admin_fix: typeof admin_fix;
   ai: typeof ai;
   aiPolicy: typeof aiPolicy;
   analytics: typeof analytics;
@@ -88,6 +91,7 @@ declare const fullApi: ApiFromModules<{
   users: typeof users;
   validation: typeof validation;
   waitlist: typeof waitlist;
+  walkIn: typeof walkIn;
 }>;
 
 /**

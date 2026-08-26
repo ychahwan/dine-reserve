@@ -33,6 +33,9 @@ const QUEUE_ARGS = {
   occasion: v.optional(v.string()),
 };
 
+/** M-4: cap on a single user's simultaneously queued requests (flood guard). */
+const MAX_ACTIVE_QUEUED_PER_USER = 10;
+
 /** Join the booking queue for a slot. Returns the queue entry + line position. */
 export const enqueue = mutation({
   args: QUEUE_ARGS,
@@ -65,24 +68,41 @@ export const enqueue = mutation({
         time: args.time,
       });
 
-    // Idempotent: an already-queued request for the same slot is reused, not duplicated.
+    // M-4: idempotent per (user, restaurantId, date, time) — party size is NOT
+    // part of the key. Re-requesting the same slot with a different size
+    // patches the existing entry instead of double-queuing (processSlot would
+    // otherwise book both entries).
     const mine = await ctx.db.query("bookingQueue").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
     const dup = mine.find(
       (e) =>
         e.status === "queued" &&
         e.restaurantId === args.restaurantId &&
         e.date === args.date &&
-        e.time === args.time &&
-        e.partySize === args.partySize,
+        e.time === args.time,
     );
     if (dup) {
+      await ctx.db.patch(dup._id, {
+        partySize: args.partySize,
+        seat: args.seat,
+        nonSmoking: args.nonSmoking,
+        name,
+        email: args.email?.trim().slice(0, 120) || undefined,
+        phone: args.phone?.trim().slice(0, 20) || undefined,
+        notes: args.notes?.trim().slice(0, 300) || undefined,
+        occasion: args.occasion?.trim().slice(0, 40) || undefined,
+      });
       await fireProcessor();
       const sameSlot = await ctx.db
         .query("bookingQueue")
         .withIndex("by_slot", (q) => q.eq("restaurantId", args.restaurantId).eq("date", args.date).eq("time", args.time))
         .collect();
       const position = sameSlot.filter((e) => e.status === "queued" && e.createdAt <= dup.createdAt).length;
-      return { entry: dup, position };
+      return { entry: await ctx.db.get(dup._id), position };
+    }
+
+    // M-4: flood guard — bound how many requests one user may keep queued.
+    if (mine.filter((e) => e.status === "queued").length >= MAX_ACTIVE_QUEUED_PER_USER) {
+      throw new Error("Too many pending booking requests — wait for one to finish first.");
     }
 
     const createdAt = Date.now();
@@ -121,6 +141,13 @@ export const enqueue = mutation({
  * every enqueue — the first invocation books everyone queued so far and later
  * invocations are no-ops, so it is safe under heavy concurrent load.
  */
+/** L-8: bounded drain batch — process at most this many queued entries per
+ * invocation and reschedule for the rest, so a burst can never blow the
+ * transaction read/write limits. */
+const DRAIN_BATCH = 25;
+/** Terminal entries (booked/failed) are archived once older than this. */
+const TERMINAL_RETENTION_MS = 48 * 60 * 60 * 1000;
+
 export const processSlot = internalMutation({
   args: { restaurantId: v.id("restaurants"), date: v.string(), time: v.string() },
   handler: async (ctx, { restaurantId, date, time }) => {
@@ -128,9 +155,19 @@ export const processSlot = internalMutation({
       .query("bookingQueue")
       .withIndex("by_slot", (q) => q.eq("restaurantId", restaurantId).eq("date", date).eq("time", time))
       .collect();
-    const queued = entries.filter((e) => e.status === "queued").sort((a, b) => a.createdAt - b.createdAt);
 
-    for (const entry of queued) {
+    // L-8: archive old terminal rows so repeated scans stay small.
+    const staleCutoff = Date.now() - TERMINAL_RETENTION_MS;
+    await Promise.all(
+      entries
+        .filter((e) => e.status !== "queued" && (e.processedAt ?? 0) < staleCutoff)
+        .map((e) => ctx.db.delete(e._id)),
+    );
+
+    const queued = entries.filter((e) => e.status === "queued").sort((a, b) => a.createdAt - b.createdAt);
+    const batch = queued.slice(0, DRAIN_BATCH);
+
+    for (const entry of batch) {
       const bookingArgs: BookingArgs = {
         restaurantId,
         date,
@@ -164,7 +201,12 @@ export const processSlot = internalMutation({
         });
       }
     }
-    return { processed: queued.length };
+
+    // L-8: keep draining without holding one giant transaction open.
+    if (queued.length > batch.length) {
+      await ctx.scheduler.runAfter(1_000, internal.queue.processSlot, { restaurantId, date, time });
+    }
+    return { processed: batch.length, remaining: Math.max(0, queued.length - batch.length) };
   },
 });
 

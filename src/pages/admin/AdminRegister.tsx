@@ -57,6 +57,11 @@ export default function AdminRegister() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    // HTML required accepts whitespace-only input — enforce the real minimum.
+    if (tempPassword.trim().length < 8) {
+      setError("Temporary password must be at least 8 characters.");
+      return;
+    }
     setSaving(true);
     try {
       await registerRestaurant({
@@ -128,7 +133,7 @@ export default function AdminRegister() {
               <div className="mt-4 space-y-2">
                 <Label htmlFor="a-temp-pass">Temporary password *</Label>
                 <div className="relative">
-                  <Input id="a-temp-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters" type={showTempPass ? "text" : "password"} required disabled={saving} className="pr-10" />
+                  <Input id="a-temp-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters" type={showTempPass ? "text" : "password"} required minLength={8} disabled={saving} className="pr-10" />
                   <button type="button" tabIndex={-1} onClick={() => setShowTempPass((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                     {showTempPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   </button>

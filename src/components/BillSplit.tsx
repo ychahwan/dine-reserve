@@ -7,19 +7,23 @@ import { Spinner } from "@/components/ui/spinner";
 import { Separator } from "@/components/ui/separator";
 import { formatPrice } from "@/lib/format";
 import { useAuth } from "@/hooks/use-auth";
+import { useTranslation } from "react-i18next";
 import { Receipt, Gift, ShoppingCart } from "lucide-react";
 import type { Id } from "@/convex/_generated/dataModel";
 
 interface BillSplitProps {
   bookingId: Id<"bookings">;
+  /** The booking's owner — only this person is badged "Host". */
+  hostUserId?: string;
 }
 
 /**
  * Displays a per-user breakdown of the bill for a shared booking.
  * Shows each person's orders and gifts separately, with totals.
  */
-export function BillSplit({ bookingId }: BillSplitProps) {
+export function BillSplit({ bookingId, hostUserId }: BillSplitProps) {
   const { user } = useAuth();
+  const { t } = useTranslation();
   const bill = useQuery(api.dining.billForBooking, { bookingId });
   const myShare = useQuery(api.dining.myBillShare, { bookingId });
 
@@ -37,13 +41,11 @@ export function BillSplit({ bookingId }: BillSplitProps) {
     return null;
   }
 
-  const isHost = bill.breakdown.some((b) => b.userId === user?._id);
-
   return (
     <Card className="rounded-2xl border-border/70 p-0 shadow-sm">
       <CardHeader className="pb-3">
         <CardTitle className="flex items-center gap-2 text-base">
-          <Receipt className="size-4 text-primary" /> Bill Split
+          <Receipt className="size-4 text-primary" /> {t("split.title")}
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -60,15 +62,15 @@ export function BillSplit({ bookingId }: BillSplitProps) {
                 </div>
                 <div>
                   <p className="text-sm font-medium">
-                    {person.userId === user?._id ? "You" : person.name}
-                    {person.userId === user?._id && (
+                    {person.userId === user?._id ? t("split.you") : person.name}
+                    {person.userId === hostUserId && (
                       <Badge variant="secondary" className="ml-2 text-[10px]">
-                        Host
+                        {t("split.host")}
                       </Badge>
                     )}
                   </p>
                   <p className="text-xs text-muted-foreground">
-                    {person.orderCount} {person.orderCount === 1 ? "order" : "orders"}
+                    {t("split.orders", { count: person.orderCount })}
                   </p>
                 </div>
               </div>
@@ -81,22 +83,22 @@ export function BillSplit({ bookingId }: BillSplitProps) {
 
         {/* Total */}
         <div className="flex items-center justify-between">
-          <span className="text-sm font-medium">Total</span>
+          <span className="text-sm font-medium">{t("split.total")}</span>
           <span className="text-lg font-bold">{formatPrice(bill.totalCents)}</span>
         </div>
 
         {/* My share highlight */}
         <div className="rounded-xl bg-primary/10 p-4">
           <div className="flex items-center justify-between">
-            <span className="text-sm font-medium">Your share</span>
+            <span className="text-sm font-medium">{t("split.yourShare")}</span>
             <span className="text-lg font-bold text-primary">
               {formatPrice(myShare.subtotalCents)}
             </span>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {myShare.orders.length} items
+            {t("split.items", { count: myShare.orders.length })}
             {myShare.gifts.length > 0 && (
-              <> + {myShare.gifts.length} gifts</>
+              <> {t("split.giftsExtra", { count: myShare.gifts.length })}</>
             )}
           </p>
 
@@ -135,11 +137,11 @@ export function BillSplit({ bookingId }: BillSplitProps) {
         {/* Pay button placeholder */}
         <Button className="w-full" disabled>
           <ShoppingCart className="mr-2 size-4" />
-          Pay {formatPrice(myShare.subtotalCents)}
+          {t("split.pay", { amount: formatPrice(myShare.subtotalCents) })}
         </Button>
 
         <p className="text-center text-xs text-muted-foreground">
-          Payment integration coming soon
+          {t("split.comingSoon")}
         </p>
       </CardContent>
     </Card>

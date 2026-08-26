@@ -1,6 +1,6 @@
 import { v } from "convex/values";
-import { action, mutation, query } from "./_generated/server";
-import { api } from "./_generated/api";
+import { action, internalQuery, mutation } from "./_generated/server";
+import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
 
 /**
@@ -34,18 +34,21 @@ export const SETTING_KEYS = [
   "TWILIO_FROM_NUMBER",
 ] as const;
 
-/** Keys whose values are secrets and must be masked in the UI. */
-const SECRET_KEYS = new Set([
-  "GEMINI_API_KEY",
-  "TWILIO_AUTH_TOKEN",
-  "TWILIO_API_KEY_SECRET",
+/**
+ * Keys whose values are safe to display verbatim in the admin console.
+ * M-23: default-deny — every key NOT listed here is masked, so a future
+ * sensitive setting can never leak by being forgotten in a deny-list.
+ */
+const PUBLIC_KEYS = new Set([
+  "AI_SYSTEM_PROMPT",
+  "AI_MODEL",
 ]);
 
 /**
- * Private, deterministic DB read for one setting row.
- * Used by `getSetting` (actions) via runQuery. Not for client use.
+ * Private, deterministic DB read for one setting row. C-1: internal-only so
+ * raw values (secrets included) are never callable from any client.
  */
-export const getSettingDb = query({
+export const getSettingDb = internalQuery({
   args: { key: v.string() },
   handler: async (ctx, { key }) => {
     const row = await ctx.db
@@ -60,7 +63,7 @@ export const getSettingDb = query({
  * Private, deterministic read of the current user's role — used by
  * listSettings to authorize. Not for client use.
  */
-export const getSettingRoleCheck = query({
+export const getSettingRoleCheck = internalQuery({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
@@ -74,7 +77,7 @@ export const getSettingRoleCheck = query({
  * Private, deterministic read of all appSettings rows — used by
  * listSettings. Not for client use.
  */
-export const getSettingRows = query({
+export const getSettingRows = internalQuery({
   args: {},
   handler: async (ctx) => {
     const rows = await ctx.db.query("appSettings").collect();
@@ -90,10 +93,10 @@ export const getSettingRows = query({
 export const listSettings = action({
   args: {},
   handler: async (ctx) => {
-    const role = await ctx.runQuery(api.settings.getSettingRoleCheck, {});
+    const role = await ctx.runQuery(internal.settings.getSettingRoleCheck, {});
     if (role !== "admin") throw new Error("Admins only.");
 
-    const rows = await ctx.runQuery(api.settings.getSettingRows, {});
+    const rows = await ctx.runQuery(internal.settings.getSettingRows, {});
     const byKey = new Map<string, { key: string; value: string; updatedAt: number }>();
     for (const r of rows) byKey.set(r.key, r);
 
@@ -103,16 +106,17 @@ export const listSettings = action({
       return {
         key,
         configured: row ? true : false,
-        // masked: last 4 of the stored value, or "env" when only env has it
+        // M-23: default-deny masking — only PUBLIC_KEYS values are shown
+        // verbatim; everything else is masked to the last 4 chars.
         masked:
-          row && SECRET_KEYS.has(key)
-            ? `••••${row.value.slice(-4)}`
+          row && PUBLIC_KEYS.has(key)
+            ? row.value
             : row
-              ? row.value
-              : envValue && SECRET_KEYS.has(key)
-                ? `(env) ••••${envValue.slice(-4)}`
+              ? `••••${row.value.slice(-4)}`
+              : envValue && PUBLIC_KEYS.has(key)
+                ? `(env) ${envValue}`
                 : envValue
-                  ? `(env) ${envValue}`
+                  ? `(env) ••••${envValue.slice(-4)}`
                   : "",
         source: row ? "db" : envValue ? "env" : "unset",
         updatedAt: row?.updatedAt ?? 0,
@@ -164,7 +168,7 @@ export async function getSetting(
   key: string,
 ): Promise<string | undefined> {
   try {
-    const row = await ctx.runQuery(api.settings.getSettingDb, { key });
+    const row = await ctx.runQuery(internal.settings.getSettingDb, { key });
     if (row?.value) return row.value;
   } catch {
     // DB read failed (e.g. table not migrated yet) — fall through to env.

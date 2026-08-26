@@ -79,7 +79,7 @@ export default function Notifications() {
         ) : (
           <div className="mt-5 space-y-2">
             {notifications.map((n) => {
-              const key = TYPE_KEYS[n.type] ?? "notif.typeFavoriteStory";
+              const key = TYPE_KEYS[n.type] ?? "notif.typeUpdate";
               const meta = {
                 icon: n.type === "guest_joined" ? UserPlus : n.type === "review_nudge" ? Star : n.type === "waitlist_freed" ? Gift : n.type === "booking_reminder" ? CalendarCheck2 : n.type === "reengage" ? Sparkles : ChefHat,
                 label: t(key),

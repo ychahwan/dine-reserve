@@ -62,6 +62,11 @@ export default function SetPassword() {
       setError(t("setpw.errMin"));
       return;
     }
+    // Mirror the backend's intent: no whitespace-only secrets, sane upper bound.
+    if (!/\S/.test(newPassword) || newPassword.length > 128) {
+      setError(t("setpw.errMin"));
+      return;
+    }
     if (newPassword !== confirm) {
       setError(t("setpw.errMatch"));
       return;

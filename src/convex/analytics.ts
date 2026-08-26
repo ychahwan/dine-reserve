@@ -2,6 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { query, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
+import { dateSchema, parseOrThrow } from "./validation";
 
 // ---------------------------------------------------------------------------
 // Idea #3 — Real-time wait time intelligence
@@ -42,11 +43,15 @@ export const waitTimes = query({
     cutoff.setDate(cutoff.getDate() - lookback);
     const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
 
+    // M-21: ranged query on by_restaurant_date instead of loading every
+    // booking ever and filtering in JS.
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+      .withIndex("by_restaurant_date", (q) =>
+        q.eq("restaurantId", restaurantId).gte("date", cutoffKey),
+      )
       .collect();
-    const window = bookings.filter((b) => b.date >= cutoffKey && b.status !== "cancelled");
+    const window = bookings.filter((b) => b.status !== "cancelled");
 
     const lateDelays: number[] = [];
     const seatTimes: number[] = [];
@@ -115,11 +120,14 @@ export const publicWaitSignal = query({
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - 30);
     const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+    // M-21: ranged query on by_restaurant_date (see waitTimes).
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+      .withIndex("by_restaurant_date", (q) =>
+        q.eq("restaurantId", restaurantId).gte("date", cutoffKey),
+      )
       .collect();
-    const window = bookings.filter((b) => b.date >= cutoffKey && b.status !== "cancelled");
+    const window = bookings.filter((b) => b.status !== "cancelled");
     const seatTimes: number[] = [];
     for (const b of window) {
       if (b.checkedInAt && b.status === "completed" && b.updatedAt > b.checkedInAt) {
@@ -159,11 +167,13 @@ export const analytics2 = query({
     cutoff.setDate(cutoff.getDate() - lookback);
     const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
 
+    // M-21: ranged query on by_restaurant_date (see waitTimes); orders keep
+    // the by_restaurant scan — dineOrders has no date index to range on.
     const [bookings, orders] = await Promise.all([
-      ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).gte("date", cutoffKey)).collect(),
       ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
     ]);
-    const window = bookings.filter((b) => b.date >= cutoffKey && b.status !== "cancelled");
+    const window = bookings.filter((b) => b.status !== "cancelled");
     const validOrders = orders.filter((o) => o.status !== "cancelled");
 
     // ── repeat rate: diners with >1 visit in window ────────────────────────
@@ -251,6 +261,9 @@ export const analytics2 = query({
 export const predict = query({
   args: { restaurantId: v.id("restaurants"), date: v.string() },
   handler: async (ctx, { restaurantId, date }) => {
+    // M-21: validate the date (real calendar date) before any date math —
+    // unvalidated input produced NaN day-of-week and bogus history keys.
+    parseOrThrow(dateSchema, date);
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) return null;
 

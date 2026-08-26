@@ -1,8 +1,10 @@
 import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import { useAuth } from "@/hooks/use-auth";
 import { ArrowLeft, Compass, LogOut, Store } from "lucide-react";
 import type { ReactNode } from "react";
 import { Link, Navigate, useNavigate } from "react-router";
+import { toast } from "sonner";
 
 export function OwnerShell({
   children,
@@ -17,9 +19,25 @@ export function OwnerShell({
   const navigate = useNavigate();
 
   const handleSignOut = async () => {
-    await signOut();
-    navigate("/");
+    // L-36: a failed signOut must not skip the navigate fallback.
+    try {
+      await signOut();
+    } catch {
+      toast.error("Could not sign out. Try again.");
+    } finally {
+      navigate("/");
+    }
   };
+
+  // L-36: user===undefined means the session is still resolving — don't flash
+  // the owner chrome (or bounce) before auth settles.
+  if (user === undefined) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner className="size-6" />
+      </div>
+    );
+  }
 
   // Only restaurant owners (and the platform admin) may manage restaurants.
   if (user && user.role !== "owner" && user.role !== "admin") {

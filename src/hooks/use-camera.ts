@@ -44,9 +44,10 @@ export function useCamera(defaultOptions?: UseCameraOptions): UseCameraReturn {
   const processPhoto = useCallback(
     (result: Photo, options?: UseCameraOptions) => {
       setPhoto(result);
-      if (result.base64String) {
-        setPhotoBase64(result.base64String);
-      }
+      // Null out when the result carries no base64 (Uri/DataUrl resultType) —
+      // otherwise a stale base64 from the previous capture lingers here while
+      // the UI previews the new photo, mismatching uploads (M-36).
+      setPhotoBase64(result.base64String ?? null);
       return result;
     },
     [],

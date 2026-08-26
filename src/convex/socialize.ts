@@ -2,7 +2,7 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
-import { notifyRestaurant } from "./notifications";
+import { notifyRestaurant, todayKey } from "./notifications";
 import { safeGet } from "./helpers";
 import { awardPoints, POINTS } from "./loyalty";
 import { giftTypeSchema, parseOrThrow, sendGiftSchema } from "./validation";
@@ -12,13 +12,8 @@ import { checkRateLimit } from "./rateLimit";
 // helpers
 // ---------------------------------------------------------------------------
 
-/** Today's date (server clock, effectively UTC on Convex Cloud) as "YYYY-MM-DD". */
-function todayKey(): string {
-  const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(
-    now.getDate(),
-  ).padStart(2, "0")}`;
-}
+// L-13: todayKey is imported from ./notifications so both modules share one
+// implementation and can never diverge at midnight again.
 
 /**
  * Resolve "today" for a day-of-visit check, preferring the caller's own
@@ -65,15 +60,17 @@ async function requireActiveBooking(
 }
 
 /**
- * Like requireActiveBooking but also requires the diner to have checked in.
- * Used by setVisibility so phantom bookings can't access the Socialize room.
+ * Like requireActiveTodayBooking but also requires the diner to have checked
+ * in. Used by setVisibility so phantom or past bookings can't access the
+ * Socialize room (M-14).
  */
 async function requireCheckedInBooking(
   ctx: MutationCtx,
   userId: Id<"users">,
   bookingId: Id<"bookings">,
+  clientDate?: string,
 ) {
-  const booking = await requireActiveBooking(ctx, userId, bookingId);
+  const booking = await requireActiveTodayBooking(ctx, userId, bookingId, clientDate);
   if (!booking.checkedInAt) {
     throw new Error("Please check in at the restaurant before going visible.");
   }
@@ -332,6 +329,13 @@ export const tasteTwins = query({
 
     const restaurant = await ctx.db.get(restaurantId);
     const isOwner = !!restaurant && restaurant.ownerId === userId;
+
+    // H-5: same venue-side gates as visibleDiners — when Socialize is OFF at
+    // this restaurant, and for diners this venue has blocked, return nothing.
+    const socializeSettings = restaurant?.socialize;
+    if (socializeSettings && !socializeSettings.enabled && !isOwner) return [];
+    if (socializeSettings?.blockedUserIds?.includes(userId as never) && !isOwner) return [];
+
     if (!isOwner) {
       const myBookings = await ctx.db
         .query("bookings")
@@ -344,12 +348,30 @@ export const tasteTwins = query({
     }
 
     // Soft gate (Idea #3): Taste Twins only available at "seated" tier.
+    // M-24 server side: apply the same lazy >15-min "seated" promotion
+    // visibleDiners computes, so waiting 15 minutes actually unlocks the
+    // feature instead of requiring a visibility toggle.
+    const SEATED_THRESHOLD_MS = 15 * 60 * 1000;
     const viewerPresences = await ctx.db
       .query("dinerPresence")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
     const viewerPresence = viewerPresences.find((p) => p.restaurantId === restaurantId);
-    const viewerTier = viewerPresence?.accessTier ?? (viewerPresence?.visible ? "checked_in" : "booked");
+    let viewerTier: "booked" | "checked_in" | "seated" = "booked";
+    if (viewerPresence) {
+      const tier =
+        viewerPresence.accessTier ?? (viewerPresence.visible ? "checked_in" : "booked");
+      if (tier === "checked_in") {
+        const viewerBooking = await safeGet<Doc<"bookings">>(ctx, viewerPresence.bookingId);
+        viewerTier =
+          viewerBooking?.checkedInAt &&
+          Date.now() - viewerBooking.checkedInAt >= SEATED_THRESHOLD_MS
+            ? "seated"
+            : "checked_in";
+      } else {
+        viewerTier = tier;
+      }
+    }
     if (viewerTier !== "seated" && !isOwner) return [];
 
     const me = await safeGet<Doc<"users">>(ctx, userId);
@@ -368,7 +390,6 @@ export const tasteTwins = query({
     let visible = presences.filter((p) => p.visible && p.userId !== userId);
 
     // BUG-10: apply block list filter (same as visibleDiners)
-    const socializeSettings = restaurant?.socialize;
     if (socializeSettings?.blockedUserIds?.length) {
       const blocked = new Set(socializeSettings.blockedUserIds);
       visible = visible.filter((p) => !blocked.has(p.userId as never));
@@ -458,11 +479,12 @@ export const setVisibility = mutation({
   args: {
     bookingId: v.id("bookings"),
     visible: v.boolean(),
+    clientDate: v.optional(v.string()),
   },
-  handler: async (ctx, { bookingId, visible }) => {
+  handler: async (ctx, { bookingId, visible, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
-    const booking = await requireCheckedInBooking(ctx, userId, bookingId);
+    const booking = await requireCheckedInBooking(ctx, userId, bookingId, clientDate);
 
     const now = Date.now();
     const existing = await ctx.db
@@ -659,6 +681,16 @@ export const sendGift = mutation({
       (p) => p.restaurantId === booking.restaurantId && p.visible,
     );
     if (!active) throw new Error("That diner isn't accepting gifts right now.");
+    // M-14: presence alone isn't enough — the receiver's booking must still
+    // be confirmed and for today, so gifts can't address absent diners.
+    const receiverBooking = await safeGet<Doc<"bookings">>(ctx, active.bookingId);
+    if (
+      !receiverBooking ||
+      receiverBooking.status !== "confirmed" ||
+      receiverBooking.date !== resolveTodayKey(clientDate)
+    ) {
+      throw new Error("That diner isn't accepting gifts right now.");
+    }
 
     const now = Date.now();
     const id = await ctx.db.insert("giftDeliveries", {
@@ -732,8 +764,10 @@ export const myReceivedGifts = query({
           createdAt: g.createdAt,
           deliveredAt: g.deliveredAt,
           restaurantName: restaurants[i]?.name ?? "Restaurant",
-          senderName: senders[i]?.name ?? "Guest",
-          senderImage: senders[i]?.image ?? undefined,
+          // H-6: sender identity is only revealed on delivery — masking it
+          // here is what makes anonymous/surprise gifting actually work.
+          senderName: surprise ? "A guest" : (senders[i]?.name ?? "Guest"),
+          senderImage: surprise ? undefined : (senders[i]?.image ?? undefined),
           // details are hidden until the surprise is delivered
           gift: surprise
             ? null
