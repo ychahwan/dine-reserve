@@ -19,6 +19,7 @@
     "mobile:open": "cap open",
     "cap:add:ios": "npx cap add ios",
     "cap:add:android": "npx cap add android",
+    "test:e2e": "npx convex run --typecheck=disable testHelpers:wipeRateLimits '{}' && npx playwright test",
     "deploy": "bash scripts/deploy-render.sh",
     "deploy:convex": "npx convex deploy"
   },
@@ -96,6 +97,7 @@
     "@capacitor/cli": "^8.5.0",
     "@capacitor/ios": "^8.5.0",
     "@eslint/js": "^9.39.1",
+    "@playwright/test": "^1.62.1",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",

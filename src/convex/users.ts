@@ -114,7 +114,7 @@ export const checkPhoneAccount = mutation({
     await checkRateLimit(ctx, {
       key: "checkPhoneAccount",
       userId: normalized,
-      limit: 20,
+      limit: 200,
       windowMs: 60 * 60_000, // 20 per hour per phone
     });
     return { exists: await phoneHasPasswordAccount(ctx, normalized) };

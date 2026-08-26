@@ -39,6 +39,7 @@ import type * as sms from "../sms.js";
 import type * as socialize from "../socialize.js";
 import type * as stories from "../stories.js";
 import type * as stressSeed from "../stressSeed.js";
+import type * as testHelpers from "../testHelpers.js";
 import type * as twilio from "../twilio.js";
 import type * as uploads from "../uploads.js";
 import type * as users from "../users.js";
@@ -84,6 +85,7 @@ declare const fullApi: ApiFromModules<{
   socialize: typeof socialize;
   stories: typeof stories;
   stressSeed: typeof stressSeed;
+  testHelpers: typeof testHelpers;
   twilio: typeof twilio;
   uploads: typeof uploads;
   users: typeof users;
