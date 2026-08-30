@@ -28,8 +28,12 @@ import {
 import { ArrowLeft, Ban, Eye, EyeOff, Gift, KeyRound, Loader2, Mail, Phone, ShieldCheck, Trash2, UserRoundCheck } from "lucide-react";
 import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote } from "./AdminUI";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { SortableHead, TablePaginationBar } from "./AdminUI";
+import { useTablePagination, useSort, sortItems } from "@/lib/use-table-pagination";
+
+const EMPTY_ROWS: never[] = [];
 
 export default function AdminUserDetail() {
   const { id } = useParams();
@@ -37,6 +41,7 @@ export default function AdminUserDetail() {
   const setUserPassword = useMutation(api.admin.setUserPassword);
   const setUserDisabled = useMutation(api.admin.setUserDisabled);
   const deleteUser = useMutation(api.admin.deleteUser);
+  const updateUserProfile = useMutation(api.admin.updateUserProfile);
 
   const [newPassword, setNewPassword] = useState("");
   const [showPass, setShowPass] = useState(false);
@@ -45,6 +50,9 @@ export default function AdminUserDetail() {
   const [modBusy, setModBusy] = useState(false);
   const [modError, setModError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editFamilyName, setEditFamilyName] = useState("");
+  const [profileBusy, setProfileBusy] = useState(false);
 
   const handleSetDisabled = async (disabled: boolean) => {
     if (!id || modBusy) return;
@@ -95,6 +103,40 @@ export default function AdminUserDetail() {
     }
   };
 
+  const handleProfileSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || profileBusy) return;
+    setProfileBusy(true);
+    try {
+      await updateUserProfile({ userId: id as never, name: editName, familyName: editFamilyName });
+      toast.success("User profile updated.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update the profile.");
+    } finally { setProfileBusy(false); }
+  };
+
+  const userForHooks = data?.user;
+  const bookings = data?.bookings ?? EMPTY_ROWS;
+  const orders = data?.orders ?? EMPTY_ROWS;
+  const reviews = data?.reviews ?? EMPTY_ROWS;
+  const bookingSort = useSort<"date" | "party" | "status">({ key: "date", direction: "desc" });
+  const orderSort = useSort<"createdAt" | "total" | "status">({ key: "createdAt", direction: "desc" });
+  const reviewSort = useSort<"createdAt" | "rating">({ key: "createdAt", direction: "desc" });
+  const sortedBookings = useMemo(() => sortItems(bookings, bookingSort.sort.key, bookingSort.sort.direction, (b, k) => k === "date" ? `${b.date}T${b.time}` : k === "party" ? b.partySize : b.status), [bookings, bookingSort.sort]);
+  const sortedOrders = useMemo(() => sortItems(orders, orderSort.sort.key, orderSort.sort.direction, (o, k) => k === "createdAt" ? o.createdAt : k === "total" ? o.totalCents : o.status), [orders, orderSort.sort]);
+  const sortedReviews = useMemo(() => sortItems(reviews, reviewSort.sort.key, reviewSort.sort.direction, (r, k) => k === "createdAt" ? r.createdAt : r.rating), [reviews, reviewSort.sort]);
+  const bookingPage = useTablePagination({ items: sortedBookings, sortKey: bookingSort.sort.key, sortDirection: bookingSort.sort.direction, pageSize: 10 });
+  const orderPage = useTablePagination({ items: sortedOrders, sortKey: orderSort.sort.key, sortDirection: orderSort.sort.direction, pageSize: 10 });
+  const reviewPage = useTablePagination({ items: sortedReviews, sortKey: reviewSort.sort.key, sortDirection: reviewSort.sort.direction, pageSize: 10 });
+  useEffect(() => {
+    if (userForHooks) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEditName(userForHooks.name ?? "");
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setEditFamilyName(userForHooks.familyName ?? "");
+    }
+  }, [userForHooks]);
+
   if (data === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
@@ -103,8 +145,8 @@ export default function AdminUserDetail() {
     );
   }
   if (data === null) return <EmptyNote>User not found.</EmptyNote>;
+  const user = data.user;
 
-  const { user } = data;
 
   return (
     <div className="mx-auto max-w-5xl space-y-6">
@@ -143,6 +185,17 @@ export default function AdminUserDetail() {
               <div><p className="text-xl font-bold">{data.reviews.length}</p><p className="text-[11px] text-muted-foreground">Reviews</p></div>
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border-border/70">
+        <CardHeader className="pb-3"><CardTitle className="text-base">Edit user name</CardTitle><CardDescription>Update the user&apos;s first and family name.</CardDescription></CardHeader>
+        <CardContent>
+          <form className="flex flex-wrap items-end gap-3" onSubmit={handleProfileSave}>
+            <div className="min-w-52 flex-1"><label className="mb-1 block text-xs text-muted-foreground">First name</label><Input value={editName} onChange={(e) => setEditName(e.target.value)} required /></div>
+            <div className="min-w-52 flex-1"><label className="mb-1 block text-xs text-muted-foreground">Family name</label><Input value={editFamilyName} onChange={(e) => setEditFamilyName(e.target.value)} /></div>
+            <Button type="submit" disabled={profileBusy}>{profileBusy ? <Loader2 className="size-4 animate-spin" /> : "Save name"}</Button>
+          </form>
         </CardContent>
       </Card>
 
@@ -231,19 +284,19 @@ export default function AdminUserDetail() {
 
       <Tabs defaultValue="bookings">
         <TabsList className="flex-wrap">
-          <TabsTrigger value="bookings">Bookings ({data.bookings.length})</TabsTrigger>
-          <TabsTrigger value="orders">Orders ({data.orders.length})</TabsTrigger>
-          <TabsTrigger value="reviews">Reviews ({data.reviews.length})</TabsTrigger>
+          <TabsTrigger value="bookings">Bookings ({bookings.length})</TabsTrigger>
+          <TabsTrigger value="orders">Orders ({orders.length})</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews ({reviews.length})</TabsTrigger>
           <TabsTrigger value="interactions">Interactions</TabsTrigger>
         </TabsList>
 
         <TabsContent value="bookings">
           <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
-            {data.bookings.length === 0 ? <EmptyNote>No bookings.</EmptyNote> : (
+            {bookings.length === 0 ? <EmptyNote>No bookings.</EmptyNote> : (
               <Table>
-                <TableHeader><TableRow><TableHead>Restaurant</TableHead><TableHead>When</TableHead><TableHead>Party</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Restaurant</TableHead><SortableHead label="When" sortKey="date" activeSortKey={bookingSort.sort.key} direction={bookingSort.sort.direction} onToggle={bookingSort.toggleSort} /><SortableHead label="Party" sortKey="party" activeSortKey={bookingSort.sort.key} direction={bookingSort.sort.direction} onToggle={bookingSort.toggleSort} /><SortableHead label="Status" sortKey="status" activeSortKey={bookingSort.sort.key} direction={bookingSort.sort.direction} onToggle={bookingSort.toggleSort} /></TableRow></TableHeader>
                 <TableBody>
-                  {data.bookings.map((b) => (
+                  {bookingPage.pageItems.map((b) => (
                     <TableRow key={b._id}>
                       <TableCell><Link to={`/admin/restaurants/${b.restaurantId}`} className="font-medium hover:text-primary">{b.restaurantName}</Link></TableCell>
                       <TableCell>{formatDate(b.date)} · {formatTime(b.time)}</TableCell>
@@ -254,16 +307,17 @@ export default function AdminUserDetail() {
                 </TableBody>
               </Table>
             )}
+            <TablePaginationBar page={bookingPage.page} totalPages={bookingPage.totalPages} totalItems={bookingPage.totalItems} showingCount={bookingPage.pageItems.length} onPageChange={bookingPage.setPage} />
           </CardContent></Card>
         </TabsContent>
 
         <TabsContent value="orders">
           <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
-            {data.orders.length === 0 ? <EmptyNote>No dine-in orders.</EmptyNote> : (
+            {orders.length === 0 ? <EmptyNote>No dine-in orders.</EmptyNote> : (
               <Table>
-                <TableHeader><TableRow><TableHead>Restaurant</TableHead><TableHead>Items</TableHead><TableHead>Total</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Restaurant</TableHead><TableHead>Items</TableHead><SortableHead label="Total" sortKey="total" activeSortKey={orderSort.sort.key} direction={orderSort.sort.direction} onToggle={orderSort.toggleSort} /><SortableHead label="Status" sortKey="status" activeSortKey={orderSort.sort.key} direction={orderSort.sort.direction} onToggle={orderSort.toggleSort} /></TableRow></TableHeader>
                 <TableBody>
-                  {data.orders.map((o) => (
+                  {orderPage.pageItems.map((o) => (
                     <TableRow key={o._id}>
                       <TableCell className="font-medium">{o.restaurantName}</TableCell>
                       <TableCell className="max-w-xs text-sm text-muted-foreground">{o.items.map((it) => `${it.quantity}× ${it.name}`).join(", ")}</TableCell>
@@ -274,16 +328,17 @@ export default function AdminUserDetail() {
                 </TableBody>
               </Table>
             )}
+            <TablePaginationBar page={orderPage.page} totalPages={orderPage.totalPages} totalItems={orderPage.totalItems} showingCount={orderPage.pageItems.length} onPageChange={orderPage.setPage} />
           </CardContent></Card>
         </TabsContent>
 
         <TabsContent value="reviews">
           <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
-            {data.reviews.length === 0 ? <EmptyNote>No reviews written.</EmptyNote> : (
+            {reviews.length === 0 ? <EmptyNote>No reviews written.</EmptyNote> : (
               <Table>
-                <TableHeader><TableRow><TableHead>Restaurant</TableHead><TableHead>Rating</TableHead><TableHead className="w-full">Feedback</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Restaurant</TableHead><SortableHead label="Rating" sortKey="rating" activeSortKey={reviewSort.sort.key} direction={reviewSort.sort.direction} onToggle={reviewSort.toggleSort} /><SortableHead label="Feedback" sortKey="createdAt" activeSortKey={reviewSort.sort.key} direction={reviewSort.sort.direction} onToggle={reviewSort.toggleSort} /></TableRow></TableHeader>
                 <TableBody>
-                  {data.reviews.map((r) => (
+                  {reviewPage.pageItems.map((r) => (
                     <TableRow key={r._id}>
                       <TableCell className="font-medium">{r.restaurantName}</TableCell>
                       <TableCell><Stars rating={r.rating} /></TableCell>
@@ -293,6 +348,7 @@ export default function AdminUserDetail() {
                 </TableBody>
               </Table>
             )}
+            <TablePaginationBar page={reviewPage.page} totalPages={reviewPage.totalPages} totalItems={reviewPage.totalItems} showingCount={reviewPage.pageItems.length} onPageChange={reviewPage.setPage} />
           </CardContent></Card>
         </TabsContent>
 

@@ -318,6 +318,16 @@ export const updateOrderStatus = mutation({
     if (!(await isOwnerOf(ctx, userId, order.restaurantId))) {
       throw new Error("Only the restaurant owner can update orders.");
     }
+    const allowed: Record<string, string[]> = {
+      open: ["preparing", "cancelled"],
+      preparing: ["served", "cancelled"],
+      served: ["completed"],
+      completed: [],
+      cancelled: [],
+    };
+    if (order.status !== status && !allowed[order.status]?.includes(status)) {
+      throw new Error(`Cannot change an ${order.status} order to ${status}.`);
+    }
     await ctx.db.patch(orderId, { status, updatedAt: Date.now() });
     return await ctx.db.get(orderId);
   },

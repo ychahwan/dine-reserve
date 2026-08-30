@@ -85,10 +85,7 @@ export const claimPlatformAdmin = mutation({
       (phone) => phone === PLATFORM_ADMIN_PHONE,
     );
     if (!isPlatformAdmin) {
-      throw new Error(
-        "This phone number is not the platform admin. " +
-          `Account phones: [${accountPhones.join(", ")}]`,
-      );
+      throw new Error("This account is not eligible for platform admin access.");
     }
 
     await ctx.db.patch(userId, { role: "admin", onboarded: true });
@@ -790,6 +787,26 @@ export const setUserPassword = mutation({
       details: JSON.stringify({ phone }),
     });
 
+    return await ctx.db.get(userId);
+  },
+});
+
+/** Admin-only profile editing; authentication identifiers and roles remain
+ * separate privileged operations. */
+export const updateUserProfile = mutation({
+  args: { userId: v.id("users"), name: v.string(), familyName: v.optional(v.string()) },
+  handler: async (ctx, { userId, name, familyName }) => {
+    const { userId: adminUserId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, { key: "updateUserProfile", userId: adminUserId, limit: 120, windowMs: 60 * 60_000 });
+    const cleanName = name.trim().slice(0, 80);
+    const cleanFamilyName = familyName?.trim().slice(0, 80) || undefined;
+    if (!cleanName) throw new Error("First name is required.");
+    if (!(await ctx.db.get(userId))) throw new Error("User not found.");
+    await ctx.db.patch(userId, { name: cleanName, familyName: cleanFamilyName });
+    await logAdminAction(ctx, adminUserId, "updateUserProfile", {
+      targetUserId: userId as unknown as string,
+      details: JSON.stringify({ name: cleanName, familyName: cleanFamilyName ?? null }),
+    });
     return await ctx.db.get(userId);
   },
 });

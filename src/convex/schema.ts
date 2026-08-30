@@ -153,6 +153,7 @@ const schema = defineSchema(
     // the users table is the default users table that is brought in by the authTables
     users: defineTable({
       name: v.optional(v.string()), // name of the user. do not remove
+      familyName: v.optional(v.string()), // admin-editable family name
       image: v.optional(v.string()), // image of the user. do not remove
       email: v.optional(v.string()), // email of the user. do not remove
       emailVerificationTime: v.optional(v.number()), // email verification time. do not remove

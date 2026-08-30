@@ -435,6 +435,10 @@ export const create = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
+    const caller = await ctx.db.get(userId);
+    if (caller?.role !== "owner" && caller?.role !== "admin") {
+      throw new Error("Only approved restaurant owners can create restaurants.");
+    }
     // Zod: non-empty name/cuisine/city/address, sane price range, length caps.
     parseOrThrow(restaurantArgsSchema, args);
 

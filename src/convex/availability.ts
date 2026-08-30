@@ -188,6 +188,10 @@ export const ensureForDate = mutation({
     await checkRateLimit(ctx, { key: "ensureForDate", userId, limit: 20, windowMs: 60_000 });
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
+    const caller = await ctx.db.get(userId);
+    if (restaurant.ownerId !== userId && caller?.role !== "admin") {
+      throw new Error("Only the restaurant owner can materialize availability.");
+    }
     // A disabled restaurant only materializes slots for its owner/admin
     // (moderation preview); everyone else is rejected.
     if (restaurant.disabled) {

@@ -72,7 +72,7 @@ export const create = mutation({
       userId,
       amount: POINTS.REVIEW,
       source: "review",
-      sourceId: `booking:${booking._id}`,
+      sourceId: `review:${reviewId}`,
     });
     return await ctx.db.get(reviewId);
   },
@@ -150,7 +150,7 @@ export const remove = mutation({
       .withIndex("by_user_source", (q) =>
         q
           .eq("userId", review.userId)
-          .eq("sourceId", `booking:${review.bookingId ?? ""}`),
+        .eq("sourceId", `review:${review._id}`),
       )
       .collect();
     const reviewLedger = ledger.find((l) => l.source === "review");
