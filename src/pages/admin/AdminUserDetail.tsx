@@ -25,7 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ArrowLeft, Ban, Eye, EyeOff, Gift, KeyRound, Loader2, Mail, Phone, ShieldCheck, Trash2, UserRoundCheck } from "lucide-react";
+import { ArrowLeft, Ban, Eye, EyeOff, KeyRound, Loader2, Mail, Phone, ShieldCheck, Trash2, UserRoundCheck } from "lucide-react";
 import { roleBadge, bookingStatusBadge, orderStatusBadge, Stars, EmptyNote } from "./AdminUI";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
 import { useEffect, useMemo, useState } from "react";
@@ -119,15 +119,33 @@ export default function AdminUserDetail() {
   const bookings = data?.bookings ?? EMPTY_ROWS;
   const orders = data?.orders ?? EMPTY_ROWS;
   const reviews = data?.reviews ?? EMPTY_ROWS;
+  const assists = data?.assists ?? EMPTY_ROWS;
+  const menuRequests = data?.menuRequests ?? EMPTY_ROWS;
+  const giftsSent = data?.giftsSent ?? EMPTY_ROWS;
+  const giftsReceived = data?.giftsReceived ?? EMPTY_ROWS;
   const bookingSort = useSort<"date" | "party" | "status">({ key: "date", direction: "desc" });
   const orderSort = useSort<"createdAt" | "total" | "status">({ key: "createdAt", direction: "desc" });
   const reviewSort = useSort<"createdAt" | "rating">({ key: "createdAt", direction: "desc" });
+  const requestSort = useSort<"createdAt" | "type" | "status">({ key: "createdAt", direction: "desc" });
+  const giftSort = useSort<"createdAt" | "direction" | "price" | "status">({ key: "createdAt", direction: "desc" });
   const sortedBookings = useMemo(() => sortItems(bookings, bookingSort.sort.key, bookingSort.sort.direction, (b, k) => k === "date" ? `${b.date}T${b.time}` : k === "party" ? b.partySize : b.status), [bookings, bookingSort.sort]);
   const sortedOrders = useMemo(() => sortItems(orders, orderSort.sort.key, orderSort.sort.direction, (o, k) => k === "createdAt" ? o.createdAt : k === "total" ? o.totalCents : o.status), [orders, orderSort.sort]);
   const sortedReviews = useMemo(() => sortItems(reviews, reviewSort.sort.key, reviewSort.sort.direction, (r, k) => k === "createdAt" ? r.createdAt : r.rating), [reviews, reviewSort.sort]);
+  const requestRows = useMemo(() => [
+    ...assists.map((a) => ({ id: `a-${a._id}`, interactionType: "Assist", restaurantName: a.restaurantName, detail: a.template, status: a.status, resolveMinutes: a.resolveMs != null ? Math.round(a.resolveMs / 60000) : null, createdAt: a.createdAt })),
+    ...menuRequests.map((m) => ({ id: `m-${m._id}`, interactionType: "Menu request", restaurantName: "—", detail: m.name, status: m.status, resolveMinutes: null, createdAt: m.createdAt })),
+  ], [assists, menuRequests]);
+  const giftRows = useMemo(() => [
+    ...giftsSent.map((g) => ({ ...g, direction: "Sent" })),
+    ...giftsReceived.map((g) => ({ ...g, direction: "Received" })),
+  ], [giftsSent, giftsReceived]);
+  const sortedRequests = useMemo(() => sortItems(requestRows, requestSort.sort.key, requestSort.sort.direction, (r, k) => k === "createdAt" ? r.createdAt : k === "type" ? r.interactionType : r.status), [requestRows, requestSort.sort]);
+  const sortedGifts = useMemo(() => sortItems(giftRows, giftSort.sort.key, giftSort.sort.direction, (g, k) => k === "createdAt" ? g.createdAt : k === "direction" ? g.direction : k === "price" ? g.priceCents : g.status), [giftRows, giftSort.sort]);
   const bookingPage = useTablePagination({ items: sortedBookings, sortKey: bookingSort.sort.key, sortDirection: bookingSort.sort.direction, pageSize: 10 });
   const orderPage = useTablePagination({ items: sortedOrders, sortKey: orderSort.sort.key, sortDirection: orderSort.sort.direction, pageSize: 10 });
   const reviewPage = useTablePagination({ items: sortedReviews, sortKey: reviewSort.sort.key, sortDirection: reviewSort.sort.direction, pageSize: 10 });
+  const requestPage = useTablePagination({ items: sortedRequests, sortKey: requestSort.sort.key, sortDirection: requestSort.sort.direction, pageSize: 10 });
+  const giftPage = useTablePagination({ items: sortedGifts, sortKey: giftSort.sort.key, sortDirection: giftSort.sort.direction, pageSize: 10 });
   useEffect(() => {
     if (userForHooks) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -287,7 +305,8 @@ export default function AdminUserDetail() {
           <TabsTrigger value="bookings">Bookings ({bookings.length})</TabsTrigger>
           <TabsTrigger value="orders">Orders ({orders.length})</TabsTrigger>
           <TabsTrigger value="reviews">Reviews ({reviews.length})</TabsTrigger>
-          <TabsTrigger value="interactions">Interactions</TabsTrigger>
+          <TabsTrigger value="requests">Requests ({requestRows.length})</TabsTrigger>
+          <TabsTrigger value="gifts">Gifts ({giftRows.length})</TabsTrigger>
         </TabsList>
 
         <TabsContent value="bookings">
@@ -352,62 +371,50 @@ export default function AdminUserDetail() {
           </CardContent></Card>
         </TabsContent>
 
-        <TabsContent value="interactions">
-          <div className="space-y-4">
-            <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
-              {data.assists.length === 0 && data.menuRequests.length === 0 ? <EmptyNote>No table requests.</EmptyNote> : (
+        <TabsContent value="requests">
+          <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
+              {requestRows.length === 0 ? <EmptyNote>No table requests.</EmptyNote> : (
                 <Table>
-                  <TableHeader><TableRow><TableHead>Type</TableHead><TableHead>Restaurant</TableHead><TableHead>Detail</TableHead><TableHead>Status</TableHead><TableHead>Resolve time</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><SortableHead label="Type" sortKey="type" activeSortKey={requestSort.sort.key} direction={requestSort.sort.direction} onToggle={requestSort.toggleSort} /><TableHead>Restaurant</TableHead><TableHead>Detail</TableHead><SortableHead label="Status" sortKey="status" activeSortKey={requestSort.sort.key} direction={requestSort.sort.direction} onToggle={requestSort.toggleSort} /><TableHead>Resolve time</TableHead><SortableHead label="Created" sortKey="createdAt" activeSortKey={requestSort.sort.key} direction={requestSort.sort.direction} onToggle={requestSort.toggleSort} /></TableRow></TableHeader>
                   <TableBody>
-                    {data.assists.map((a) => (
-                      <TableRow key={`a-${a._id}`}>
-                        <TableCell className="font-medium">Assist</TableCell>
-                        <TableCell>{a.restaurantName}</TableCell>
-                        <TableCell>{a.template}</TableCell>
-                        <TableCell>{a.status}</TableCell>
-                        <TableCell className="text-muted-foreground">{a.resolveMs != null ? `${Math.round(a.resolveMs / 60000)} min` : "—"}</TableCell>
-                      </TableRow>
-                    ))}
-                    {data.menuRequests.map((m) => (
-                      <TableRow key={`m-${m._id}`}>
-                        <TableCell className="font-medium">Menu request</TableCell>
-                        <TableCell>—</TableCell>
-                        <TableCell>{m.name}</TableCell>
-                        <TableCell>{m.status}</TableCell>
-                        <TableCell>—</TableCell>
+                    {requestPage.pageItems.map((r) => (
+                      <TableRow key={r.id}>
+                        <TableCell className="font-medium">{r.interactionType}</TableCell>
+                        <TableCell>{r.restaurantName}</TableCell>
+                        <TableCell>{r.detail}</TableCell>
+                        <TableCell>{r.status}</TableCell>
+                        <TableCell className="text-muted-foreground">{r.resolveMinutes != null ? `${r.resolveMinutes} min` : "—"}</TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               )}
-            </CardContent></Card>
+            <TablePaginationBar page={requestPage.page} totalPages={requestPage.totalPages} totalItems={requestPage.totalItems} showingCount={requestPage.pageItems.length} onPageChange={requestPage.setPage} />
+          </CardContent></Card>
+        </TabsContent>
 
-            <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
-              {data.giftsSent.length === 0 && data.giftsReceived.length === 0 ? <EmptyNote>No gifts.</EmptyNote> : (
+        <TabsContent value="gifts">
+          <Card className="rounded-2xl border-border/70"><CardContent className="p-0">
+              {giftRows.length === 0 ? <EmptyNote>No gifts.</EmptyNote> : (
                 <Table>
-                  <TableHeader><TableRow><TableHead className="flex items-center gap-1"><Gift className="size-3.5" /> Direction</TableHead><TableHead>Restaurant</TableHead><TableHead>Gift</TableHead><TableHead>Status</TableHead></TableRow></TableHeader>
+                  <TableHeader><TableRow><SortableHead label="Direction" sortKey="direction" activeSortKey={giftSort.sort.key} direction={giftSort.sort.direction} onToggle={giftSort.toggleSort} /><TableHead>Restaurant</TableHead><TableHead>Gift</TableHead><SortableHead label="Price" sortKey="price" activeSortKey={giftSort.sort.key} direction={giftSort.sort.direction} onToggle={giftSort.toggleSort} /><SortableHead label="Status" sortKey="status" activeSortKey={giftSort.sort.key} direction={giftSort.sort.direction} onToggle={giftSort.toggleSort} /><SortableHead label="Created" sortKey="createdAt" activeSortKey={giftSort.sort.key} direction={giftSort.sort.direction} onToggle={giftSort.toggleSort} /></TableRow></TableHeader>
                   <TableBody>
-                    {data.giftsSent.map((g) => (
-                      <TableRow key={`s-${g._id}`}>
-                        <TableCell>Sent</TableCell>
+                    {giftPage.pageItems.map((g) => (
+                      <TableRow key={`${g.direction}-${g._id}`}>
+                        <TableCell className="font-medium">{g.direction}</TableCell>
                         <TableCell>{g.restaurantName}</TableCell>
                         <TableCell>{g.emoji} {g.name}</TableCell>
+                        <TableCell>{formatPrice(g.priceCents)}</TableCell>
                         <TableCell>{g.status}</TableCell>
-                      </TableRow>
-                    ))}
-                    {data.giftsReceived.map((g) => (
-                      <TableRow key={`r-${g._id}`}>
-                        <TableCell>Received</TableCell>
-                        <TableCell>{g.restaurantName}</TableCell>
-                        <TableCell>{g.emoji} {g.name}</TableCell>
-                        <TableCell>{g.status}</TableCell>
+                        <TableCell className="text-muted-foreground">{new Date(g.createdAt).toLocaleDateString()}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               )}
-            </CardContent></Card>
-          </div>
+            <TablePaginationBar page={giftPage.page} totalPages={giftPage.totalPages} totalItems={giftPage.totalItems} showingCount={giftPage.pageItems.length} onPageChange={giftPage.setPage} />
+          </CardContent></Card>
         </TabsContent>
       </Tabs>
 
