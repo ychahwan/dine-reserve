@@ -4,7 +4,7 @@
 # Builds the React/Vite frontend and serves it with nginx.
 # VITE_CONVEX_URL must be set as a build arg or Render env var.
 #
-# Usage:
+# Usage:d
 #   docker build --build-arg VITE_CONVEX_URL=https://xxx.convex.cloud -t kamix .
 #   docker run -p 80:80 kamix
 # ---------------------------------------------------------------------------
