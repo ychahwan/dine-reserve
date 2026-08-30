@@ -65,5 +65,10 @@ export default defineConfig({
       dependencies: ["setup"],
       use: { storageState: "e2e/.auth/admin.json" },
     },
+    {
+      name: "account-switching",
+      testMatch: /account-switching\.spec\.ts/,
+      // No dependencies — tests the full login flow fresh
+    },
   ],
 });
