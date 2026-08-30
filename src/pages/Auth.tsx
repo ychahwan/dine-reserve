@@ -120,7 +120,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     try {
       const formData = new FormData(event.currentTarget);
       await signIn("password", formData);
-      navigate(resolveTarget());
+      // Don't navigate eagerly — the useEffect watching `user` will redirect
+      // once the new session's role is available, avoiding stale-profile routing.
     } catch (err) {
       console.error("Password sign-in error:", err);
       setError(t("auth.errInvalidPassword"));
@@ -263,7 +264,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     setError(null);
     try {
       await setPasswordMutation({ newPassword: password });
-      navigate(resolveTarget());
+      // Reset step away from "set-password" so the useEffect fires and
+      // redirects to the correct role page once the user doc updates.
+      setStep("enter-phone");
     } catch (err) {
       console.error("Set password error:", err);
       setError(err instanceof Error ? err.message : t("auth.errSetPassword"));
@@ -298,7 +301,8 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
     try {
       const formData = new FormData(event.currentTarget);
       await signIn("password", formData);
-      navigate(resolveTarget());
+      // Don't navigate eagerly — the useEffect watching `user` will redirect
+      // once the new session's role is available, avoiding stale-profile routing.
     } catch (err) {
       console.error("Password reset error:", err);
       setError(t("auth.errResetCode"));
@@ -308,7 +312,9 @@ function Auth({ redirectAfterAuth }: AuthProps = {}) {
   };
 
   const handleSkipPassword = () => {
-    navigate(resolveTarget());
+    // Reset step away from "set-password" so the useEffect fires and
+    // redirects to the correct role page based on user.role.
+    setStep("enter-phone");
   };
 
   const handleBack = () => {
