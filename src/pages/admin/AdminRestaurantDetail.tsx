@@ -1,6 +1,7 @@
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTranslation } from "react-i18next";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -181,6 +182,7 @@ const DATE_PRESETS = [
 // ── Main component ──
 
 export default function AdminRestaurantDetail() {
+  const { t } = useTranslation();
   const { id } = useParams();
   const data = useQuery(api.adminView.restaurantDetail, { id: id as never });
   const setRestaurantDisabled = useMutation(api.admin.setRestaurantDisabled);
@@ -411,7 +413,7 @@ export default function AdminRestaurantDetail() {
           <Button variant="outline" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={modBusy} onClick={() => setConfirmDelete(true)}>
             <Trash2 className="size-4" /> Delete restaurant permanently
           </Button>
-          {restaurant.disabled && <p className="text-xs text-muted-foreground">Hidden from Explore and new bookings until re-enabled.</p>}
+          {restaurant.disabled && <p className="text-xs text-muted-foreground">{t("admin.hiddenFromExplore")}</p>}
           {modError && <p className="w-full rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{modError}</p>}
         </CardContent>
       </Card>
@@ -638,7 +640,7 @@ export default function AdminRestaurantDetail() {
             {/* Assist requests */}
             <Card className="rounded-2xl border-border/70">
               <CardHeader className="flex flex-row items-center justify-between pb-3">
-                <CardTitle className="text-base">Assist requests (table pings)</CardTitle>
+                <CardTitle className="text-base">{t("admin.assistRequests")}</CardTitle>
                 <Button variant="outline" size="sm" onClick={handleExportAssists} disabled={filteredAssists.length === 0}>
                   <Download className="size-3.5" /> CSV
                 </Button>
@@ -680,7 +682,7 @@ export default function AdminRestaurantDetail() {
             {/* Menu requests */}
             <Card className="rounded-2xl border-border/70">
               <CardHeader className="flex flex-row items-center justify-between pb-3">
-                <CardTitle className="text-base">Menu requests (off-menu)</CardTitle>
+                <CardTitle className="text-base">{t("admin.menuRequests")}</CardTitle>
                 <Button variant="outline" size="sm" onClick={handleExportMenuReqs} disabled={filteredMenuReqs.length === 0}>
                   <Download className="size-3.5" /> CSV
                 </Button>
@@ -734,14 +736,14 @@ export default function AdminRestaurantDetail() {
                 {data.hours.filter((h) => h.enabled).map((h) => (
                   <Badge key={h._id} variant="secondary">Day {h.dayOfWeek}: {formatTime(h.open)}–{formatTime(h.close)}</Badge>
                 ))}
-                {data.hours.filter((h) => h.enabled).length === 0 && <span className="text-sm text-muted-foreground">No hours set</span>}
+                {data.hours.filter((h) => h.enabled).length === 0 && <span className="text-sm text-muted-foreground">{t("admin.noHoursSet")}</span>}
               </div>
               <h3 className="mt-4 font-semibold">Menus</h3>
               <div className="mt-2 flex flex-wrap gap-2">
                 {data.menus.map((m) => (
                   <Badge key={m._id} variant="outline">{m.name}</Badge>
                 ))}
-                {data.menus.length === 0 && <span className="text-sm text-muted-foreground">No menus</span>}
+                {data.menus.length === 0 && <span className="text-sm text-muted-foreground">{t("admin.noMenus")}</span>}
               </div>
             </CardContent>
           </Card>
@@ -751,7 +753,7 @@ export default function AdminRestaurantDetail() {
       <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && !modBusy && setConfirmDelete(false)}>
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Delete this restaurant permanently?</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">{t("admin.deleteRestaurantTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               This permanently erases {restaurant.name} and everything attached to it — sections,
               hours, menus, bookings, reviews, stories, gifts and waitlists. This cannot be undone.

@@ -3,6 +3,7 @@ import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
 import { useQuery } from "convex/react";
 import { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import {
   LayoutDashboard,
   Bot,
@@ -142,6 +143,7 @@ function SidebarNav({ onNavigate }: { onNavigate?: () => void }) {
 }
 
 export default function AdminShell() {
+  const { t } = useTranslation();
   const { user, isLoading, signOut } = useAuth();
   const isAdmin = useQuery(api.admin.isAdmin);
   const navigate = useNavigate();
@@ -182,7 +184,7 @@ export default function AdminShell() {
           </span>
           <div className="leading-tight">
             <p className="text-sm font-semibold tracking-tight">Kamix Admin</p>
-            <p className="text-xs text-muted-foreground">Platform console</p>
+            <p className="text-xs text-muted-foreground">{t("admin.platformConsole")}</p>
           </div>
         </div>
         <nav className="flex-1 overflow-y-auto px-3 py-3">
@@ -212,7 +214,7 @@ export default function AdminShell() {
             </span>
             <div className="leading-tight">
               <p className="text-sm font-semibold tracking-tight">Kamix Admin</p>
-              <p className="text-xs text-muted-foreground">Platform console</p>
+              <p className="text-xs text-muted-foreground">{t("admin.platformConsole")}</p>
             </div>
           </div>
           <Button

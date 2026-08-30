@@ -1,4 +1,5 @@
 import { OwnerShell } from "@/components/OwnerShell";
+import { useTranslation } from "react-i18next";
 import { OwnerMenuTab } from "@/components/OwnerMenuTab";
 import { OwnerNotificationsTab } from "@/components/OwnerNotificationsTab";
 import { OwnerInsightsTab } from "@/components/OwnerInsightsTab";
@@ -93,7 +94,9 @@ type HoursRow = { dayOfWeek: number; open: string; close: string; enabled: boole
 export default function OwnerRestaurant() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: id as never });
+  const menuData = useQuery(api.restaurants.menuForRestaurant, { id: id as never });
   const claimDemo = useMutation(api.restaurants.claimDemo);
   const [claiming, setClaiming] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -103,22 +106,24 @@ export default function OwnerRestaurant() {
       <OwnerShell title="Restaurant" onBack={() => navigate("/owner")}>
         <div className="flex flex-col items-center gap-3 py-24 text-muted-foreground">
           <Spinner className="size-6" />
-          <p className="text-sm">Loading restaurant…</p>
+          <p className="text-sm">{t("owner.loadingRestaurant")}</p>
         </div>
       </OwnerShell>
     );
   }
 
-  const { restaurant: r, sections, menuDocs, isOwner, ownerIsDemo } = data;
+  const { restaurant: r, sections, isOwner, ownerIsDemo } = data;
+  const menuDocs = menuData?.menuDocs ?? [];
+  const menuCount = menuDocs.length ?? 0;
 
   const handleClaimDemo = async () => {
     if (claiming) return;
     setClaiming(true);
     try {
       await claimDemo({ id: r._id });
-      toast.success(`You are now the owner of ${r.name} — bookings and notifications are visible.`);
+      toast.success(t("owner.claimSuccess", { name: r.name }));
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not claim this restaurant.");
+      toast.error(err instanceof Error ? err.message : t("owner.claimError"));
     } finally {
       setClaiming(false);
     }
@@ -219,7 +224,7 @@ export default function OwnerRestaurant() {
         </TabsList>
 
         <TabsContent value="overview" className="mt-5">
-          <OverviewTab restaurantId={r._id} />
+          <OverviewTab restaurantId={r._id} menuCount={menuCount} />
         </TabsContent>
         <TabsContent value="seating" className="mt-5">
           <SeatingTab restaurantId={r._id} sections={sections} />
@@ -292,7 +297,8 @@ function NotificationsBadge({ restaurantId, active }: { restaurantId: string; ac
 // Overview: edit profile + amenities + cancellation policy
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ restaurantId }: { restaurantId: string }) {
+function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCount: number }) {
+  const { t } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: restaurantId as never });
   const update = useMutation(api.restaurants.update);
   const setCancellationPolicy = useMutation(api.restaurants.setCancellationPolicy);
@@ -347,7 +353,6 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
   }, [data]);
 
   const totalCapacity = (data?.sections ?? []).reduce((sum, s) => sum + s.capacity, 0);
-  const menuCount = data?.menuDocs.length ?? 0;
   const todayKey = useToday();
   const todays = useQuery(api.bookings.byRestaurant, {
     restaurantId: restaurantId as never,
@@ -431,7 +436,7 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
 
       <Card className="rounded-2xl border-border/70 p-0 shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Restaurant profile</CardTitle>
+          <CardTitle className="text-base">{t("owner.restaurantProfile")}</CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSave} className="space-y-4">
@@ -537,13 +542,12 @@ function OverviewTab({ restaurantId }: { restaurantId: string }) {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">Enable Socialize</p>
-                    <p className="text-xs text-muted-foreground">Diners can go visible and send gifts to each other.</p>
+                    <p className="text-xs text-muted-foreground">{t("owner.socializeHint")}</p>
                   </div>
                   <Switch checked={socEnabled} onCheckedChange={setSocEnabled} />
                 </div>
                 {socEnabled && (
-                  <div className="space-y-1.5">
-                    <Label className="text-xs">Minimum completed visits to be visible</Label>
+                  <div className="space-y-1.5">                     <Label className="text-xs">{t("owner.minVisits")}</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         type="number"

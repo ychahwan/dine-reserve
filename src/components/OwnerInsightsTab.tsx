@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/convex/_generated/api";
+import { useTranslation } from "react-i18next";
 import { useAction, useQuery } from "convex/react";
 import {
   BarChart3,
@@ -31,6 +32,7 @@ const DAY_NAMES = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
  * day×hour heatmap — and the AI operations optimizer (Idea #12).
  */
 export function OwnerInsightsTab({ restaurantId }: { restaurantId: string }) {
+  const { t } = useTranslation();
   const stats = useQuery(api.bookings.stats, { restaurantId: restaurantId as never });
   const a2 = useQuery(api.analytics.analytics2, { restaurantId: restaurantId as never });
   const wait = useQuery(api.analytics.waitTimes, { restaurantId: restaurantId as never });
@@ -153,7 +155,7 @@ export function OwnerInsightsTab({ restaurantId }: { restaurantId: string }) {
         </CardHeader>
         <CardContent>
           {stats.topTimes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No completed bookings yet to analyze.</p>
+            <p className="text-sm text-muted-foreground">{t("owner.noInsights")}</p>
           ) : (
             <div className="space-y-2.5">
               {stats.topTimes.map((t) => (

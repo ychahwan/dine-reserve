@@ -1,4 +1,5 @@
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -69,6 +70,7 @@ function extractReviewValue(row: ReviewRow, key: SortKey): string | number {
 }
 
 export default function AdminReviews() {
+  const { t } = useTranslation();
   const reviews = useQuery(api.adminView.listReviews);
   const removeReview = useMutation(api.reviews.remove);
   const [restaurantId, setRestaurantId] = useState("all");
@@ -192,7 +194,7 @@ export default function AdminReviews() {
       <div className="mx-auto flex max-w-6xl flex-col gap-6">
         <div>
           <h1 className="text-2xl font-bold tracking-tight">Reviews</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Moderate diner feedback across the platform.</p>
+          <p className="mt-1 text-sm text-muted-foreground">{t("admin.reviewsListDesc")}</p>
         </div>
         <EmptyNote>No reviews yet — diners can rate a visit from My Bookings after it completes.</EmptyNote>
       </div>
@@ -220,7 +222,7 @@ export default function AdminReviews() {
               <TrendingUp className="size-5" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Avg rating{filtered.length < reviews.length ? " (filtered)" : ""}</p>
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">{filtered.length < reviews.length ? t("admin.avgRatingFiltered") : t("admin.avgRating")}</p>
               <p className="text-lg font-bold tracking-tight sm:text-xl">{stats ? `${stats.average.toFixed(1)} / 5` : "—"}</p>
             </div>
           </CardContent>
@@ -242,7 +244,7 @@ export default function AdminReviews() {
               <Star className="size-5" />
             </div>
             <div className="min-w-0">
-              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">Total platform</p>
+              <p className="truncate text-[10px] text-muted-foreground sm:text-xs">{t("admin.totalPlatform")}</p>
               <p className="text-lg font-bold tracking-tight sm:text-xl">{reviews.length}</p>
             </div>
           </CardContent>
@@ -260,7 +262,7 @@ export default function AdminReviews() {
           <div className="grid gap-3 md:grid-cols-3">
             <Select value={restaurantId} onValueChange={setRestaurantId}>
               <SelectTrigger className="w-full" aria-label="Filter by restaurant">
-                <SelectValue placeholder="All restaurants" />
+                <SelectValue placeholder={t("admin.allRestaurants")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -274,7 +276,7 @@ export default function AdminReviews() {
 
             <Select value={userId} onValueChange={setUserId}>
               <SelectTrigger className="w-full" aria-label="Filter by diner">
-                <SelectValue placeholder="All diners" />
+                <SelectValue placeholder={t("admin.allDiners")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -288,7 +290,7 @@ export default function AdminReviews() {
 
             <Select value={String(rating)} onValueChange={(value) => setRating(Number(value))}>
               <SelectTrigger className="w-full" aria-label="Filter by rating">
-                <SelectValue placeholder="All ratings" />
+                <SelectValue placeholder={t("admin.allRatings")} />
               </SelectTrigger>
               <SelectContent>
                 <SelectGroup>
@@ -400,7 +402,7 @@ export default function AdminReviews() {
                    </TableCell>
                    <TableCell className="max-w-sm">
                     <p className="line-clamp-2 text-sm text-muted-foreground">
-                      {review.text ?? <span className="italic opacity-60">No comment</span>}
+                      {review.text ?? <span className="italic opacity-60">{t("admin.noCommentShort")}</span>}
                     </p>
                   </TableCell>
                   <TableCell className="text-right">

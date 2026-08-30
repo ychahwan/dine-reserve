@@ -8,6 +8,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import { useTranslation } from "react-i18next";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -64,8 +65,8 @@ const MAX_INGREDIENTS = 12;
 // ---------------------------------------------------------------------------
 // Main tab
 // ---------------------------------------------------------------------------
-
 export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string; menuDocs: OwnerMenuDoc[] }) {
+  const { t } = useTranslation();
   const createMenu = useMutation(api.restaurants.createMenu);
   const deleteMenu = useMutation(api.restaurants.deleteMenu);
   const deleteItem = useMutation(api.restaurants.deleteMenuItem);
@@ -151,7 +152,7 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {m.items.length === 0 && <p className="text-xs text-muted-foreground">No items yet.</p>}
+            {m.items.length === 0 && <p className="text-xs text-muted-foreground">{t("owner.noItemsYet")}</p>}
             {m.items.map((it) => (
               <ItemRow key={it._id} item={it} onEdit={() => openEdit(m._id, it)} onDelete={() => handleDeleteItem(it)} />
             ))}
@@ -161,7 +162,7 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
 
       <Card className="rounded-2xl border-border/70 p-0 shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">New menu</CardTitle>
+          <CardTitle className="text-base">{t("owner.newMenu")}</CardTitle>
         </CardHeader>
         <CardContent className="flex gap-2">
           <Input

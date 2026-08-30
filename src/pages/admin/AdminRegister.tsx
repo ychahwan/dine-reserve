@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -34,6 +35,7 @@ const EMPTY_FEATURES: Record<FeatureKey, boolean> = {
 };
 
 export default function AdminRegister() {
+  const { t } = useTranslation();
   const registerRestaurant = useMutation(api.admin.registerRestaurant);
 
   const [name, setName] = useState("");
@@ -119,7 +121,7 @@ export default function AdminRegister() {
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
             <div className="rounded-xl border border-border/70 bg-muted/30 p-4">
-              <p className="mb-3 text-sm font-semibold">Owner account</p>
+              <p className="mb-3 text-sm font-semibold">{t("admin.ownerAccount")}</p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="a-owner-name">Owner name *</Label>
@@ -133,12 +135,12 @@ export default function AdminRegister() {
               <div className="mt-4 space-y-2">
                 <Label htmlFor="a-temp-pass">Temporary password *</Label>
                 <div className="relative">
-                  <Input id="a-temp-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters" type={showTempPass ? "text" : "password"} required minLength={8} disabled={saving} className="pr-10" />
+                  <Input id="a-temp-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder={t("admin.minChars8")} type={showTempPass ? "text" : "password"} required minLength={8} disabled={saving} className="pr-10" />
                   <button type="button" tabIndex={-1} onClick={() => setShowTempPass((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                     {showTempPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                   </button>
                 </div>
-                <p className="text-xs text-muted-foreground">Share this with the owner — they must change it at first login.</p>
+                <p className="text-xs text-muted-foreground">{t("admin.tempPassHint")}</p>
               </div>
             </div>
 
@@ -167,7 +169,7 @@ export default function AdminRegister() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="r-address">Address *</Label>
-              <Input id="r-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street and number" required disabled={saving} />
+              <Input id="r-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t("owner.addressPlaceholder")} required disabled={saving} />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
@@ -181,7 +183,7 @@ export default function AdminRegister() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="r-desc">Description</Label>
-              <Textarea id="r-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="What makes your place special?" disabled={saving} />
+              <Textarea id="r-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder={t("owner.descPlaceholder")} disabled={saving} />
             </div>
 
             <div>

@@ -1,3 +1,4 @@
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -109,6 +110,7 @@ const RULE_PRESETS = [
 ];
 
 export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string; sections: SectionBrief[] }) {
+  const { t } = useTranslation();
   const todayKey = useToday();
   const data = useQuery(api.slotRules.list, { restaurantId: restaurantId as never });
   const week = useQuery(api.slotRules.previewWeek, { restaurantId: restaurantId as never });
@@ -251,7 +253,7 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
 
       {/* Presets */}
       <div>
-        <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">Start from a preset</p>
+        <p className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">{t("owner.preset")}</p>
         <div className="grid grid-cols-3 gap-2">
           {RULE_PRESETS.map((p) => (
             <button
@@ -508,7 +510,7 @@ export function SlotRulesTab({ restaurantId, sections }: { restaurantId: string;
                     </span>
                   </div>
                   {s.times.length === 0 ? (
-                    <p className="mt-2 text-xs text-muted-foreground">No times this day.</p>
+                    <p className="mt-2 text-xs text-muted-foreground">{t("owner.noTimesThisDay")}</p>
                   ) : (
                     <>
                       <div className="mt-2.5 flex flex-wrap gap-1.5">

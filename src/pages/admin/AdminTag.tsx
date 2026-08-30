@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +10,7 @@ import { useState } from "react";
 import { toast } from "sonner";
 
 export default function AdminTag() {
+  const { t } = useTranslation();
   const tagAsRestaurant = useMutation(api.admin.tagAsRestaurant);
   const ensureOwnerPassword = useMutation(api.admin.ensureOwnerPassword);
 
@@ -82,12 +84,12 @@ export default function AdminTag() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="t-name">Owner name</Label>
-              <Input id="t-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Optional" disabled={saving} />
+              <Input id="t-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("admin.optional")} disabled={saving} />
             </div>
             <div className="space-y-2">
               <Label htmlFor="t-pass">Temporary password (optional)</Label>
               <div className="relative">
-                <Input id="t-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder="At least 8 characters — if the account has none" type={showTagPass ? "text" : "password"} disabled={saving} className="pr-10" />
+                <Input id="t-pass" value={tempPassword} onChange={(e) => setTempPassword(e.target.value)} placeholder={t("admin.atLeast8Chars")} type={showTagPass ? "text" : "password"} disabled={saving} className="pr-10" />
                 <button type="button" tabIndex={-1} onClick={() => setShowTagPass((v) => !v)} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
                   {showTagPass ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
                 </button>

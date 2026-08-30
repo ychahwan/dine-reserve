@@ -171,6 +171,10 @@ export function DiningDialog({
     api.restaurants.get,
     booking ? { id: booking.restaurantId as never } : "skip",
   );
+  const menuData = useQuery(
+    api.restaurants.menuForRestaurant,
+    booking ? { id: booking.restaurantId as never } : "skip",
+  );
   const orders = useQuery(
     api.dining.myOrders,
     booking ? { bookingId: booking._id as never } : "skip",
@@ -219,8 +223,8 @@ export function DiningDialog({
   }, [booking?._id]);
 
   const allItems = useMemo(
-    () => (restaurantData?.menuDocs ?? []).flatMap((m) => m.items),
-    [restaurantData],
+    () => (menuData?.menuDocs ?? []).flatMap((m: any) => m.items),
+    [menuData],
   );
   const availableItems = useMemo(
     () => allItems.filter((i) => i.available),

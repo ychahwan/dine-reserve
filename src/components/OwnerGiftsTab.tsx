@@ -1,4 +1,5 @@
 import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "react-i18next";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -74,6 +75,7 @@ function timeAgo(ts: number): string {
  * "surprise" gift to the receiver.
  */
 export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
+  const { t } = useTranslation();
   const gifts = useQuery(api.socialize.ownerGiftTypes, { restaurantId: restaurantId as never });
   const deliveries = useQuery(api.socialize.restaurantGiftDeliveries, {
     restaurantId: restaurantId as never,
@@ -194,7 +196,7 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
         ) : (gifts ?? []).length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
             <Gift className="mx-auto size-8 text-muted-foreground/50" />
-            <p className="mt-2 text-sm font-medium">No gifts yet</p>
+            <p className="mt-2 text-sm font-medium">{t("owner.noGifts")}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               Add a drink or dessert diners can send each other — a glass of wine, an espresso, a
               dessert. It lands on the sender&apos;s bill.
@@ -296,7 +298,7 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
               </div>
               <div className="flex items-center justify-between rounded-xl bg-muted/40 px-3.5 py-2.5">
                 <div>
-                  <p className="text-sm font-medium">Available to send</p>
+                  <p className="text-sm font-medium">{t("owner.availableToSend")}</p>
                   <p className="text-[11px] text-muted-foreground">
                     Hidden gifts stay in the catalog but aren&apos;t offered to diners.
                   </p>
@@ -336,7 +338,7 @@ export function OwnerGiftsTab({ restaurantId }: { restaurantId: string }) {
         ) : allDeliveries.length === 0 ? (
           <div className="rounded-xl border border-dashed border-border px-4 py-8 text-center">
             <CheckCircle2 className="mx-auto size-8 text-muted-foreground/50" />
-            <p className="mt-2 text-sm font-medium">No gift orders yet</p>
+            <p className="mt-2 text-sm font-medium">{t("owner.noGiftOrders")}</p>
             <p className="mt-1 text-xs text-muted-foreground">
               When a diner sends a gift from the Socialize room, it lands here for your team to
               prepare and deliver to the table.

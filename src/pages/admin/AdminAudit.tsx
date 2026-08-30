@@ -1,6 +1,7 @@
 import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useTranslation } from "react-i18next";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
@@ -79,6 +80,7 @@ function exportToCsv(entries: AuditEntry[]) {
 }
 
 export default function AdminAudit() {
+  const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [actionFilter, setActionFilter] = useState<string>("");
   const [dateFrom, setDateFrom] = useState("");
@@ -215,7 +217,7 @@ export default function AdminAudit() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Audit log</h1>
+          <h1 className="text-2xl font-bold tracking-tight">{t("admin.auditLog")}</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {entries.length} entries{search || actionFilter || dateFrom || dateTo ? ` (${dateFiltered.length} shown)` : ""}. Clearing it is itself logged.
           </p>
@@ -248,17 +250,17 @@ export default function AdminAudit() {
       {/* Filters */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
         <Input
-          placeholder="Search action, details, or target…"
+          placeholder={t("admin.searchAuditAction")}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           className="h-9 w-full sm:max-w-xs rounded-full text-sm"
         />
         <Select value={actionFilter} onValueChange={(v) => setActionFilter(v === "all" ? "" : v)}>
           <SelectTrigger className="h-9 w-full sm:w-auto rounded-full text-sm">
-            <SelectValue placeholder="All actions" />
+            <SelectValue placeholder={t("admin.allActions")} />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All actions</SelectItem>
+            <SelectItem value="all">{t("admin.allActions")}</SelectItem>
             {actionOptions.map((a) => (
               <SelectItem key={a} value={a}>{a}</SelectItem>
             ))}
@@ -366,7 +368,7 @@ export default function AdminAudit() {
       <AlertDialog open={confirmClear} onOpenChange={(open) => !open && !busy && setConfirmClear(false)}>
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Clear the audit log?</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">{t("admin.clearAuditTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               All {entries?.length ?? 0} entries are permanently deleted. A single
               "clearAuditLog" entry is kept so the clearing itself stays on record.

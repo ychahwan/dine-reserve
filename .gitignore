@@ -14,3 +14,6 @@ test-results/
 playwright-report/
 e2e/.auth/
 e2e/report/
+
+# Firebase service account (never commit)
+kamix-firebase-adminsdk.json

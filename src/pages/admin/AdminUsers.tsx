@@ -3,6 +3,7 @@ import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
 import { Link } from "react-router";
 import { Badge } from "@/components/ui/badge";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -57,6 +58,7 @@ function extractValue(row: UserRow, key: SortKey): string | number {
 }
 
 export default function AdminUsers() {
+  const { t } = useTranslation();
   const rows = useQuery(api.adminView.listUsers);
   const bulkDelete = useMutation(api.admin.bulkDeleteUsers);
   const createUser = useMutation(api.admin.createUser);
@@ -254,7 +256,7 @@ export default function AdminUsers() {
                     autoComplete="off"
                     value={nameQuery}
                     onChange={(e) => setNameQuery(e.target.value)}
-                    placeholder="Search by name…"
+                    placeholder={t("admin.searchName")}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -273,10 +275,10 @@ export default function AdminUsers() {
                   <Label className="text-xs">Role</Label>
                   <Select value={roleFilter} onValueChange={setRoleFilter}>
                     <SelectTrigger>
-                      <SelectValue placeholder="All roles" />
+                      <SelectValue placeholder={t("admin.allRoles")} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All roles</SelectItem>
+                      <SelectItem value="all">{t("admin.allRoles")}</SelectItem>
                       <SelectItem value="admin">Admin</SelectItem>
                       <SelectItem value="owner">Owner</SelectItem>
                       <SelectItem value="customer">Diner</SelectItem>
@@ -430,7 +432,7 @@ export default function AdminUsers() {
                 id="add-name"
                 value={addName}
                 onChange={(e) => setAddName(e.target.value)}
-                placeholder="Full name"
+                placeholder={t("admin.fullName")}
               />
             </div>
             <div className="space-y-1.5">
@@ -452,9 +454,9 @@ export default function AdminUsers() {
                 type="password"
                 value={addPassword}
                 onChange={(e) => setAddPassword(e.target.value)}
-                placeholder="Min 8 characters"
+                placeholder={t("admin.minChars8")}
               />
-              <p className="text-[11px] text-muted-foreground">User must change this on first login.</p>
+              <p className="text-[11px] text-muted-foreground">{t("admin.mustChangeLogin")}</p>
             </div>
           </div>
           <DialogFooter>

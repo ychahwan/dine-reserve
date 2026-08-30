@@ -1,4 +1,5 @@
 import { Spinner } from "@/components/ui/spinner";
+import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -119,6 +120,7 @@ function formatUpdated(ts: number) {
 }
 
 export default function AdminSettings() {
+  const { t } = useTranslation();
   const listSettings = useAction(api.settings.listSettings);
   const setSetting = useMutation(api.settings.setSetting);
   const [rows, setRows] = useState<SettingRow[] | null>(null);

@@ -11,6 +11,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
@@ -33,6 +34,7 @@ function initialsOf(name: string) {
 }
 
 export default function AdminReviewDetail() {
+  const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
   const reviews = useQuery(api.adminView.listReviews);
@@ -92,8 +94,8 @@ export default function AdminReviewDetail() {
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">Review details</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Complete moderation record for this diner review.</p>
+          <h1 className="text-2xl font-bold tracking-tight">{t("admin.reviewDetails")}</h1>
+          <p className="mt-1 text-sm text-muted-foreground">{t("admin.reviewDetailsDesc")}</p>
         </div>
         <Button variant="destructive" onClick={() => setConfirmDelete(true)}>
           <Trash2 data-icon="inline-start" /> Delete review
@@ -126,7 +128,7 @@ export default function AdminReviewDetail() {
               <MessageSquareQuote className="size-4 text-primary" /> Feedback
             </h2>
             <p className="whitespace-pre-wrap text-base leading-7 text-foreground">
-              {review.text ?? <span className="italic text-muted-foreground">No written comment was provided.</span>}
+              {review.text ?? <span className="italic text-muted-foreground">{t("admin.noComment")}</span>}
             </p>
           </section>
 
@@ -173,7 +175,7 @@ export default function AdminReviewDetail() {
       <AlertDialog open={confirmDelete} onOpenChange={(open) => !busy && setConfirmDelete(open)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete this review?</AlertDialogTitle>
+            <AlertDialogTitle>{t("admin.deleteReviewTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               This review will be permanently removed, its loyalty reward reversed, and the admin action audited.
             </AlertDialogDescription>

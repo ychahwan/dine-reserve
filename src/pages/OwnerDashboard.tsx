@@ -15,6 +15,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
 import { useMutation, useQuery } from "convex/react";
+import { useTranslation } from "react-i18next";
 import {
   CalendarDays,
   Loader2,
@@ -59,6 +60,7 @@ const EMPTY_FEATURES: Record<FeatureKey, boolean> = {
 // (previously it listed a non-existent "Casa Oliva" and missed two real ones).
 
 export default function OwnerDashboard() {
+  const { t } = useTranslation();
   const restaurants = useQuery(api.restaurants.listMine);
   const navigate = useNavigate();
 
@@ -120,15 +122,15 @@ export default function OwnerDashboard() {
     <OwnerShell>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">Your restaurants</h1>
+          <h1 className="text-xl font-bold tracking-tight">{t("owner.yourRestaurants")}</h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
-            Manage availability, menus and bookings
+            {t("owner.manageSubtitle")}
           </p>
         </div>
         <Button size="sm" onClick={() => setShowCreate((s) => !s)}>
-          {showCreate ? "Close" : (
+          {showCreate ? t("common.close") : (
             <>
-              <Plus className="size-4" /> Add restaurant
+              <Plus className="size-4" /> {t("owner.addRestaurant")}
             </>
           )}
         </Button>
@@ -138,28 +140,28 @@ export default function OwnerDashboard() {
       {showCreate && (
         <Card className="mt-5 rounded-2xl border-border/70 p-0 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">New restaurant</CardTitle>
+            <CardTitle className="text-base">{t("owner.newRestaurant")}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="r-name">Name *</Label>
-                  <Input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Trullo" required disabled={saving} />
+                  <Label htmlFor="r-name">{t("owner.nameLabel")}</Label>
+                  <Input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("owner.namePlaceholder")} required disabled={saving} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="r-cuisine">Cuisine *</Label>
-                  <Input id="r-cuisine" value={cuisine} onChange={(e) => setCuisine(e.target.value)} placeholder="e.g. Italian" required disabled={saving} />
+                  <Label htmlFor="r-cuisine">{t("owner.cuisineLabel")}</Label>
+                  <Input id="r-cuisine" value={cuisine} onChange={(e) => setCuisine(e.target.value)} placeholder={t("owner.cuisinePlaceholder")} required disabled={saving} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="r-city">City *</Label>
-                  <Input id="r-city" value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Milan" required disabled={saving} />
+                  <Label htmlFor="r-city">{t("owner.cityLabel")}</Label>
+                  <Input id="r-city" value={city} onChange={(e) => setCity(e.target.value)} placeholder={t("owner.cityPlaceholder")} required disabled={saving} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="r-price">Price range</Label>
+                  <Label htmlFor="r-price">{t("owner.priceRange")}</Label>
                   <Select value={priceRange} onValueChange={setPriceRange} disabled={saving}>
                     <SelectTrigger id="r-price" className="w-full">
-                      <SelectValue placeholder="Price" />
+                      <SelectValue placeholder={t("owner.pricePlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
                       {PRICE_OPTIONS.map((p) => (
@@ -170,26 +172,26 @@ export default function OwnerDashboard() {
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="r-address">Address *</Label>
-                <Input id="r-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder="Street and number" required disabled={saving} />
+                <Label htmlFor="r-address">{t("owner.addressLabel")}</Label>
+                <Input id="r-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t("owner.addressPlaceholder")} required disabled={saving} />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="r-phone">Phone</Label>
+                  <Label htmlFor="r-phone">{t("owner.phoneLabel")}</Label>
                   <Input id="r-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+39 02 …" disabled={saving} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="r-image">Photo URL</Label>
+                  <Label htmlFor="r-image">{t("owner.photoUrl")}</Label>
                   <Input id="r-image" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" disabled={saving} />
                 </div>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="r-desc">Description</Label>
-                <Textarea id="r-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder="What makes your place special?" disabled={saving} />
+                <Label htmlFor="r-desc">{t("owner.descLabel")}</Label>
+                <Textarea id="r-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={t("owner.descPlaceholder")} disabled={saving} />
               </div>
 
               <div>
-                <p className="mb-2 text-sm font-medium">Amenities</p>
+                <p className="mb-2 text-sm font-medium">{t("owner.amenities")}</p>
                 <div className="flex flex-wrap gap-2">
                   {FEATURE_OPTIONS.map((f) => (
                     <button
@@ -218,10 +220,10 @@ export default function OwnerDashboard() {
               <Button type="submit" className="w-full" disabled={saving}>
                 {saving ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" /> Creating…
+                    <Loader2 className="size-4 animate-spin" /> {t("owner.saving")}
                   </>
                 ) : (
-                  "Create restaurant"
+                  t("owner.addRestaurant")
                 )}
               </Button>
             </form>
@@ -240,14 +242,13 @@ export default function OwnerDashboard() {
           <div className="flex flex-col items-center gap-3 rounded-2xl border border-dashed border-border py-16 text-center">
             <Store className="size-9 text-muted-foreground/60" />
             <div>
-              <p className="font-medium">No restaurants yet</p>
+              <p className="font-medium">{t("owner.noRestaurants")}</p>
               <p className="mt-1 max-w-xs text-sm text-muted-foreground">
-                Add your first restaurant to start publishing live availability and
-                taking bookings.
+                {t("owner.noRestaurantsHint")}
               </p>
             </div>
             <Button onClick={() => setShowCreate(true)}>
-              <Plus className="size-4" /> Add restaurant
+              <Plus className="size-4" /> {t("owner.addRestaurant")}
             </Button>
           </div>
         ) : (

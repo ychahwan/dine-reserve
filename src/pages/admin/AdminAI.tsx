@@ -1,6 +1,7 @@
 import { api } from "@/convex/_generated/api";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { useTranslation } from "react-i18next";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,6 +20,7 @@ const blankRule: RuleDraft = { name: "", description: "", instruction: "", prior
 function dateLabel(ts: number) { return new Date(ts).toLocaleString(undefined, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }); }
 
 export default function AdminAI() {
+  const { t } = useTranslation();
   const data = useQuery(api.adminAi.overview);
   const selected = useState<string | null>(null);
   const [selectedId, setSelectedId] = selected;
@@ -53,7 +55,7 @@ export default function AdminAI() {
     <div className="mx-auto max-w-7xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div><div className="flex items-center gap-2"><Bot className="size-5 text-primary" /><h1 className="text-2xl font-bold tracking-tight">AI workspace</h1></div>
-        <p className="mt-1 text-sm text-muted-foreground">Review customer conversations and manage the agent’s prompt, knowledge, and semantic behavior.</p></div>
+        <p className="mt-1 text-sm text-muted-foreground">{t("admin.aiChatDesc")}</p></div>
         <Button variant="outline" disabled={busy} onClick={async () => { setBusy(true); try { const result = await installDefaults({}); toast.success(`Installed ${result.knowledgeAdded} knowledge entries and ${result.rulesAdded} rules.`); } catch (error) { toast.error(error instanceof Error ? error.message : "Could not install defaults."); } finally { setBusy(false); } }}><RefreshCw className="size-4" /> Restore defaults</Button>
       </div>
 
@@ -61,7 +63,7 @@ export default function AdminAI() {
         <div className="rounded-2xl border border-border/70 bg-card">
           <div className="flex items-center justify-between border-b border-border/60 p-4"><div><h2 className="font-semibold">Conversations</h2><p className="text-xs text-muted-foreground">{data.conversations.length} threads · {data.messageCount} messages</p></div><MessageSquare className="size-4 text-muted-foreground" /></div>
           <div className="max-h-[520px] overflow-y-auto p-2">
-            {data.conversations.length === 0 ? <p className="p-4 text-sm text-muted-foreground">No agent conversations yet.</p> : data.conversations.map((c) => (
+            {data.conversations.length === 0 ? <p className="p-4 text-sm text-muted-foreground">{t("admin.noConversations")}</p> : data.conversations.map((c) => (
               <button key={c._id} onClick={() => setSelectedId(c._id)} className={`w-full rounded-xl p-3 text-left transition-colors ${selectedId === c._id ? "bg-primary/10" : "hover:bg-muted/60"}`}>
                 <div className="flex items-start justify-between gap-2"><span className="truncate text-sm font-medium">{c.customerName}</span><ChevronRight className="size-4 shrink-0 text-muted-foreground" /></div>
                 <p className="mt-1 truncate text-xs text-muted-foreground">{c.title || "Dining concierge conversation"}</p>
@@ -74,7 +76,7 @@ export default function AdminAI() {
           {/* Loading vs empty are distinct states (L-41) */}
           {selectedId && thread === undefined ? (
             <div className="flex h-full min-h-[360px] items-center justify-center p-8"><Spinner className="size-5" /></div>
-          ) : !thread ? <div className="flex h-full min-h-[360px] items-center justify-center p-8 text-center text-sm text-muted-foreground">Select a conversation to inspect the complete agent/customer discussion.</div> : (
+          ) : !thread ? <div className="flex h-full min-h-[360px] items-center justify-center p-8 text-center text-sm text-muted-foreground">{t("admin.selectConversation")}</div> : (
             <><div className="border-b border-border/60 p-5"><h2 className="font-semibold">{thread.customer?.name || "Customer"}</h2><p className="text-xs text-muted-foreground">{thread.customer?.phone || thread.customer?.email || "Customer profile"}</p></div><div className="max-h-[470px] space-y-4 overflow-y-auto p-5">
               {thread.messages.map((m) => <div key={m._id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}><div className={`max-w-[80%] rounded-2xl px-4 py-3 text-sm ${m.role === "user" ? "bg-primary text-primary-foreground" : "bg-muted/60"}`}><div className="mb-1 text-[10px] font-semibold uppercase tracking-wide opacity-70">{m.role === "user" ? "Customer" : "Kamix AI"}</div><p className="whitespace-pre-wrap">{m.content}</p><p className="mt-2 text-[10px] opacity-60">{dateLabel(m.createdAt)}</p></div></div>)}
             </div></>
@@ -92,7 +94,7 @@ export default function AdminAI() {
           {ruleDraft && <RuleForm draft={ruleDraft} setDraft={setRuleDraft} onSave={submitRule} busy={busy} />}
         </ConfigCard>
       </section>
-      <p className="text-xs text-muted-foreground">The system prompt itself is managed in <a className="text-primary underline" href="/admin/settings">Settings → AI system prompt</a>. Changes are applied to new requests immediately.</p>
+      <p className="text-xs text-muted-foreground">{t("admin.aiPromptNote")}</p>
     </div>
   );
 }

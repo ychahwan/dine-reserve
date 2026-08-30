@@ -2,10 +2,12 @@ import { useAuth } from "@/hooks/use-auth";
 import { Loader2 } from "lucide-react";
 import { useEffect, useRef, type ReactNode } from "react";
 import { Navigate, useLocation } from "react-router";
+import { useTranslation } from "react-i18next";
 
 export function RequireAuth({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated, user, signOut } = useAuth();
   const location = useLocation();
+  const { t } = useTranslation();
 
   // Defense-in-depth: if the admin disabled this account while a session was
   // still valid (JWT up to 1h), force a sign-out instead of letting them use
@@ -40,9 +42,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (orphaned) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-        <p className="text-lg font-semibold">This account no longer exists.</p>
+        <p className="text-lg font-semibold">{t("requireAuth.accountGone")}</p>
         <p className="text-sm text-muted-foreground">
-          You are being signed out. Contact support if you think this is a mistake.
+          {t("requireAuth.accountGoneHint")}
         </p>
       </main>
     );
@@ -51,9 +53,9 @@ export function RequireAuth({ children }: { children: ReactNode }) {
   if (isAuthenticated && user?.disabled) {
     return (
       <main className="flex min-h-screen flex-col items-center justify-center gap-3 bg-background px-6 text-center">
-        <p className="text-lg font-semibold">This account has been disabled.</p>
+        <p className="text-lg font-semibold">{t("requireAuth.accountDisabled")}</p>
         <p className="text-sm text-muted-foreground">
-          Contact support for help restoring access.
+          {t("requireAuth.accountDisabledHint")}
         </p>
       </main>
     );
