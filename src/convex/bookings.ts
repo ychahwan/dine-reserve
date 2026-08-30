@@ -1,6 +1,6 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { internalMutation, mutation, query, MutationCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { SEAT_KIND } from "./schema";
@@ -12,10 +12,24 @@ import { bookingArgsSchema, bookingCodeSchema, cancelReasonSchema, guestNameSche
 const CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789";
 export function generateCode(len = 6): string {
   let out = "";
-  const bytes = new Uint8Array(len);
-  crypto.getRandomValues(bytes);
-  for (let i = 0; i < len; i++) out += CODE_ALPHABET[bytes[i] % CODE_ALPHABET.length];
+  const unbiasedUpperBound = Math.floor(256 / CODE_ALPHABET.length) * CODE_ALPHABET.length;
+  while (out.length < len) {
+    const bytes = new Uint8Array(len - out.length);
+    crypto.getRandomValues(bytes);
+    for (const byte of bytes) {
+      if (byte >= unbiasedUpperBound) continue;
+      out += CODE_ALPHABET[byte % CODE_ALPHABET.length];
+    }
+  }
   return out;
+}
+
+const OWNER_BOOKING_LIST_LIMIT = 100;
+
+function dateFromDaysAgo(days: number): string {
+  const date = new Date();
+  date.setDate(date.getDate() - days);
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
 type SlotLike = { _id: Id<"slots">; sectionId: Id<"sections">; time: string; total: number; remaining: number; closed: boolean };
@@ -83,7 +97,6 @@ export async function attemptBooking(
   })();
   if (args.date < serverToday) throw new Error("You can't book a table in the past.");
 
-  const name = args.name.trim().slice(0, 80);
   const restaurant = await ctx.db.get(args.restaurantId);
   if (!restaurant) throw new Error("Restaurant not found.");
   // KB-03: the disabled-venue guard lives with the booking primitive, not
@@ -231,7 +244,7 @@ async function commitBooking(
   });
   // async SMS — never blocks or breaks the booking (only when phone is present)
   if (opts.args.phone?.trim()) {
-    await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
+    await ctx.scheduler.runAfter(0, internal.sms.sendBookingSms, {
       to: opts.args.phone.trim(),
       event: "confirmed",
       restaurantName: opts.restaurantName,
@@ -261,8 +274,11 @@ export const byCode = query({
     if (!parsed.success) return null;
     const clean = parsed.data.toUpperCase();
     // indexed lookup — O(log n) instead of scanning every booking
-    const hits = await ctx.db.query("bookings").withIndex("by_code", (q) => q.eq("code", clean)).collect();
-    const booking = hits.find((b) => b.status === "confirmed");
+    const booking = await ctx.db
+      .query("bookings")
+      .withIndex("by_code", (q) => q.eq("code", clean))
+      .filter((q) => q.eq(q.field("status"), "confirmed"))
+      .first();
     if (!booking) return null;
     const restaurant = await ctx.db.get(booking.restaurantId);
 
@@ -345,20 +361,25 @@ export const myBookings = query({
 
 /** Owner view: bookings for one restaurant (optionally filtered by date). */
 export const byRestaurant = query({
-  args: { restaurantId: v.id("restaurants"), date: v.optional(v.string()) },
-  handler: async (ctx, { restaurantId, date }) => {
+  args: { restaurantId: v.id("restaurants"), date: v.optional(v.string()), limit: v.optional(v.number()) },
+  handler: async (ctx, { restaurantId, date, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant || restaurant.ownerId !== userId) return [];
+    const effectiveLimit = Math.min(Math.max(Math.floor(limit ?? OWNER_BOOKING_LIST_LIMIT), 1), 200);
     let bookings;
     if (date) {
       bookings = await ctx.db
         .query("bookings")
         .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", date))
-        .collect();
+        .take(effectiveLimit);
     } else {
-      bookings = await ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect();
+      bookings = await ctx.db
+        .query("bookings")
+        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).gte("date", dateFromDaysAgo(90)))
+        .order("desc")
+        .take(effectiveLimit);
     }
     return bookings
       .filter((b) => b.status !== "cancelled")
@@ -385,12 +406,12 @@ export const stats = query({
     const cutoff = new Date();
     cutoff.setDate(cutoff.getDate() - lookback);
     const cutoffKey = `${cutoff.getFullYear()}-${String(cutoff.getMonth() + 1).padStart(2, "0")}-${String(cutoff.getDate()).padStart(2, "0")}`;
+    const todayKey = dateFromDaysAgo(0);
 
     const bookings = await ctx.db
       .query("bookings")
-      .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+      .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).gte("date", cutoffKey).lte("date", todayKey))
       .collect();
-    const inWindow = bookings.filter((b) => b.date >= cutoffKey);
 
     let covers = 0;
     let completed = 0;
@@ -398,7 +419,7 @@ export const stats = query({
     let cancelled = 0;
     const byDay = new Map<string, number>();
     const byHour = new Map<string, number>();
-    for (const b of inWindow) {
+    for (const b of bookings) {
       if (b.status === "cancelled") { cancelled++; continue; }
       covers += b.partySize;
       byDay.set(b.date, (byDay.get(b.date) ?? 0) + b.partySize);
@@ -411,10 +432,10 @@ export const stats = query({
     const totalFinished = completed + noShow;
     // M-3: average party size must divide by non-cancelled bookings only —
     // cancelled rows contribute no covers but were in the denominator before.
-    const nonCancelled = inWindow.length - cancelled;
+    const nonCancelled = bookings.length - cancelled;
     const waitlist = await ctx.db
       .query("waitlist")
-      .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
+      .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).gte("date", cutoffKey).lte("date", todayKey))
       .collect();
     const waiting = waitlist.filter((w) => w.status === "waiting").length;
     const notified = waitlist.filter((w) => w.status === "notified").length;
@@ -429,13 +450,13 @@ export const stats = query({
 
     return {
       rangeDays: lookback,
-      totalBookings: inWindow.length,
+      totalBookings: bookings.length,
       covers,
       completed,
       noShow,
       cancelled,
       noShowRate: totalFinished > 0 ? Math.round((noShow / totalFinished) * 100) : 0,
-      cancellationRate: inWindow.length > 0 ? Math.round((cancelled / inWindow.length) * 100) : 0,
+      cancellationRate: bookings.length > 0 ? Math.round((cancelled / bookings.length) * 100) : 0,
       avgParty: nonCancelled > 0 ? Math.round((covers / nonCancelled) * 10) / 10 : 0,
       byDay: last14,
       topTimes: [...byHour.entries()]
@@ -465,11 +486,13 @@ export const cancelBooking = mutation({
 
     // H-2: walk-in–sourced bookings never consumed slot ledger seats, so
     // restoring any here would mint phantom availability.
+    let seatsRestored = false;
     if (booking.sectionId && restoresSeats(booking)) {
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         // restore seats with a ceiling at total capacity
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+        seatsRestored = slot.remaining < slot.total;
       } else {
         // KB-16: the slot ledger entry is missing (deleted / pruned) — the
         // seats can't be restored. Log it so it can be reconciled instead of
@@ -488,7 +511,7 @@ export const cancelBooking = mutation({
     const restaurant = await ctx.db.get(booking.restaurantId);
     // L-1: only schedule the SMS when there is a phone number to send to.
     if (booking.phone) {
-      await ctx.scheduler.runAfter(0, api.sms.sendBookingSms, {
+      await ctx.scheduler.runAfter(0, internal.sms.sendBookingSms, {
         to: booking.phone,
         event: "cancelled",
         restaurantName: restaurant?.name ?? "",
@@ -501,15 +524,17 @@ export const cancelBooking = mutation({
     }
 
     // seats freed up — notify the next diner on the waitlist, if any
-    const freed = await notifyWaitlistForFreedSeats(ctx, {
-      restaurantId: booking.restaurantId,
-      sectionId: booking.sectionId,
-      date: booking.date,
-      time: booking.time,
-      partySize: booking.partySize,
-    });
+    const freed = seatsRestored
+      ? await notifyWaitlistForFreedSeats(ctx, {
+          restaurantId: booking.restaurantId,
+          sectionId: booking.sectionId,
+          date: booking.date,
+          time: booking.time,
+          partySize: booking.partySize,
+        })
+      : null;
     if (freed && freed.to) {
-      await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
+      await ctx.scheduler.runAfter(0, internal.sms.sendWaitlistSms, freed);
     }
     return await ctx.db.get(bookingId);
   },
@@ -574,10 +599,12 @@ export const updateStatus = mutation({
 
     // cancelling returns seats to availability (H-2: never for walk-in–
     // sourced bookings — they never took seats from the ledger)
+    let seatsRestored = false;
     if (status === "cancelled" && booking.sectionId && booking.status !== "cancelled" && restoresSeats(booking)) {
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+        seatsRestored = slot.remaining < slot.total;
       } else {
         // KB-16: missing slot ledger entry — log instead of leaking seats.
         console.warn(`[KB-16] updateStatus: no slot found to restore seats for booking ${bookingId}`);
@@ -593,15 +620,17 @@ export const updateStatus = mutation({
         userId: booking.userId,
         type: "booking_cancelled",
       });
-      const freed = await notifyWaitlistForFreedSeats(ctx, {
-        restaurantId: booking.restaurantId,
-        sectionId: booking.sectionId,
-        date: booking.date,
-        time: booking.time,
-        partySize: booking.partySize,
-      });
+      const freed = seatsRestored
+        ? await notifyWaitlistForFreedSeats(ctx, {
+            restaurantId: booking.restaurantId,
+            sectionId: booking.sectionId,
+            date: booking.date,
+            time: booking.time,
+            partySize: booking.partySize,
+          })
+        : null;
       if (freed && freed.to) {
-        await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
+        await ctx.scheduler.runAfter(0, internal.sms.sendWaitlistSms, freed);
       }
     }
     return await ctx.db.get(bookingId);
@@ -633,10 +662,12 @@ export const releaseBooking = mutation({
 
     // restore seats to the pool (same path as cancellation; H-2: never for
     // walk-in–sourced bookings — they never took seats from the ledger)
+    let seatsRestored = false;
     if (booking.sectionId && restoresSeats(booking)) {
       const slot = await findBestSlotFromDb(ctx, booking);
       if (slot) {
         await ctx.db.patch(slot._id, { remaining: Math.min(slot.total, slot.remaining + booking.partySize) });
+        seatsRestored = slot.remaining < slot.total;
       } else {
         // KB-16: missing slot ledger entry — log instead of leaking seats.
         console.warn(`[KB-16] releaseBooking: no slot found to restore seats for booking ${bookingId}`);
@@ -645,15 +676,17 @@ export const releaseBooking = mutation({
     await ctx.db.patch(bookingId, { status: "cancelled", updatedAt: Date.now() });
 
     // tell the next waitlist diner — their table just opened up
-    const freed = await notifyWaitlistForFreedSeats(ctx, {
-      restaurantId: booking.restaurantId,
-      sectionId: booking.sectionId,
-      date: booking.date,
-      time: booking.time,
-      partySize: booking.partySize,
-    });
+    const freed = seatsRestored
+      ? await notifyWaitlistForFreedSeats(ctx, {
+          restaurantId: booking.restaurantId,
+          sectionId: booking.sectionId,
+          date: booking.date,
+          time: booking.time,
+          partySize: booking.partySize,
+        })
+      : null;
     if (freed && freed.to) {
-      await ctx.scheduler.runAfter(0, api.sms.sendWaitlistSms, freed);
+      await ctx.scheduler.runAfter(0, internal.sms.sendWaitlistSms, freed);
     }
 
     await notifyRestaurant(ctx, {

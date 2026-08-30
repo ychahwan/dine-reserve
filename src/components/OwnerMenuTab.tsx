@@ -9,7 +9,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useTranslation } from "react-i18next";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
@@ -30,11 +29,26 @@ import {
 } from "@/components/ui/select";
 import { api } from "@/convex/_generated/api";
 import { useAction, useMutation } from "convex/react";
-import { ImagePlus, Loader2, Pencil, Plus, Star, Trash2, Upload, X } from "lucide-react";
+import {
+  ImagePlus,
+  Loader2,
+  Pencil,
+  Plus,
+  Star,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { cn } from "@/lib/utils";
 import { formatPrice } from "@/lib/format";
-import { ALLERGENS, DIETARY_TAGS, FEATURE_TAGS, SPICE_LEVELS, spiceLabel } from "@/lib/menu";
+import {
+  ALLERGENS,
+  DIETARY_TAGS,
+  FEATURE_TAGS,
+  SPICE_LEVELS,
+  spiceLabel,
+} from "@/lib/menu";
 import { toast } from "sonner";
 
 export type OwnerMenuItem = {
@@ -65,7 +79,13 @@ const MAX_INGREDIENTS = 12;
 // ---------------------------------------------------------------------------
 // Main tab
 // ---------------------------------------------------------------------------
-export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string; menuDocs: OwnerMenuDoc[] }) {
+export function OwnerMenuTab({
+  restaurantId,
+  menuDocs,
+}: {
+  restaurantId: string;
+  menuDocs: OwnerMenuDoc[];
+}) {
   const { t } = useTranslation();
   const createMenu = useMutation(api.restaurants.createMenu);
   const deleteMenu = useMutation(api.restaurants.deleteMenu);
@@ -73,7 +93,11 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
 
   const [newMenuName, setNewMenuName] = useState("");
   const [saving, setSaving] = useState(false);
-  const [dialog, setDialog] = useState<{ open: boolean; menuId: string; item: OwnerMenuItem | null }>({
+  const [dialog, setDialog] = useState<{
+    open: boolean;
+    menuId: string;
+    item: OwnerMenuItem | null;
+  }>({
     open: false,
     menuId: "",
     item: null,
@@ -111,7 +135,10 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
     if (!newMenuName.trim()) return;
     setSaving(true);
     try {
-      await createMenu({ restaurantId: restaurantId as never, name: newMenuName.trim() });
+      await createMenu({
+        restaurantId: restaurantId as never,
+        name: newMenuName.trim(),
+      });
       setNewMenuName("");
       toast.success("Menu added");
     } catch (err) {
@@ -121,11 +148,15 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
     }
   };
 
-  const handleDeleteMenu = (m: OwnerMenuDoc) => setDeleteConfirm({ kind: "menu", id: m._id, name: m.name });
-  const handleDeleteItem = (it: OwnerMenuItem) => setDeleteConfirm({ kind: "item", id: it._id, name: it.name });
+  const handleDeleteMenu = (m: OwnerMenuDoc) =>
+    setDeleteConfirm({ kind: "menu", id: m._id, name: m.name });
+  const handleDeleteItem = (it: OwnerMenuItem) =>
+    setDeleteConfirm({ kind: "item", id: it._id, name: it.name });
 
-  const openAdd = (menuId: string) => setDialog({ open: true, menuId, item: null });
-  const openEdit = (menuId: string, item: OwnerMenuItem) => setDialog({ open: true, menuId, item });
+  const openAdd = (menuId: string) =>
+    setDialog({ open: true, menuId, item: null });
+  const openEdit = (menuId: string, item: OwnerMenuItem) =>
+    setDialog({ open: true, menuId, item });
 
   return (
     <div className="space-y-4 pb-6">
@@ -136,25 +167,52 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
       )}
 
       {menuDocs.map((m) => (
-        <Card key={m._id} className="rounded-2xl border-border/70 p-0 shadow-sm">
+        <Card
+          key={m._id}
+          className="rounded-2xl border-border/70 p-0 shadow-sm"
+        >
           <CardHeader className="flex flex-row items-center justify-between gap-2 space-y-0 pb-3">
             <div>
               <CardTitle className="text-base">{m.name}</CardTitle>
-              {m.description && <p className="mt-0.5 text-xs text-muted-foreground">{m.description}</p>}
+              {m.description && (
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {m.description}
+                </p>
+              )}
             </div>
             <div className="flex shrink-0 gap-1">
-              <Button variant="ghost" size="sm" className="h-8" onClick={() => openAdd(m._id)}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8"
+                onClick={() => openAdd(m._id)}
+              >
                 <Plus className="size-3.5" /> Item
               </Button>
-              <Button variant="ghost" size="icon-sm" aria-label="Delete menu" className="text-destructive" onClick={() => handleDeleteMenu(m)}>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                aria-label="Delete menu"
+                className="text-destructive"
+                onClick={() => handleDeleteMenu(m)}
+              >
                 <Trash2 className="size-4" />
               </Button>
             </div>
           </CardHeader>
           <CardContent className="space-y-2">
-            {m.items.length === 0 && <p className="text-xs text-muted-foreground">{t("owner.noItemsYet")}</p>}
+            {m.items.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                {t("owner.noItemsYet")}
+              </p>
+            )}
             {m.items.map((it) => (
-              <ItemRow key={it._id} item={it} onEdit={() => openEdit(m._id, it)} onDelete={() => handleDeleteItem(it)} />
+              <ItemRow
+                key={it._id}
+                item={it}
+                onEdit={() => openEdit(m._id, it)}
+                onDelete={() => handleDeleteItem(it)}
+              />
             ))}
           </CardContent>
         </Card>
@@ -176,7 +234,10 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
               }
             }}
           />
-          <Button onClick={handleAddMenu} disabled={saving || !newMenuName.trim()}>
+          <Button
+            onClick={handleAddMenu}
+            disabled={saving || !newMenuName.trim()}
+          >
             <Plus className="size-4" /> Add
           </Button>
         </CardContent>
@@ -211,7 +272,9 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>{deleteConfirm ? "Keep it" : ""}</AlertDialogCancel>
+            <AlertDialogCancel disabled={deleting}>
+              {deleteConfirm ? "Keep it" : ""}
+            </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={deleting}
@@ -233,7 +296,15 @@ export function OwnerMenuTab({ restaurantId, menuDocs }: { restaurantId: string;
 // Item row
 // ---------------------------------------------------------------------------
 
-function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () => void; onDelete: () => void }) {
+function ItemRow({
+  item,
+  onEdit,
+  onDelete,
+}: {
+  item: OwnerMenuItem;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
   const updateItem = useMutation(api.restaurants.updateMenuItem);
   const [busy, setBusy] = useState(false);
 
@@ -242,7 +313,9 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
     try {
       await updateItem({ id: item._id as never, available: !item.available });
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update item.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not update item.",
+      );
     } finally {
       setBusy(false);
     }
@@ -256,7 +329,15 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
   return (
     <div className="flex items-start gap-3 rounded-xl border border-border/70 px-3 py-2.5">
       {item.imageUrl ? (
-        <img src={item.imageUrl} alt={item.name} className="size-14 shrink-0 rounded-lg object-cover" />
+        <img
+          src={item.imageUrl}
+          alt={item.name}
+          loading="lazy"
+          decoding="async"
+          width={56}
+          height={56}
+          className="size-14 shrink-0 rounded-lg object-cover"
+        />
       ) : (
         <div className="flex size-14 shrink-0 items-center justify-center rounded-lg bg-muted/60 text-muted-foreground">
           <ImagePlus className="size-5" />
@@ -266,9 +347,18 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
         <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
           <p className="truncate text-sm font-medium">
             {item.name}
-            {item.popular && <Star className="ml-1.5 inline size-3.5 fill-amber-400 text-amber-400" />}
+            {item.popular && (
+              <Star className="ml-1.5 inline size-3.5 fill-amber-400 text-amber-400" />
+            )}
           </p>
-          {spice && <span className="text-[11px] text-orange-600 dark:text-orange-400" title={`Spice: ${spice}`}>{spice}</span>}
+          {spice && (
+            <span
+              className="text-[11px] text-orange-600 dark:text-orange-400"
+              title={`Spice: ${spice}`}
+            >
+              {spice}
+            </span>
+          )}
         </div>
         <p className="text-xs text-muted-foreground">
           {formatPrice(item.priceCents)}
@@ -277,11 +367,18 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
         {(tags.length > 0 || allergens.length > 0) && (
           <div className="mt-1 flex flex-wrap gap-1">
             {tags.slice(0, 4).map((t) => (
-              <span key={t} className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+              <span
+                key={t}
+                className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"
+              >
                 {t}
               </span>
             ))}
-            {tags.length > 4 && <span className="text-[10px] text-muted-foreground">+{tags.length - 4}</span>}
+            {tags.length > 4 && (
+              <span className="text-[10px] text-muted-foreground">
+                +{tags.length - 4}
+              </span>
+            )}
             {allergens.length > 0 && (
               <span
                 className="rounded-full bg-amber-500/10 px-2 py-0.5 text-[10px] font-medium text-amber-700 dark:text-amber-400"
@@ -293,7 +390,10 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
           </div>
         )}
         {ingredients.length > 0 && (
-          <p className="mt-1 truncate text-[11px] text-muted-foreground" title={ingredients.join(", ")}>
+          <p
+            className="mt-1 truncate text-[11px] text-muted-foreground"
+            title={ingredients.join(", ")}
+          >
             🥘 {ingredients.join(", ")}
           </p>
         )}
@@ -312,10 +412,21 @@ function ItemRow({ item, onEdit, onDelete }: { item: OwnerMenuItem; onEdit: () =
         >
           {item.available ? "Available" : "Hidden"}
         </button>
-        <Button variant="ghost" size="icon-sm" aria-label="Edit item" onClick={onEdit}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Edit item"
+          onClick={onEdit}
+        >
           <Pencil className="size-3.5" />
         </Button>
-        <Button variant="ghost" size="icon-sm" aria-label="Delete item" className="text-destructive" onClick={onDelete}>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          aria-label="Delete item"
+          className="text-destructive"
+          onClick={onDelete}
+        >
           <Trash2 className="size-3.5" />
         </Button>
       </div>
@@ -342,7 +453,12 @@ function ItemFormDialog({
   const updateItem = useMutation(api.restaurants.updateMenuItem);
   const generateUploadUrl = useAction(api.uploads.generateUploadUrl);
 
-  const [form, setForm] = useState({ name: "", price: "", category: "", description: "" });
+  const [form, setForm] = useState({
+    name: "",
+    price: "",
+    category: "",
+    description: "",
+  });
   const [popular, setPopular] = useState(false);
   const [available, setAvailable] = useState(true);
   const [tags, setTags] = useState<string[]>([]);
@@ -353,9 +469,14 @@ function ItemFormDialog({
   const [currentImage, setCurrentImage] = useState<string | null>(null);
   // L-33: local photo previews are object URLs — track and revoke the current
   // one whenever it's replaced, discarded, or the dialog closes/unmounts.
-  const [newUpload, setNewUploadState] = useState<{ storageId: string; preview: string } | null>(null);
+  const [newUpload, setNewUploadState] = useState<{
+    storageId: string;
+    preview: string;
+  } | null>(null);
   const previewRef = useRef<string | null>(null);
-  const setNewUpload = (next: { storageId: string; preview: string } | null) => {
+  const setNewUpload = (
+    next: { storageId: string; preview: string } | null,
+  ) => {
     if (previewRef.current && previewRef.current !== (next?.preview ?? null)) {
       URL.revokeObjectURL(previewRef.current);
     }
@@ -384,6 +505,7 @@ function ItemFormDialog({
   // Prefill whenever the dialog opens for a different item.
   useEffect(() => {
     if (!open) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset the controlled editor when its record changes.
     setForm({
       name: item?.name ?? "",
       price: item ? (item.priceCents / 100).toFixed(2) : "",
@@ -404,11 +526,20 @@ function ItemFormDialog({
     setError(null);
   }, [open, item]);
 
-  const toggleTag = (list: string[], setList: (v: string[]) => void, value: string) =>
-    setList(list.includes(value) ? list.filter((t) => t !== value) : [...list, value]);
+  const toggleTag = (
+    list: string[],
+    setList: (v: string[]) => void,
+    value: string,
+  ) =>
+    setList(
+      list.includes(value) ? list.filter((t) => t !== value) : [...list, value],
+    );
 
   const addIngredient = (raw: string) => {
-    const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+    const parts = raw
+      .split(",")
+      .map((p) => p.trim())
+      .filter(Boolean);
     if (parts.length === 0) return;
     setIngredients((prev) => {
       const seen = new Set(prev.map((i) => i.toLowerCase()));
@@ -438,7 +569,10 @@ function ItemFormDialog({
     setUploading(true);
     setError(null);
     try {
-      const uploadUrl = await generateUploadUrl();
+      const uploadUrl = await generateUploadUrl({
+        contentType: file.type,
+        size: file.size,
+      });
       const res = await fetch(uploadUrl, {
         method: "POST",
         headers: { "Content-Type": file.type },
@@ -446,19 +580,25 @@ function ItemFormDialog({
       });
       if (!res.ok) throw new Error("Upload failed — try again.");
       const data = (await res.json()) as { storageId: string };
-      setNewUpload({ storageId: data.storageId, preview: URL.createObjectURL(file) });
+      setNewUpload({
+        storageId: data.storageId,
+        preview: URL.createObjectURL(file),
+      });
       setUrlInput("");
       setRemoveImage(false);
       toast.success("Photo uploaded — save the item to keep it");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not upload the photo.");
+      setError(
+        err instanceof Error ? err.message : "Could not upload the photo.",
+      );
     } finally {
       setUploading(false);
       if (fileRef.current) fileRef.current.value = "";
     }
   };
 
-  const previewSrc = newUpload?.preview ?? (currentImage && !removeImage ? currentImage : null);
+  const previewSrc =
+    newUpload?.preview ?? (currentImage && !removeImage ? currentImage : null);
 
   const handleSave = async () => {
     const priceCents = Math.round((parseFloat(form.price) || 0) * 100);
@@ -482,7 +622,9 @@ function ItemFormDialog({
       allergens,
       ingredients,
       spiceLevel: spice || undefined,
-      imageStorageId: hasNewUpload ? (newUpload!.storageId as never) : undefined,
+      imageStorageId: hasNewUpload
+        ? (newUpload!.storageId as never)
+        : undefined,
       imageUrl: hasUrl ? urlInput.trim() : undefined,
     };
 
@@ -508,12 +650,19 @@ function ItemFormDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !saving && !uploading && onClose()}>
+    <Dialog
+      open={open}
+      onOpenChange={(nextOpen) =>
+        !nextOpen && !saving && !uploading && onClose()
+      }
+    >
       <DialogContent className="max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{item ? "Edit item" : "Add item"}</DialogTitle>
           <DialogDescription>
-            {item ? `Update “${item.name}” — photo and attributes show on the diner menu.` : "Photos and tags help diners find and trust your dishes."}
+            {item
+              ? `Update “${item.name}” — photo and attributes show on the diner menu.`
+              : "Photos and tags help diners find and trust your dishes."}
           </DialogDescription>
         </DialogHeader>
 
@@ -522,25 +671,46 @@ function ItemFormDialog({
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
               <Label htmlFor="f-name">Dish name *</Label>
-              <Input id="f-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Cacio e pepe" />
+              <Input
+                id="f-name"
+                value={form.name}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+                placeholder="e.g. Cacio e pepe"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="f-price">Price *</Label>
-              <Input id="f-price" value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} placeholder="14.50" inputMode="decimal" />
+              <Input
+                id="f-price"
+                value={form.price}
+                onChange={(e) => setForm({ ...form, price: e.target.value })}
+                placeholder="14.50"
+                inputMode="decimal"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="f-category">Category</Label>
-              <Input id="f-category" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} placeholder="e.g. Pasta" />
+              <Input
+                id="f-category"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                placeholder="e.g. Pasta"
+              />
             </div>
             <div className="space-y-1.5">
               <Label htmlFor="f-spice">Spice level</Label>
-              <Select value={spice} onValueChange={(v) => setSpice(v === "" ? "" : v)}>
+              <Select
+                value={spice}
+                onValueChange={(v) => setSpice(v === "" ? "" : v)}
+              >
                 <SelectTrigger id="f-spice" className="w-full">
                   <SelectValue placeholder="Not spicy" />
                 </SelectTrigger>
                 <SelectContent>
                   {SPICE_LEVELS.map((s) => (
-                    <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>
+                    <SelectItem key={s.value} value={s.value}>
+                      {s.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -548,7 +718,14 @@ function ItemFormDialog({
           </div>
           <div className="space-y-1.5">
             <Label htmlFor="f-desc">Description</Label>
-            <Input id="f-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="Short description (optional)" />
+            <Input
+              id="f-desc"
+              value={form.description}
+              onChange={(e) =>
+                setForm({ ...form, description: e.target.value })
+              }
+              placeholder="Short description (optional)"
+            />
           </div>
 
           {/* Photo */}
@@ -557,7 +734,15 @@ function ItemFormDialog({
             <div className="flex items-center gap-3">
               {previewSrc ? (
                 <div className="relative">
-                  <img src={previewSrc} alt="Item preview" className="size-16 rounded-xl object-cover" />
+                  <img
+                    src={previewSrc}
+                    alt="Item preview"
+                    loading="lazy"
+                    decoding="async"
+                    width={64}
+                    height={64}
+                    className="size-16 rounded-xl object-cover"
+                  />
                   <button
                     type="button"
                     aria-label="Remove photo"
@@ -576,9 +761,26 @@ function ItemFormDialog({
                 </div>
               )}
               <div className="flex-1 space-y-2">
-                <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => handleFile(e.target.files?.[0])} />
-                <Button type="button" variant="outline" size="sm" onClick={() => fileRef.current?.click()} disabled={uploading}>
-                  {uploading ? <Loader2 className="size-3.5 animate-spin" /> : <Upload className="size-3.5" />} Upload photo
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => handleFile(e.target.files?.[0])}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading}
+                >
+                  {uploading ? (
+                    <Loader2 className="size-3.5 animate-spin" />
+                  ) : (
+                    <Upload className="size-3.5" />
+                  )}{" "}
+                  Upload photo
                 </Button>
                 <div className="flex gap-2">
                   <Input
@@ -594,12 +796,21 @@ function ItemFormDialog({
                     className="h-8 text-xs"
                   />
                   {newUpload && (
-                    <Button type="button" variant="ghost" size="sm" className="h-8 shrink-0" onClick={() => setNewUpload(null)}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-8 shrink-0"
+                      onClick={() => setNewUpload(null)}
+                    >
                       Cancel upload
                     </Button>
                   )}
                 </div>
-                <p className="text-[10px] text-muted-foreground">JPG, PNG or WebP · up to 5 MB. You can upload a photo or link one from the web.</p>
+                <p className="text-[10px] text-muted-foreground">
+                  JPG, PNG or WebP · up to 5 MB. You can upload a photo or link
+                  one from the web.
+                </p>
               </div>
             </div>
           </div>
@@ -608,7 +819,8 @@ function ItemFormDialog({
           <div>
             <p className="text-sm font-medium">Ingredients</p>
             <p className="mb-1.5 text-[11px] text-muted-foreground">
-              List the dish&apos;s ingredients — diners can remove any of these when they order at the table.
+              List the dish&apos;s ingredients — diners can remove any of these
+              when they order at the table.
             </p>
             {ingredients.length > 0 && (
               <div className="mb-2 flex flex-wrap gap-1.5">
@@ -621,7 +833,9 @@ function ItemFormDialog({
                     <button
                       type="button"
                       aria-label={`Remove ${ing}`}
-                      onClick={() => setIngredients((prev) => prev.filter((i) => i !== ing))}
+                      onClick={() =>
+                        setIngredients((prev) => prev.filter((i) => i !== ing))
+                      }
                       className="text-muted-foreground hover:text-destructive"
                     >
                       <X className="size-3" />
@@ -653,7 +867,9 @@ function ItemFormDialog({
                 size="sm"
                 className="h-8 shrink-0"
                 onClick={() => addIngredient(ingInput)}
-                disabled={!ingInput.trim() || ingredients.length >= MAX_INGREDIENTS}
+                disabled={
+                  !ingInput.trim() || ingredients.length >= MAX_INGREDIENTS
+                }
               >
                 <Plus className="size-3.5" /> Add
               </Button>
@@ -699,7 +915,13 @@ function ItemFormDialog({
                   : "border-border bg-card text-muted-foreground hover:text-foreground",
               )}
             >
-              <Star className={cn("size-3.5", popular && "fill-amber-400 text-amber-400")} /> Popular
+              <Star
+                className={cn(
+                  "size-3.5",
+                  popular && "fill-amber-400 text-amber-400",
+                )}
+              />{" "}
+              Popular
             </button>
             {item && (
               <button
@@ -717,15 +939,34 @@ function ItemFormDialog({
             )}
           </div>
 
-          {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+          {error && (
+            <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+              {error}
+            </p>
+          )}
         </div>
 
         <div className="mt-5 flex gap-3">
-          <Button variant="outline" className="flex-1" onClick={onClose} disabled={saving || uploading}>
+          <Button
+            variant="outline"
+            className="flex-1"
+            onClick={onClose}
+            disabled={saving || uploading}
+          >
             Cancel
           </Button>
-          <Button className="flex-1" onClick={handleSave} disabled={saving || uploading}>
-            {saving ? <Loader2 className="size-4 animate-spin" /> : item ? "Save changes" : "Add item"}
+          <Button
+            className="flex-1"
+            onClick={handleSave}
+            disabled={saving || uploading}
+          >
+            {saving ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : item ? (
+              "Save changes"
+            ) : (
+              "Add item"
+            )}
           </Button>
         </div>
       </DialogContent>

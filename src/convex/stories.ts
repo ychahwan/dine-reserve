@@ -1,7 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
 
@@ -49,7 +49,9 @@ export const post = mutation({
       createdAt: Date.now(),
     });
     // Idea #4: notify diners who saved this restaurant (fire-and-forget)
-    await ctx.scheduler.runAfter(0, internal.dinerNotify.onStoryPosted, { storyId: id });
+    await ctx.scheduler.runAfter(0, internal.dinerNotify.onStoryPosted, {
+      storyId: id,
+    });
     return await ctx.db.get(id);
   },
 });
@@ -80,8 +82,9 @@ export const mine = query({
     const stories = await ctx.db
       .query("stories")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
-    return stories.sort((a, b) => b.createdAt - a.createdAt);
+      .order("desc")
+      .take(100);
+    return stories;
   },
 });
 
@@ -97,8 +100,17 @@ export const mine = query({
 export const recent = query({
   args: { limit: v.optional(v.number()) },
   handler: async (ctx, { limit }) => {
-    const stories = await ctx.db.query("stories").withIndex("by_created", (q) => q.gte("createdAt", Date.now() - 30 * 24 * 3600_000)).collect();
-    const capped = stories.sort((a, b) => b.createdAt - a.createdAt).slice(0, Math.min(limit ?? 20, 50));
+    const requestedLimit = limit ?? 20;
+    if (!Number.isInteger(requestedLimit) || requestedLimit < 1) {
+      throw new Error("Limit must be a positive whole number.");
+    }
+    const capped = await ctx.db
+      .query("stories")
+      .withIndex("by_created", (q) =>
+        q.gte("createdAt", Date.now() - 30 * 24 * 3600_000),
+      )
+      .order("desc")
+      .take(Math.min(requestedLimit, 50));
     const restaurants = await Promise.all(
       capped.map((s) => safeGet<Doc<"restaurants">>(ctx, s.restaurantId)),
     );
@@ -132,7 +144,8 @@ export const forRestaurant = query({
     const stories = await ctx.db
       .query("stories")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
-    return stories.sort((a, b) => b.createdAt - a.createdAt).slice(0, 10);
+      .order("desc")
+      .take(10);
+    return stories;
   },
 });

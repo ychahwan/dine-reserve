@@ -14,8 +14,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Ban, Plus, Search, Trash2, UserPlus } from "lucide-react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Ban, Search, Trash2, UserPlus } from "lucide-react";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -24,13 +30,19 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { roleBadge, EmptyNote, SortableHead, TablePaginationBar } from "./AdminUI";
+import {
+  roleBadge,
+  EmptyNote,
+  SortableHead,
+  TablePaginationBar,
+} from "./AdminUI";
 import { formatPrice } from "@/lib/format";
-import { useMemo, useState } from "react";
+import { useDeferredValue, useMemo, useState } from "react";
 import {
   useTablePagination,
   useSort,
   sortItems,
+  capAdminRows,
 } from "@/lib/use-table-pagination";
 import { toast } from "sonner";
 import {
@@ -42,24 +54,41 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
-type UserRow = NonNullable<ReturnType<typeof useQuery<typeof api.adminView.listUsers>>>[number];
-type SortKey = "name" | "role" | "phone" | "bookings" | "orders" | "reviews" | "spend";
+type UserRow = NonNullable<
+  ReturnType<typeof useQuery<typeof api.adminView.listUsers>>
+>[number];
+type SortKey =
+  | "name"
+  | "role"
+  | "phone"
+  | "bookings"
+  | "orders"
+  | "reviews"
+  | "spend";
 
 function extractValue(row: UserRow, key: SortKey): string | number {
   switch (key) {
-    case "name": return row.name ?? "";
-    case "role": return row.role ?? "";
-    case "phone": return row.phone ?? "";
-    case "bookings": return row.bookingCount;
-    case "orders": return row.orderCount;
-    case "reviews": return row.reviewCount;
-    case "spend": return row.totalSpendCents;
+    case "name":
+      return row.name ?? "";
+    case "role":
+      return row.role ?? "";
+    case "phone":
+      return row.phone ?? "";
+    case "bookings":
+      return row.bookingCount;
+    case "orders":
+      return row.orderCount;
+    case "reviews":
+      return row.reviewCount;
+    case "spend":
+      return row.totalSpendCents;
   }
 }
 
 export default function AdminUsers() {
   const { t } = useTranslation();
-  const rows = useQuery(api.adminView.listUsers);
+  const queriedRows = useQuery(api.adminView.listUsers);
+  const rows = useMemo(() => capAdminRows(queriedRows), [queriedRows]);
   const bulkDelete = useMutation(api.admin.bulkDeleteUsers);
   const createUser = useMutation(api.admin.createUser);
 
@@ -67,8 +96,13 @@ export default function AdminUsers() {
   const [nameQuery, setNameQuery] = useState("");
   const [phoneQuery, setPhoneQuery] = useState("");
   const [roleFilter, setRoleFilter] = useState<string>("all");
+  const deferredNameQuery = useDeferredValue(nameQuery);
+  const deferredPhoneQuery = useDeferredValue(phoneQuery);
 
-  const { sort, toggleSort } = useSort<SortKey>({ key: "name", direction: "asc" });
+  const { sort, toggleSort } = useSort<SortKey>({
+    key: "name",
+    direction: "asc",
+  });
 
   // Selection state
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -87,15 +121,17 @@ export default function AdminUsers() {
   const filteredRows = useMemo(() => {
     let list = rows ?? [];
 
-    if (nameQuery.trim()) {
-      const q = nameQuery.trim().toLowerCase();
+    if (deferredNameQuery.trim()) {
+      const q = deferredNameQuery.trim().toLowerCase();
       list = list.filter((u) => (u.name ?? "").toLowerCase().includes(q));
     }
 
-    if (phoneQuery.trim()) {
-      const digits = phoneQuery.replace(/\D/g, "");
+    if (deferredPhoneQuery.trim()) {
+      const digits = deferredPhoneQuery.replace(/\D/g, "");
       if (digits) {
-        list = list.filter((u) => (u.phone ?? "").replace(/\D/g, "").includes(digits));
+        list = list.filter((u) =>
+          (u.phone ?? "").replace(/\D/g, "").includes(digits),
+        );
       }
     }
 
@@ -104,22 +140,24 @@ export default function AdminUsers() {
     }
 
     return list;
-  }, [rows, nameQuery, phoneQuery, roleFilter]);
+  }, [rows, deferredNameQuery, deferredPhoneQuery, roleFilter]);
 
   const sortedRows = useMemo(
     () => sortItems(filteredRows, sort.key, sort.direction, extractValue),
     [filteredRows, sort.key, sort.direction],
   );
 
-  const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
-    items: sortedRows,
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    pageSize: 25,
-  });
+  const { pageItems, page, setPage, totalPages, totalItems } =
+    useTablePagination({
+      items: sortedRows,
+      sortKey: sort.key,
+      sortDirection: sort.direction,
+      pageSize: 25,
+    });
 
   // Selection helpers
-  const allPageSelected = pageItems.length > 0 && pageItems.every((u) => selected.has(u._id));
+  const allPageSelected =
+    pageItems.length > 0 && pageItems.every((u) => selected.has(u._id));
   // H-26: only rows matching the current filters may be bulk-deleted —
   // selections made under other filters are ignored, not silently included.
   const selectedVisibleIds = useMemo(
@@ -159,7 +197,9 @@ export default function AdminUsers() {
       const ids = selectedVisibleIds as never[];
       const res = await bulkDelete({ userIds: ids });
       if (res.deleted > 0) {
-        toast.success(`Deleted ${res.deleted} user${res.deleted === 1 ? "" : "s"}.`);
+        toast.success(
+          `Deleted ${res.deleted} user${res.deleted === 1 ? "" : "s"}.`,
+        );
       }
       if (res.skipped.length > 0) {
         const reasons = res.skipped.map((s) => s.reason).join(", ");
@@ -175,7 +215,8 @@ export default function AdminUsers() {
   };
 
   const handleAddUser = async () => {
-    if (!addPhone.trim() || !addName.trim() || !addPassword.trim() || addBusy) return;
+    if (!addPhone.trim() || !addName.trim() || !addPassword.trim() || addBusy)
+      return;
     setAddBusy(true);
     try {
       await createUser({
@@ -184,14 +225,18 @@ export default function AdminUsers() {
         role: addRole,
         tempPassword: addPassword.trim(),
       });
-      toast.success(`User "${addName.trim()}" created. They must set a new password on first login.`);
+      toast.success(
+        `User "${addName.trim()}" created. They must set a new password on first login.`,
+      );
       setAddOpen(false);
       setAddPhone("");
       setAddName("");
       setAddRole("customer");
       setAddPassword("");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not create user.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not create user.",
+      );
     } finally {
       setAddBusy(false);
     }
@@ -214,7 +259,8 @@ export default function AdminUsers() {
           <h1 className="text-2xl font-bold tracking-tight">Users</h1>
           <p className="mt-1 text-sm text-muted-foreground">
             {filteredRows.length} of {rows.length} accounts
-            {hasFilters ? " (filtered)" : ""}. Select one to see their bookings, orders and interactions.
+            {hasFilters ? " (filtered)" : ""}. Select one to see their bookings,
+            orders and interactions.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -228,7 +274,8 @@ export default function AdminUsers() {
               onClick={() => setConfirmBulkDelete(true)}
               disabled={busy}
             >
-              <Trash2 className="size-3.5" /> Delete ({selectedVisibleIds.length})
+              <Trash2 className="size-3.5" /> Delete (
+              {selectedVisibleIds.length})
             </Button>
           )}
         </div>
@@ -244,12 +291,16 @@ export default function AdminUsers() {
               <CardTitle className="flex items-center gap-2 text-base">
                 <Search className="size-4 text-primary" /> Find a user
               </CardTitle>
-              <CardDescription>Search by name, phone, or filter by role.</CardDescription>
+              <CardDescription>
+                Search by name, phone, or filter by role.
+              </CardDescription>
             </CardHeader>
             <CardContent className="px-4">
               <div className="grid gap-3 sm:grid-cols-3">
                 <div className="space-y-1.5">
-                  <Label htmlFor="user-name-filter" className="text-xs">Name</Label>
+                  <Label htmlFor="user-name-filter" className="text-xs">
+                    Name
+                  </Label>
                   <Input
                     id="user-name-filter"
                     type="search"
@@ -260,7 +311,9 @@ export default function AdminUsers() {
                   />
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="user-phone-filter" className="text-xs">Phone</Label>
+                  <Label htmlFor="user-phone-filter" className="text-xs">
+                    Phone
+                  </Label>
                   <Input
                     id="user-phone-filter"
                     type="search"
@@ -289,7 +342,11 @@ export default function AdminUsers() {
               {hasFilters && (
                 <button
                   className="mt-2 text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  onClick={() => { setNameQuery(""); setPhoneQuery(""); setRoleFilter("all"); }}
+                  onClick={() => {
+                    setNameQuery("");
+                    setPhoneQuery("");
+                    setRoleFilter("all");
+                  }}
                 >
                   Clear filters
                 </button>
@@ -299,76 +356,155 @@ export default function AdminUsers() {
 
           {/* Table */}
           <div className="overflow-hidden rounded-xl border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-10">
-                  <input
-                    type="checkbox"
-                    checked={allPageSelected}
-                    onChange={toggleSelectAll}
-                    className="size-4 rounded border-border accent-primary cursor-pointer"
-                    aria-label="Select all on this page"
-                  />
-                </TableHead>
-                <SortableHead label="User" sortKey="name" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
-                <SortableHead label="Role" sortKey="role" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
-                <SortableHead label="Contact" sortKey="phone" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
-                <SortableHead label="Bookings" sortKey="bookings" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
-                <SortableHead label="Orders" sortKey="orders" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
-                <SortableHead label="Reviews" sortKey="reviews" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden lg:table-cell" />
-                <SortableHead label="Spend" sortKey="spend" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden lg:table-cell" />
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {pageItems.length === 0 ? (
+            <Table>
+              <TableHeader>
                 <TableRow>
-                  <TableCell colSpan={8} className="py-12 text-center text-sm text-muted-foreground">
-                    {hasFilters ? "No users match your filters." : "No users yet."}
-                  </TableCell>
-                </TableRow>
-              ) : pageItems.map((u) => (
-                <TableRow key={u._id} className={selected.has(u._id) ? "bg-primary/5" : undefined}>
-                  <TableCell>
+                  <TableHead className="w-10">
                     <input
                       type="checkbox"
-                      checked={selected.has(u._id)}
-                      onChange={() => toggleRow(u._id)}
+                      checked={allPageSelected}
+                      onChange={toggleSelectAll}
                       className="size-4 rounded border-border accent-primary cursor-pointer"
-                      aria-label={`Select ${u.name ?? "user"}`}
+                      aria-label="Select all on this page"
                     />
-                  </TableCell>
-                  <TableCell>
-                    <Link to={`/admin/users/${u._id}`} className="group block">
-                      <p className="flex items-center gap-2 font-medium group-hover:text-primary">
-                        {u.name ?? "Unnamed"}
-                        {u.disabled && (
-                          <Badge className="gap-1 bg-destructive/10 text-destructive">
-                            <Ban className="size-3" /> Disabled
-                          </Badge>
-                        )}
-                      </p>
-                      {u.ownedRestaurants.length > 0 && (
-                        <p className="text-xs text-muted-foreground">
-                          owns {u.ownedRestaurants.map((r) => r.name).join(", ")}
-                        </p>
-                      )}
-                      {u.phone && <p className="text-xs text-muted-foreground md:hidden">{u.phone}</p>}
-                    </Link>
-                  </TableCell>
-                  <TableCell>{roleBadge(u.role)}</TableCell>
-                  <TableCell className="hidden md:table-cell">
-                    <p className="text-sm">{u.phone ?? ""}</p>
-                    {u.email && <p className="text-xs text-muted-foreground">{u.email}</p>}
-                  </TableCell>
-                  <TableCell className="hidden sm:table-cell">{u.bookingCount}</TableCell>
-                  <TableCell className="hidden sm:table-cell">{u.orderCount}</TableCell>
-                  <TableCell className="hidden lg:table-cell">{u.reviewCount}</TableCell>
-                  <TableCell className="hidden lg:table-cell">{formatPrice(u.totalSpendCents)}</TableCell>
+                  </TableHead>
+                  <SortableHead
+                    label="User"
+                    sortKey="name"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHead
+                    label="Role"
+                    sortKey="role"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHead
+                    label="Contact"
+                    sortKey="phone"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden md:table-cell"
+                  />
+                  <SortableHead
+                    label="Bookings"
+                    sortKey="bookings"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden sm:table-cell"
+                  />
+                  <SortableHead
+                    label="Orders"
+                    sortKey="orders"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden sm:table-cell"
+                  />
+                  <SortableHead
+                    label="Reviews"
+                    sortKey="reviews"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden lg:table-cell"
+                  />
+                  <SortableHead
+                    label="Spend"
+                    sortKey="spend"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden lg:table-cell"
+                  />
                 </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+              </TableHeader>
+              <TableBody>
+                {pageItems.length === 0 ? (
+                  <TableRow>
+                    <TableCell
+                      colSpan={8}
+                      className="py-12 text-center text-sm text-muted-foreground"
+                    >
+                      {hasFilters
+                        ? "No users match your filters."
+                        : "No users yet."}
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  pageItems.map((u) => (
+                    <TableRow
+                      key={u._id}
+                      className={
+                        selected.has(u._id) ? "bg-primary/5" : undefined
+                      }
+                    >
+                      <TableCell>
+                        <input
+                          type="checkbox"
+                          checked={selected.has(u._id)}
+                          onChange={() => toggleRow(u._id)}
+                          className="size-4 rounded border-border accent-primary cursor-pointer"
+                          aria-label={`Select ${u.name ?? "user"}`}
+                        />
+                      </TableCell>
+                      <TableCell>
+                        <Link
+                          to={`/admin/users/${u._id}`}
+                          className="group block"
+                        >
+                          <p className="flex items-center gap-2 font-medium group-hover:text-primary">
+                            {u.name ?? "Unnamed"}
+                            {u.disabled && (
+                              <Badge className="gap-1 bg-destructive/10 text-destructive">
+                                <Ban className="size-3" /> Disabled
+                              </Badge>
+                            )}
+                          </p>
+                          {u.ownedRestaurants.length > 0 && (
+                            <p className="text-xs text-muted-foreground">
+                              owns{" "}
+                              {u.ownedRestaurants.map((r) => r.name).join(", ")}
+                            </p>
+                          )}
+                          {u.phone && (
+                            <p className="text-xs text-muted-foreground md:hidden">
+                              {u.phone}
+                            </p>
+                          )}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{roleBadge(u.role)}</TableCell>
+                      <TableCell className="hidden md:table-cell">
+                        <p className="text-sm">{u.phone ?? ""}</p>
+                        {u.email && (
+                          <p className="text-xs text-muted-foreground">
+                            {u.email}
+                          </p>
+                        )}
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {u.bookingCount}
+                      </TableCell>
+                      <TableCell className="hidden sm:table-cell">
+                        {u.orderCount}
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        {u.reviewCount}
+                      </TableCell>
+                      <TableCell className="hidden lg:table-cell">
+                        {formatPrice(u.totalSpendCents)}
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
           </div>
           <TablePaginationBar
             page={page}
@@ -385,19 +521,36 @@ export default function AdminUsers() {
         <DialogContent>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <Trash2 className="size-5 text-destructive" /> Delete {selectedVisibleIds.length} user{selectedVisibleIds.length === 1 ? "" : "s"}?
+              <Trash2 className="size-5 text-destructive" /> Delete{" "}
+              {selectedVisibleIds.length} user
+              {selectedVisibleIds.length === 1 ? "" : "s"}?
             </DialogTitle>
             <DialogDescription>
-              This will permanently delete all data for the selected users (bookings, orders, reviews, loyalty, auth accounts). Users who own restaurants will be skipped.
+              This will permanently delete all data for the selected users
+              (bookings, orders, reviews, loyalty, auth accounts). Users who own
+              restaurants will be skipped.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmBulkDelete(false)} disabled={busy}>
+            <Button
+              variant="outline"
+              onClick={() => setConfirmBulkDelete(false)}
+              disabled={busy}
+            >
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleBulkDelete} disabled={busy}>
-              {busy ? <Spinner className="size-4" /> : <Trash2 className="size-4" />}
-              Delete {selectedVisibleIds.length} user{selectedVisibleIds.length === 1 ? "" : "s"}
+            <Button
+              variant="destructive"
+              onClick={handleBulkDelete}
+              disabled={busy}
+            >
+              {busy ? (
+                <Spinner className="size-4" />
+              ) : (
+                <Trash2 className="size-4" />
+              )}
+              Delete {selectedVisibleIds.length} user
+              {selectedVisibleIds.length === 1 ? "" : "s"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -411,7 +564,8 @@ export default function AdminUsers() {
               <UserPlus className="size-5 text-primary" /> Add new user
             </DialogTitle>
             <DialogDescription>
-              Create a new account. The user will need to set a new password on first login.
+              Create a new account. The user will need to set a new password on
+              first login.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -437,7 +591,10 @@ export default function AdminUsers() {
             </div>
             <div className="space-y-1.5">
               <Label>Role</Label>
-              <Select value={addRole} onValueChange={(v) => setAddRole(v as "customer" | "owner")}>
+              <Select
+                value={addRole}
+                onValueChange={(v) => setAddRole(v as "customer" | "owner")}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -456,18 +613,33 @@ export default function AdminUsers() {
                 onChange={(e) => setAddPassword(e.target.value)}
                 placeholder={t("admin.minChars8")}
               />
-              <p className="text-[11px] text-muted-foreground">{t("admin.mustChangeLogin")}</p>
+              <p className="text-[11px] text-muted-foreground">
+                {t("admin.mustChangeLogin")}
+              </p>
             </div>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setAddOpen(false)} disabled={addBusy}>
+            <Button
+              variant="outline"
+              onClick={() => setAddOpen(false)}
+              disabled={addBusy}
+            >
               Cancel
             </Button>
             <Button
               onClick={handleAddUser}
-              disabled={!addPhone.trim() || !addName.trim() || addPassword.trim().length < 8 || addBusy}
+              disabled={
+                !addPhone.trim() ||
+                !addName.trim() ||
+                addPassword.trim().length < 8 ||
+                addBusy
+              }
             >
-              {addBusy ? <Spinner className="size-4" /> : <UserPlus className="size-4" />}
+              {addBusy ? (
+                <Spinner className="size-4" />
+              ) : (
+                <UserPlus className="size-4" />
+              )}
               Create user
             </Button>
           </DialogFooter>

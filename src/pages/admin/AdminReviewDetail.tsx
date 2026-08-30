@@ -37,12 +37,17 @@ export default function AdminReviewDetail() {
   const { t } = useTranslation();
   const { id } = useParams();
   const navigate = useNavigate();
-  const reviews = useQuery(api.adminView.listReviews);
+  // OX-M-32: uses the dedicated `adminView.reviewById` query (mirrors
+  // `restaurantDetail`/`userDetail`) instead of fetching the bounded
+  // recent-reviews list and `.find()`ing the row locally, so reviews older
+  // than the list cap are still reachable by id.
+  const review = useQuery(
+    api.adminView.reviewById,
+    id ? { reviewId: id as never } : "skip",
+  );
   const removeReview = useMutation(api.reviews.remove);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [busy, setBusy] = useState(false);
-
-  const review = reviews?.find((item) => item._id === id);
 
   const handleDelete = async () => {
     if (!id || busy) return;
@@ -63,7 +68,7 @@ export default function AdminReviewDetail() {
     }
   };
 
-  if (reviews === undefined) {
+  if (review === undefined) {
     return (
       <div className="flex items-center justify-center gap-2 py-16 text-sm text-muted-foreground">
         <Spinner className="size-4" /> Loading review…

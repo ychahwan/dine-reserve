@@ -1,7 +1,7 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import {
-  action,
+  internalAction,
   internalMutation,
   internalQuery,
   mutation,
@@ -32,10 +32,12 @@ export function todayKey(): string {
 
 function resolveTodayKey(clientDate?: string): string {
   const serverToday = todayKey();
-  if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate)) return serverToday;
+  if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate))
+    return serverToday;
   const msPerDay = 24 * 60 * 60 * 1000;
   const diffMs = Math.abs(
-    new Date(`${clientDate}T00:00:00Z`).getTime() - new Date(`${serverToday}T00:00:00Z`).getTime(),
+    new Date(`${clientDate}T00:00:00Z`).getTime() -
+      new Date(`${serverToday}T00:00:00Z`).getTime(),
   );
   return diffMs <= msPerDay ? clientDate : serverToday;
 }
@@ -90,7 +92,9 @@ export const sendForBooking = mutation({
     const booking = await ctx.db.get(bookingId);
     if (!booking) throw new Error("Booking not found.");
     if (booking.userId !== userId)
-      throw new Error("You can only notify the restaurant for your own booking.");
+      throw new Error(
+        "You can only notify the restaurant for your own booking.",
+      );
     if (booking.status !== "confirmed")
       throw new Error("This booking is no longer confirmed.");
 
@@ -201,32 +205,44 @@ export const forRestaurant = query({
     }
 
     const rows = await q.order("desc").take(200);
-
-    return Promise.all(
-      rows.map(async (r) => {
-        const diner = await ctx.db.get(r.userId);
-        const booking = r.bookingId ? await ctx.db.get(r.bookingId) : null;
-        return {
-          _id: r._id,
-          type: r.type,
-          message: r.message,
-          read: r.read,
-          createdAt: r.createdAt,
-          bookingId: r.bookingId,
-          dinerName: diner?.name ?? diner?.email ?? "Diner",
-          booking: booking
-            ? {
-                _id: booking._id,
-                date: booking.date,
-                time: booking.time,
-                partySize: booking.partySize,
-                code: booking.code,
-                sectionName: booking.sectionName,
-              }
-            : null,
-        };
-      }),
+    const dinerIds = [...new Set(rows.map((row) => row.userId))];
+    const bookingIds = [
+      ...new Set(rows.flatMap((row) => (row.bookingId ? [row.bookingId] : []))),
+    ];
+    const [diners, bookings] = await Promise.all([
+      Promise.all(dinerIds.map((id) => ctx.db.get(id))),
+      Promise.all(bookingIds.map((id) => ctx.db.get(id))),
+    ]);
+    const dinersById = new Map(
+      diners.filter(Boolean).map((diner) => [diner!._id, diner!]),
     );
+    const bookingsById = new Map(
+      bookings.filter(Boolean).map((booking) => [booking!._id, booking!]),
+    );
+
+    return rows.map((r) => {
+      const diner = dinersById.get(r.userId);
+      const booking = r.bookingId ? bookingsById.get(r.bookingId) : null;
+      return {
+        _id: r._id,
+        type: r.type,
+        message: r.message,
+        read: r.read,
+        createdAt: r.createdAt,
+        bookingId: r.bookingId,
+        dinerName: diner?.name ?? diner?.email ?? "Diner",
+        booking: booking
+          ? {
+              _id: booking._id,
+              date: booking.date,
+              time: booking.time,
+              partySize: booking.partySize,
+              code: booking.code,
+              sectionName: booking.sectionName,
+            }
+          : null,
+      };
+    });
   },
 });
 
@@ -250,9 +266,9 @@ export const unreadCount = query({
       .withIndex("by_restaurant_read", (q) =>
         q.eq("restaurantId", restaurantId).eq("read", false),
       )
-      .collect();
+      .take(1001);
 
-    return rows.length;
+    return Math.min(rows.length, 1000);
   },
 });
 
@@ -273,7 +289,9 @@ export const markRead = mutation({
 
     const restaurant = await ctx.db.get(notif.restaurantId);
     if (!restaurant || restaurant.ownerId !== userId)
-      throw new Error("Only the restaurant owner can mark notifications as read.");
+      throw new Error(
+        "Only the restaurant owner can mark notifications as read.",
+      );
 
     await ctx.db.patch(id, { read: true });
   },
@@ -282,6 +300,34 @@ export const markRead = mutation({
 // ---------------------------------------------------------------------------
 // markAllRead
 // ---------------------------------------------------------------------------
+
+const MARK_READ_BATCH = 200;
+
+async function markUnreadBatch(
+  ctx: MutationCtx,
+  restaurantId: Id<"restaurants">,
+) {
+  const unread = await ctx.db
+    .query("notifications")
+    .withIndex("by_restaurant_read", (q) =>
+      q.eq("restaurantId", restaurantId).eq("read", false),
+    )
+    .take(MARK_READ_BATCH);
+  await Promise.all(unread.map((n) => ctx.db.patch(n._id, { read: true })));
+  return unread.length;
+}
+
+export const markAllReadStep = internalMutation({
+  args: { restaurantId: v.id("restaurants") },
+  handler: async (ctx, { restaurantId }) => {
+    const marked = await markUnreadBatch(ctx, restaurantId);
+    if (marked === MARK_READ_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.notifications.markAllReadStep, {
+        restaurantId,
+      });
+    }
+  },
+});
 
 export const markAllRead = mutation({
   args: {
@@ -293,26 +339,27 @@ export const markAllRead = mutation({
 
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant || restaurant.ownerId !== userId)
-      throw new Error("Only the restaurant owner can mark notifications as read.");
+      throw new Error(
+        "Only the restaurant owner can mark notifications as read.",
+      );
 
-    const unread = await ctx.db
-      .query("notifications")
-      .withIndex("by_restaurant_read", (q) =>
-        q.eq("restaurantId", restaurantId).eq("read", false),
-      )
-      .collect();
-
-    for (const n of unread) {
-      await ctx.db.patch(n._id, { read: true });
+    const marked = await markUnreadBatch(ctx, restaurantId);
+    if (marked === MARK_READ_BATCH) {
+      await ctx.scheduler.runAfter(0, internal.notifications.markAllReadStep, {
+        restaurantId,
+      });
     }
-
-    return { marked: unread.length };
+    return { marked };
   },
 });
 
 // ===========================================================================
 // Firebase Cloud Messaging — push notification token management
 // ===========================================================================
+
+const PUSH_TOKEN_PATTERN = /^[A-Za-z0-9_:.-]+$/;
+const MAX_TOKENS_PER_USER = 10;
+const TOKEN_STALE_MS = 90 * 24 * 60 * 60_000;
 
 export const saveToken = mutation({
   args: {
@@ -325,28 +372,69 @@ export const saveToken = mutation({
     // device.
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
+    const token = args.token.trim();
+    if (
+      token.length < 32 ||
+      token.length > 4096 ||
+      !PUSH_TOKEN_PATTERN.test(token)
+    ) {
+      throw new Error("Invalid push token.");
+    }
+    await checkRateLimit(ctx, {
+      key: "savePushToken",
+      userId,
+      limit: 20,
+      windowMs: 24 * 60 * 60_000,
+    });
 
     const existing = await ctx.db
       .query("notificationTokens")
-      .withIndex("by_token", (q) => q.eq("token", args.token))
+      .withIndex("by_token", (q) => q.eq("token", token))
       .first();
+
+    if (existing?.active && existing.userId !== userId) {
+      throw new Error("Push token is already registered.");
+    }
+
+    const now = Date.now();
+    const userTokens = await ctx.db
+      .query("notificationTokens")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .take(50);
+    const stale = userTokens.filter(
+      (item) => item.active && item.lastUsed < now - TOKEN_STALE_MS,
+    );
+    await Promise.all(
+      stale.map((item) => ctx.db.patch(item._id, { active: false })),
+    );
+    const activeCount = userTokens.filter(
+      (item) =>
+        item.active &&
+        item.lastUsed >= now - TOKEN_STALE_MS &&
+        item._id !== existing?._id,
+    ).length;
+    if (activeCount >= MAX_TOKENS_PER_USER) {
+      throw new Error(
+        "Too many registered devices. Remove an old device first.",
+      );
+    }
 
     if (existing) {
       await ctx.db.patch(existing._id, {
         userId,
         platform: args.platform,
-        lastUsed: Date.now(),
+        lastUsed: now,
         active: true,
       });
       return existing._id;
     }
 
     return await ctx.db.insert("notificationTokens", {
-      token: args.token,
+      token,
       platform: args.platform,
       userId,
-      createdAt: Date.now(),
-      lastUsed: Date.now(),
+      createdAt: now,
+      lastUsed: now,
       active: true,
     });
   },
@@ -386,7 +474,7 @@ export const getUserTokens = query({
       .query("notificationTokens")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .filter((q) => q.eq(q.field("active"), true))
-      .collect();
+      .take(MAX_TOKENS_PER_USER);
   },
 });
 
@@ -400,7 +488,7 @@ export const _getUserTokensForPush = internalQuery({
       .query("notificationTokens")
       .withIndex("by_user", (q) => q.eq("userId", args.userId))
       .filter((q) => q.eq(q.field("active"), true))
-      .collect();
+      .take(MAX_TOKENS_PER_USER);
   },
 });
 
@@ -432,28 +520,36 @@ export const updateTokenLastUsed = internalMutation({
 export const cleanupTokens = internalMutation({
   args: {
     olderThanDays: v.optional(v.number()),
+    cursor: v.optional(v.string()),
   },
   handler: async (ctx, args) => {
-    const days = args.olderThanDays || 90;
+    const days = Math.min(Math.max(args.olderThanDays ?? 90, 1), 3650);
     const cutoff = Date.now() - days * 24 * 60 * 60 * 1000;
 
-    const oldTokens = await ctx.db
+    const page = await ctx.db
       .query("notificationTokens")
-      .filter((q) =>
-        q.and(
-          q.eq(q.field("active"), false),
-          q.lt(q.field("lastUsed"), cutoff),
-        ),
-      )
-      .collect();
+      .paginate({ numItems: 500, cursor: args.cursor ?? null });
 
     let deleted = 0;
-    for (const token of oldTokens) {
-      await ctx.db.delete(token._id);
-      deleted++;
+    let deactivated = 0;
+    for (const token of page.page) {
+      if (token.lastUsed >= cutoff) continue;
+      if (token.active) {
+        await ctx.db.patch(token._id, { active: false });
+        deactivated++;
+      } else {
+        await ctx.db.delete(token._id);
+        deleted++;
+      }
+    }
+    if (!page.isDone) {
+      await ctx.scheduler.runAfter(0, internal.notifications.cleanupTokens, {
+        olderThanDays: days,
+        cursor: page.continueCursor,
+      });
     }
 
-    return { deleted };
+    return { deleted, deactivated };
   },
 });
 
@@ -463,10 +559,7 @@ export const cleanupTokens = internalMutation({
 
 /** Base64url-encode a string without padding. */
 function b64url(input: string): string {
-  return btoa(input)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
+  return btoa(input).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** Import a PEM PKCS#8 private key for RS256 signing. */
@@ -572,7 +665,7 @@ async function resolveCredentials() {
 /**
  * Send a push notification to a specific user
  */
-export const sendToUser = action({
+export const sendToUser = internalAction({
   args: {
     userId: v.id("users"),
     title: v.string(),
@@ -583,13 +676,17 @@ export const sendToUser = action({
     ctx,
     args,
   ): Promise<{ sent: number; total?: number; error?: string }> => {
-    const tokens = await ctx.runQuery(internal.notifications._getUserTokensForPush, {
-      userId: args.userId,
-    });
+    const tokens = await ctx.runQuery(
+      internal.notifications._getUserTokensForPush,
+      {
+        userId: args.userId,
+      },
+    );
     if (tokens.length === 0) return { sent: 0 };
 
     const creds = await resolveCredentials();
-    if (!creds) return { sent: 0, error: "FIREBASE_SERVICE_ACCOUNT not configured" };
+    if (!creds)
+      return { sent: 0, error: "FIREBASE_SERVICE_ACCOUNT not configured" };
 
     let sent = 0;
     for (const t of tokens) {
@@ -616,7 +713,7 @@ export const sendToUser = action({
 /**
  * Send a broadcast notification to all users
  */
-export const broadcast = action({
+export const broadcast = internalAction({
   args: {
     title: v.string(),
     body: v.string(),
@@ -626,11 +723,14 @@ export const broadcast = action({
     ctx,
     args,
   ): Promise<{ sent: number; total?: number; error?: string }> => {
-    const tokens = await ctx.runQuery(internal.notifications._getAllActiveTokensForPush);
+    const tokens = await ctx.runQuery(
+      internal.notifications._getAllActiveTokensForPush,
+    );
     if (tokens.length === 0) return { sent: 0 };
 
     const creds = await resolveCredentials();
-    if (!creds) return { sent: 0, error: "FIREBASE_SERVICE_ACCOUNT not configured" };
+    if (!creds)
+      return { sent: 0, error: "FIREBASE_SERVICE_ACCOUNT not configured" };
 
     let sent = 0;
     for (const t of tokens) {

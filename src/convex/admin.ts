@@ -1,8 +1,16 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
-import { createAccount, modifyAccountCredentials } from "@convex-dev/auth/server";
+import {
+  createAccount,
+  modifyAccountCredentials,
+} from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
-import { internalMutation, mutation, MutationCtx, query } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  MutationCtx,
+  query,
+} from "./_generated/server";
 import { internal } from "./_generated/api";
 import { FEATURES } from "./schema";
 import { parseOrThrow, restaurantArgsSchema } from "./validation";
@@ -70,9 +78,7 @@ export const claimPlatformAdmin = mutation({
     // Collect all auth accounts for this user and check if any match.
     const authAccounts = await ctx.db
       .query("authAccounts")
-      .withIndex("userIdAndProvider", (q) =>
-        q.eq("userId", userId),
-      )
+      .withIndex("userIdAndProvider", (q) => q.eq("userId", userId))
       .collect();
     const accountPhones = authAccounts.map((a) => a.providerAccountId);
     const isPlatformAdmin = accountPhones.some(
@@ -81,7 +87,7 @@ export const claimPlatformAdmin = mutation({
     if (!isPlatformAdmin) {
       throw new Error(
         "This phone number is not the platform admin. " +
-        `Account phones: [${accountPhones.join(", ")}]`,
+          `Account phones: [${accountPhones.join(", ")}]`,
       );
     }
 
@@ -131,7 +137,8 @@ export const auditLog = query({
           const hit =
             e.action.toLowerCase().includes(q) ||
             (e.details && e.details.toLowerCase().includes(q)) ||
-            (e.targetUserId && String(e.targetUserId).toLowerCase().includes(q));
+            (e.targetUserId &&
+              String(e.targetUserId).toLowerCase().includes(q));
           if (!hit) continue;
         }
         matches.push(e);
@@ -182,7 +189,11 @@ export const registerRestaurant = mutation({
     // Store the owner under the canonical phone so login (verbatim auth-library
     // lookup) and hasPasswordAccount routing agree regardless of formatting.
     const ownerPhone = normalizePhone(args.ownerPhone);
-    if (ownerPhone.length < 8 || ownerPhone.length > 15 || !/^\+\d+$/.test(ownerPhone)) {
+    if (
+      ownerPhone.length < 8 ||
+      ownerPhone.length > 15 ||
+      !/^\+\d+$/.test(ownerPhone)
+    ) {
       throw new Error("Enter a valid phone number (e.g. +961 71 123 456).");
     }
 
@@ -194,7 +205,9 @@ export const registerRestaurant = mutation({
       profile: {
         email: ownerPhone,
         phone: ownerPhone,
-        ...(args.ownerName.trim() ? { name: args.ownerName.trim().slice(0, 80) } : {}),
+        ...(args.ownerName.trim()
+          ? { name: args.ownerName.trim().slice(0, 80) }
+          : {}),
       },
       shouldLinkViaEmail: false,
       shouldLinkViaPhone: true,
@@ -232,7 +245,13 @@ export const registerRestaurant = mutation({
     });
 
     const doc = await ctx.db.get(restaurantId);
-    const searchText = [doc!.name, doc!.cuisine, doc!.city, doc!.neighborhood ?? "", doc!.description ?? ""]
+    const searchText = [
+      doc!.name,
+      doc!.cuisine,
+      doc!.city,
+      doc!.neighborhood ?? "",
+      doc!.description ?? "",
+    ]
       .join(" ")
       .toLowerCase();
     await ctx.db.patch(restaurantId, { searchText });
@@ -248,7 +267,10 @@ export const registerRestaurant = mutation({
 
     await logAdminAction(ctx, userId, "registerRestaurant", {
       targetUserId: user._id as unknown as string,
-      details: JSON.stringify({ restaurantName: args.name, ownerPhone: args.ownerPhone }),
+      details: JSON.stringify({
+        restaurantName: args.name,
+        ownerPhone: args.ownerPhone,
+      }),
     });
 
     return restaurantId;
@@ -284,7 +306,9 @@ export const tagAsRestaurant = mutation({
     if (!user) throw new Error("No account found with that phone number.");
     // M-10: tagging must never strip the admin role (mirrors users.onboard).
     if (user.role === "admin") {
-      throw new Error("That account is an admin and cannot be tagged as a restaurant.");
+      throw new Error(
+        "That account is an admin and cannot be tagged as a restaurant.",
+      );
     }
 
     await ctx.db.patch(user._id, {
@@ -373,7 +397,11 @@ export const ensureOwnerPassword = mutation({
     }
 
     await setPasswordForUser(ctx, user._id, cleanPhone, tempPassword);
-    await ctx.db.patch(user._id, { mustChangePassword: true, role: "owner", onboarded: true });
+    await ctx.db.patch(user._id, {
+      mustChangePassword: true,
+      role: "owner",
+      onboarded: true,
+    });
 
     await logAdminAction(ctx, userId, "ensureOwnerPassword", {
       targetUserId: user._id as unknown as string,
@@ -390,7 +418,11 @@ export const ensureOwnerPassword = mutation({
 // cascadeDeleteUser + invalidateUserSessions live in ./erasure so the admin
 // console and the diner self-service "delete my account" flow share one
 // implementation of the GDPR cascade.
-import { cascadeDeleteRestaurant, cascadeDeleteUser, invalidateUserSessions } from "./erasure";
+import {
+  cascadeDeleteRestaurant,
+  cascadeDeleteUser,
+  invalidateUserSessions,
+} from "./erasure";
 
 /**
  * Admin-only: disable or re-enable a user account. A disabled user cannot
@@ -408,18 +440,28 @@ export const setUserDisabled = mutation({
       limit: 120,
       windowMs: 60 * 60_000, // 120 per hour
     });
-    if (userId === adminUserId) throw new Error("You cannot disable your own account.");
+    if (userId === adminUserId)
+      throw new Error("You cannot disable your own account.");
     const target = await ctx.db.get(userId);
     if (!target) throw new Error("User not found.");
-    if (target.role === "admin") throw new Error("You cannot disable another admin account.");
+    if (target.role === "admin")
+      throw new Error("You cannot disable another admin account.");
 
     await ctx.db.patch(userId, { disabled: disabled || undefined });
     if (disabled) await invalidateUserSessions(ctx, userId);
 
-    await logAdminAction(ctx, adminUserId, disabled ? "disableUser" : "enableUser", {
-      targetUserId: userId as unknown as string,
-      details: JSON.stringify({ phone: target.phone ?? null, name: target.name ?? null }),
-    });
+    await logAdminAction(
+      ctx,
+      adminUserId,
+      disabled ? "disableUser" : "enableUser",
+      {
+        targetUserId: userId as unknown as string,
+        details: JSON.stringify({
+          phone: target.phone ?? null,
+          name: target.name ?? null,
+        }),
+      },
+    );
     return await ctx.db.get(userId);
   },
 });
@@ -475,7 +517,11 @@ export const createUser = mutation({
 
     await logAdminAction(ctx, userId, "createUser", {
       targetUserId: user._id as unknown as string,
-      details: JSON.stringify({ phone: cleanPhone, name: cleanName, role: role ?? "customer" }),
+      details: JSON.stringify({
+        phone: cleanPhone,
+        name: cleanName,
+        role: role ?? "customer",
+      }),
     });
 
     return await ctx.db.get(user._id);
@@ -493,7 +539,16 @@ export const bulkDeleteUsersStep = internalMutation({
   args: { userIds: v.array(v.id("users")) },
   handler: async (ctx, { userIds }) => {
     const batch = userIds.slice(0, BULK_DELETE_BATCH);
-    for (const userId of batch) await cascadeDeleteUser(ctx, userId);
+    for (const userId of batch) {
+      const target = await ctx.db.get(userId);
+      if (!target || target.role === "admin") continue;
+      const owned = await ctx.db
+        .query("restaurants")
+        .withIndex("by_owner", (q) => q.eq("ownerId", userId))
+        .first();
+      if (owned) continue;
+      await cascadeDeleteUser(ctx, userId);
+    }
     const rest = userIds.slice(batch.length);
     if (rest.length > 0) {
       await ctx.scheduler.runAfter(0, internal.admin.bulkDeleteUsersStep, {
@@ -524,15 +579,27 @@ export const bulkDeleteUsers = mutation({
     const deletable: Id<"users">[] = [];
     const skipped: { id: string; reason: string }[] = [];
     for (const userId of limited) {
-      if (userId === adminUserId) { skipped.push({ id: userId, reason: "self" }); continue; }
+      if (userId === adminUserId) {
+        skipped.push({ id: userId, reason: "self" });
+        continue;
+      }
       const target = await ctx.db.get(userId);
-      if (!target) { skipped.push({ id: userId, reason: "not_found" }); continue; }
-      if (target.role === "admin") { skipped.push({ id: userId, reason: "admin" }); continue; }
+      if (!target) {
+        skipped.push({ id: userId, reason: "not_found" });
+        continue;
+      }
+      if (target.role === "admin") {
+        skipped.push({ id: userId, reason: "admin" });
+        continue;
+      }
       const owned = await ctx.db
         .query("restaurants")
         .withIndex("by_owner", (q) => q.eq("ownerId", userId))
         .collect();
-      if (owned.length > 0) { skipped.push({ id: userId, reason: "owns_restaurants" }); continue; }
+      if (owned.length > 0) {
+        skipped.push({ id: userId, reason: "owns_restaurants" });
+        continue;
+      }
       deletable.push(userId);
     }
 
@@ -546,7 +613,11 @@ export const bulkDeleteUsers = mutation({
     }
 
     await logAdminAction(ctx, adminUserId, "bulkDeleteUsers", {
-      details: JSON.stringify({ requested: userIds.length, deleted: deletable.length, skipped: skipped.length }),
+      details: JSON.stringify({
+        requested: userIds.length,
+        deleted: deletable.length,
+        skipped: skipped.length,
+      }),
     });
     return { deleted: deletable.length, skipped };
   },
@@ -569,10 +640,12 @@ export const deleteUser = mutation({
       limit: 30,
       windowMs: 60 * 60_000, // 30 per hour
     });
-    if (userId === adminUserId) throw new Error("You cannot delete your own account.");
+    if (userId === adminUserId)
+      throw new Error("You cannot delete your own account.");
     const target = await ctx.db.get(userId);
     if (!target) throw new Error("User not found.");
-    if (target.role === "admin") throw new Error("You cannot delete another admin account.");
+    if (target.role === "admin")
+      throw new Error("You cannot delete another admin account.");
 
     // Owners own restaurants — force the admin to handle those first so a
     // restaurant is never left with a dangling ownerId.
@@ -581,14 +654,19 @@ export const deleteUser = mutation({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     if (owned.length > 0) {
-      throw new Error("This user owns restaurants — delete those first (Restaurants → Delete).");
+      throw new Error(
+        "This user owns restaurants — delete those first (Restaurants → Delete).",
+      );
     }
 
     await cascadeDeleteUser(ctx, userId);
 
     await logAdminAction(ctx, adminUserId, "deleteUser", {
       targetUserId: userId as unknown as string,
-      details: JSON.stringify({ phone: target.phone ?? null, name: target.name ?? null }),
+      details: JSON.stringify({
+        phone: target.phone ?? null,
+        name: target.name ?? null,
+      }),
     });
     return { deleted: true };
   },
@@ -612,9 +690,14 @@ export const setRestaurantDisabled = mutation({
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
     await ctx.db.patch(restaurantId, { disabled: disabled || undefined });
-    await logAdminAction(ctx, userId, disabled ? "disableRestaurant" : "enableRestaurant", {
-      details: JSON.stringify({ restaurantName: restaurant.name }),
-    });
+    await logAdminAction(
+      ctx,
+      userId,
+      disabled ? "disableRestaurant" : "enableRestaurant",
+      {
+        details: JSON.stringify({ restaurantName: restaurant.name }),
+      },
+    );
     return await ctx.db.get(restaurantId);
   },
 });
@@ -647,72 +730,15 @@ export const deleteRestaurant = mutation({
   },
 });
 
-/** Audit rows deleted per invocation — keeps each transaction bounded (M-15). */
-const AUDIT_BATCH = 500;
-
 /**
- * Scheduled continuation of clearAuditLog: drains one batch; reschedules
- * itself until the log is empty, then writes the traceability marker.
- */
-export const clearAuditLogStep = internalMutation({
-  args: {
-    adminUserId: v.id("users"),
-    clearedSoFar: v.number(),
-  },
-  handler: async (ctx, { adminUserId, clearedSoFar }) => {
-    const rows = await ctx.db.query("adminAuditLog").take(AUDIT_BATCH);
-    for (const row of rows) await ctx.db.delete(row._id);
-    const cleared = clearedSoFar + rows.length;
-    if (rows.length === AUDIT_BATCH) {
-      await ctx.scheduler.runAfter(0, internal.admin.clearAuditLogStep, {
-        adminUserId,
-        clearedSoFar: cleared,
-      });
-      return;
-    }
-    await ctx.db.insert("adminAuditLog", {
-      adminUserId,
-      action: "clearAuditLog",
-      details: JSON.stringify({ clearedRows: cleared }),
-      createdAt: Date.now(),
-    });
-  },
-});
-
-/**
- * Admin-only: wipe the audit log. Records a single "clearAuditLog" entry
- * (with the number of cleared rows) so the clearing itself stays traceable.
- * M-15: deletion is batched across scheduled invocations instead of
- * collecting + deleting the entire log in one transaction.
+ * Retained for the existing admin client contract, but audit history is
+ * append-only and cannot be removed through application code.
  */
 export const clearAuditLog = mutation({
   args: {},
-  handler: async (ctx) => {
-    const { userId } = await requireAdmin(ctx);
-    await checkRateLimit(ctx, {
-      key: "clearAuditLog",
-      userId,
-      limit: 10,
-      windowMs: 60 * 60_000, // 10 per hour
-    });
-    const rows = await ctx.db.query("adminAuditLog").take(AUDIT_BATCH);
-    for (const row of rows) await ctx.db.delete(row._id);
-    if (rows.length === AUDIT_BATCH) {
-      // More remain — continue in scheduled batches (the marker row is
-      // written by the final step, after the drain completes).
-      await ctx.scheduler.runAfter(0, internal.admin.clearAuditLogStep, {
-        adminUserId: userId,
-        clearedSoFar: rows.length,
-      });
-      return { cleared: rows.length };
-    }
-    await ctx.db.insert("adminAuditLog", {
-      adminUserId: userId,
-      action: "clearAuditLog",
-      details: JSON.stringify({ clearedRows: rows.length }),
-      createdAt: Date.now(),
-    });
-    return { cleared: rows.length };
+  handler: async (ctx): Promise<{ cleared: number }> => {
+    await requireAdmin(ctx);
+    throw new Error("Audit history is immutable and cannot be cleared.");
   },
 });
 
@@ -721,23 +747,11 @@ export const clearAuditLog = mutation({
  */
 export const deleteAuditEntries = mutation({
   args: { ids: v.array(v.id("adminAuditLog")) },
-  handler: async (ctx, { ids }) => {
-    const { userId } = await requireAdmin(ctx);
-    await checkRateLimit(ctx, {
-      key: "deleteAuditEntries",
-      userId,
-      limit: 30,
-      windowMs: 60 * 60_000,
-    });
-    const limited = ids.slice(0, 100); // BUG-12: cap batch size
-    for (const id of limited) await ctx.db.delete(id);
-    await ctx.db.insert("adminAuditLog", {
-      adminUserId: userId,
-      action: "deleteAuditEntries",
-      details: JSON.stringify({ deletedIds: limited.length }),
-      createdAt: Date.now(),
-    });
-    return { deleted: limited.length };
+  handler: async (ctx): Promise<{ deleted: number }> => {
+    await requireAdmin(ctx);
+    throw new Error(
+      "Audit history is immutable and entries cannot be deleted.",
+    );
   },
 });
 

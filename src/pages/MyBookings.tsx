@@ -56,6 +56,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/hooks/use-auth";
 import {
   bookingShareText,
   dateLabel,
@@ -66,6 +67,33 @@ import {
   whatsappShareUrl,
 } from "@/lib/format";
 import { toast } from "sonner";
+
+// M-24: the offline booking-code cache must be scoped per signed-in user —
+// a shared/global key let one device's next signed-in user see the previous
+// user's confirmed booking codes offline. The key is derived from the
+// authenticated user id, so switching accounts on the same device never
+// surfaces someone else's cache.
+// eslint-disable-next-line react-refresh/only-export-components -- shared helper needed by sign-out/account-delete callers.
+export function offlineBookingsKey(userId: string): string {
+  return `kamix:offline-bookings:${userId}`;
+}
+
+/** Remove the offline booking-code cache for a given user (or all legacy /
+ *  scoped caches when no id is supplied). Must be called on sign-out and
+ *  account deletion so the next session on this device never renders a
+ *  previous user's cached booking codes. */
+// eslint-disable-next-line react-refresh/only-export-components -- shared helper needed by sign-out/account-delete callers.
+export function clearOfflineBookingsCache(userId?: string | null): void {
+  try {
+    if (userId) {
+      localStorage.removeItem(offlineBookingsKey(userId));
+    }
+    // Also drop the legacy unscoped key so pre-fix caches can't leak either.
+    localStorage.removeItem("kamix:offline-bookings");
+  } catch {
+    /* storage unavailable — nothing to clear */
+  }
+}
 
 type AlertType = "on_my_way" | "running_late" | "arrived" | "special_request";
 
@@ -103,6 +131,8 @@ function StatusBadge({ status }: { status: string }) {
 
 export default function MyBookings() {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  const userId = user?._id as string | undefined;
   const bookings = useQuery(api.bookings.myBookings, {});
   const cancelBooking = useMutation(api.bookings.cancelBooking);
   const waitlist = useQuery(api.waitlist.myWaitlist);
@@ -122,17 +152,23 @@ export default function MyBookings() {
 
   // Offline cache (Idea #10): the last 5 confirmed bookings are kept in
   // localStorage so codes are available at the door with no signal.
+  // M-24: scoped by user id so a different signed-in user on this device
+  // never sees the previous user's cached booking codes.
   const [cachedBookings, setCachedBookings] = useState<Record<string, { code: string; restaurantName: string; date: string; time: string }>>({});
   useEffect(() => {
+    if (!userId) {
+      setCachedBookings({});
+      return;
+    }
     try {
-      const raw = localStorage.getItem("kamix:offline-bookings");
+      const raw = localStorage.getItem(offlineBookingsKey(userId));
       setCachedBookings(raw ? JSON.parse(raw) : {});
     } catch {
       /* storage unavailable — fine, online-only */
     }
-  }, []);
+  }, [userId]);
   useEffect(() => {
-    if (!bookings) return;
+    if (!bookings || !userId) return;
     // Rebuild the cache from the current confirmed set on every run so codes
     // for cancelled / completed / no-show bookings never linger offline.
     const recent = (bookings as any[])
@@ -149,11 +185,11 @@ export default function MyBookings() {
     }
     setCachedBookings(next);
     try {
-      localStorage.setItem("kamix:offline-bookings", JSON.stringify(next));
+      localStorage.setItem(offlineBookingsKey(userId), JSON.stringify(next));
     } catch {
       /* quota — ignore */
     }
-  }, [bookings]);
+  }, [bookings, userId]);
 
   // In-app confirmation (native window.confirm is blocked in the sandboxed
   // preview iframe and would silently do nothing).
@@ -435,6 +471,11 @@ export default function MyBookings() {
                             <img
                               src={w.restaurant.imageUrl}
                               alt=""
+                              width={64}
+                              height={64}
+                              loading="lazy"
+                              decoding="async"
+                              referrerPolicy="no-referrer"
                               className="size-16 shrink-0 rounded-xl object-cover"
                             />
                           ) : (
@@ -521,6 +562,11 @@ export default function MyBookings() {
                             <img
                               src={b.restaurant.imageUrl}
                               alt=""
+                              width={64}
+                              height={64}
+                              loading="lazy"
+                              decoding="async"
+                              referrerPolicy="no-referrer"
                               className="size-16 shrink-0 rounded-xl object-cover"
                             />
                           ) : (

@@ -85,8 +85,8 @@ export const waitlistJoinSchema = z.object({
 export const bookingCodeSchema = z
   .string()
   .trim()
-  .max(6, "Invalid booking code.")
-  .regex(/^[A-Za-z0-9]+$/, "Invalid booking code.");
+  .length(6, "Invalid booking code.")
+  .regex(/^[A-HJ-NP-Za-hj-np-z2-9]+$/, "Invalid booking code.");
 
 export const guestNameSchema = z
   .string()

@@ -5,6 +5,10 @@ import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { parseOrThrow, waitlistJoinSchema } from "./validation";
 
+const VIP_HISTORY_LIMIT = 100;
+const VIP_CANDIDATE_LIMIT = 25;
+const WAITLIST_LIST_LIMIT = 100;
+
 /** Payload scheduled to sms.sendWaitlistSms when a waitlist spot frees up. */
 export type WaitlistSmsPayload = {
   to: string;
@@ -22,8 +26,8 @@ export type WaitlistSmsPayload = {
  */
 async function vipScore(ctx: MutationCtx, userId: Id<"users">): Promise<number> {
   const [bookings, reviews] = await Promise.all([
-    ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
-    ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+    ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(VIP_HISTORY_LIMIT),
+    ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(VIP_HISTORY_LIMIT),
   ]);
   const completed = bookings.filter((b) => b.status === "completed").length;
   const noShows = bookings.filter((b) => b.status === "no_show").length;
@@ -54,7 +58,8 @@ export async function notifyWaitlistForFreedSeats(
   const entries = await ctx.db
     .query("waitlist")
     .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", opts.restaurantId).eq("date", opts.date))
-    .collect();
+    .filter((q) => q.eq(q.field("status"), "waiting"))
+    .take(VIP_CANDIDATE_LIMIT * 4);
   const candidates = entries
     .filter(
       (e) =>
@@ -68,7 +73,7 @@ export async function notifyWaitlistForFreedSeats(
   // VIP head start: sort by (score desc, joined asc) so repeat diners are
   // alerted before casual waiters for the same freed table.
   const scored = await Promise.all(
-    candidates.map(async (c) => ({ c, score: await vipScore(ctx, c.userId) })),
+    candidates.slice(0, VIP_CANDIDATE_LIMIT).map(async (c) => ({ c, score: await vipScore(ctx, c.userId) })),
   );
   scored.sort((a, b) => b.score - a.score || a.c.createdAt - b.c.createdAt);
   const winner = scored[0]?.c;
@@ -193,7 +198,7 @@ export const myWaitlist = query({
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    const entries = await ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
+    const entries = await ctx.db.query("waitlist").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(WAITLIST_LIST_LIMIT);
     const restaurants = await Promise.all(entries.map((e) => ctx.db.get(e.restaurantId)));
     return entries
       .map((e, i) => ({
@@ -229,23 +234,25 @@ export const cancel = mutation({
 
 /** Waiting + notified entries for one restaurant (optionally filtered by date). */
 export const byRestaurant = query({
-  args: { restaurantId: v.id("restaurants"), date: v.optional(v.string()) },
-  handler: async (ctx, { restaurantId, date }) => {
+  args: { restaurantId: v.id("restaurants"), date: v.optional(v.string()), limit: v.optional(v.number()) },
+  handler: async (ctx, { restaurantId, date, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant || restaurant.ownerId !== userId) return [];
+    const effectiveLimit = Math.min(Math.max(Math.floor(limit ?? WAITLIST_LIST_LIMIT), 1), 200);
     let entries;
     if (date) {
       entries = await ctx.db
         .query("waitlist")
         .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", date))
-        .collect();
+        .take(effectiveLimit);
     } else {
       entries = await ctx.db
         .query("waitlist")
         .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
-        .collect();
+        .order("desc")
+        .take(effectiveLimit);
     }
     return entries
       .filter((e) => e.status !== "cancelled")

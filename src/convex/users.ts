@@ -10,12 +10,13 @@ import { v } from "convex/values";
 import { z } from "zod";
 import {
   internalMutation,
+  internalQuery,
   mutation,
   query,
   type MutationCtx,
   type QueryCtx,
 } from "./_generated/server";
-import { api } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { ROLES, SEAT_KIND, DINING_PREFS } from "./schema";
 import { parseOrThrow } from "./validation";
 import { checkRateLimit } from "./rateLimit";
@@ -37,7 +38,11 @@ const profileNameSchema = z
   .trim()
   .min(1, "Please tell us your name.")
   .max(80, "Name is too long.");
-const profilePhoneSchema = z.string().trim().max(20, "Phone number is too long.").optional();
+const profilePhoneSchema = z
+  .string()
+  .trim()
+  .max(20, "Phone number is too long.")
+  .optional();
 
 /**
  * Check if a phone number has a password account.
@@ -72,26 +77,10 @@ async function phoneHasPasswordAccount(
     .first();
   if (account) return true;
 
-  // Fallback: older accounts may have been stored verbatim (e.g. the OTP
-  // provider saved "+961 71 123 456" with spaces). Compare normalized
-  // values so those users still route to password login, not OTP. Bounded
-  // (KB-24): this runs unauthenticated on every phone submit, so cap the
-  // scan — `users.backfillPasswordAccounts` normalizes legacy rows, after
-  // which the fallback stops being hit.
-  // M-9: a cap-hit must NOT be reported as exists:true — that would route
-  // every new OTP user to password login once ≥2000 password accounts
-  // exist and lock them out of OTP sign-in entirely. Un-scanned remainder
-  // is treated as "no password account".
-  const passwordAccounts = await ctx.db
-    .query("authAccounts")
-    .withIndex("providerAndAccountId", (q) => q.eq("provider", "password"))
-    .take(2000);
-  return passwordAccounts.some(
-    (a) => normalizePhone(a.providerAccountId) === normalized,
-  );
+  return false;
 }
 
-export const hasPasswordAccount = query({
+export const hasPasswordAccount = internalQuery({
   args: { phone: v.string() },
   handler: async (ctx, { phone }) => {
     const normalized = normalizePhone(phone);
@@ -114,8 +103,8 @@ export const checkPhoneAccount = mutation({
     await checkRateLimit(ctx, {
       key: "checkPhoneAccount",
       userId: normalized,
-      limit: 200,
-      windowMs: 60 * 60_000, // 20 per hour per phone
+      limit: 20,
+      windowMs: 60 * 60_000,
     });
     return { exists: await phoneHasPasswordAccount(ctx, normalized) };
   },
@@ -190,7 +179,11 @@ export const onboard = mutation({
     // Validate phone format if provided (must be E.164-ish: + followed by 8-15 digits).
     if (cleanPhone) {
       const normalized = normalizePhone(cleanPhone);
-      if (normalized.length < 8 || normalized.length > 15 || !/^\+\d+$/.test(normalized)) {
+      if (
+        normalized.length < 8 ||
+        normalized.length > 15 ||
+        !/^\+\d+$/.test(normalized)
+      ) {
         throw new Error("Enter a valid phone number (e.g. +961 71 123 456).");
       }
       cleanPhone = normalized;
@@ -209,7 +202,7 @@ export const onboard = mutation({
         const accounts = await ctx.db
           .query("authAccounts")
           .withIndex("userIdAndProvider", (q) =>
-            q.eq("userId", userId).eq("provider", "phone-otp")
+            q.eq("userId", userId).eq("provider", "phone-otp"),
           )
           .first();
         if (accounts?.providerAccountId) {
@@ -403,7 +396,12 @@ export const startPhoneChange = mutation({
     const clean = normalizePhone(newPhone);
     // M-13: enforce the shared E.164-ish format, not just length — a
     // non-canonical login identity would break lookups and SMS delivery.
-    if (!clean || clean.length < 8 || clean.length > 15 || !/^\+\d+$/.test(clean)) {
+    if (
+      !clean ||
+      clean.length < 8 ||
+      clean.length > 15 ||
+      !/^\+\d+$/.test(clean)
+    ) {
       throw new Error("Enter a valid phone number.");
     }
     if (user.phone && normalizePhone(user.phone) === clean) {
@@ -425,7 +423,9 @@ export const startPhoneChange = mutation({
       )
       .first();
     if (existing || existingPassword) {
-      throw new Error("That phone number is already in use by another account.");
+      throw new Error(
+        "That phone number is already in use by another account.",
+      );
     }
 
     // Replace any prior pending request for this user.
@@ -436,7 +436,9 @@ export const startPhoneChange = mutation({
     if (prior) await ctx.db.delete(prior._id);
 
     const code = await generateOtpToken();
-    const codeHash = encodeHexLowerCase(await sha256(new TextEncoder().encode(code)));
+    const codeHash = encodeHexLowerCase(
+      await sha256(new TextEncoder().encode(code)),
+    );
     await ctx.db.insert("phoneChangeRequests", {
       userId,
       newPhone: clean,
@@ -447,7 +449,10 @@ export const startPhoneChange = mutation({
 
     // Send the code to the NEW number (scheduled like other SMS sends).
     // Graceful no-op when Twilio is off.
-    await ctx.scheduler.runAfter(0, api.sms.sendOtpSms, { phone: clean, code });
+    await ctx.scheduler.runAfter(0, internal.sms.sendOtpSms, {
+      phone: clean,
+      code,
+    });
     return { started: true };
   },
 });
@@ -483,18 +488,46 @@ export const confirmPhoneChange = mutation({
       .query("phoneChangeRequests")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .first();
-    if (!pending) throw new Error("No pending phone change. Request a code first.");
+    if (!pending)
+      throw new Error("No pending phone change. Request a code first.");
     if (pending.expiresAt < Date.now()) {
       await ctx.db.delete(pending._id);
       throw new Error("That code has expired. Request a new one.");
     }
 
-    const codeHash = encodeHexLowerCase(await sha256(new TextEncoder().encode(code)));
+    const codeHash = encodeHexLowerCase(
+      await sha256(new TextEncoder().encode(code)),
+    );
     if (codeHash !== pending.codeHash) {
       throw new Error("Incorrect code. Try again.");
     }
 
     const newPhone = pending.newPhone;
+
+    // Recheck immediately before moving the identity. Another account may
+    // have claimed this phone after startPhoneChange issued the OTP.
+    const profileWithPhone = await ctx.db
+      .query("users")
+      .withIndex("phone", (q) => q.eq("phone", newPhone))
+      .first();
+    if (profileWithPhone && profileWithPhone._id !== userId) {
+      throw new Error(
+        "That phone number is already in use by another account.",
+      );
+    }
+    for (const provider of ["phone-otp", "password"] as const) {
+      const claimed = await ctx.db
+        .query("authAccounts")
+        .withIndex("providerAndAccountId", (q) =>
+          q.eq("provider", provider).eq("providerAccountId", newPhone),
+        )
+        .first();
+      if (claimed && claimed.userId !== userId) {
+        throw new Error(
+          "That phone number is already in use by another account.",
+        );
+      }
+    }
 
     // Update the login accounts so the new number becomes the identifier
     // (providerAccountId is what the auth library matches on; phoneVerified
@@ -547,7 +580,9 @@ export const startAccountDelete = mutation({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     if (owned.length > 0) {
-      throw new Error("You still own restaurants — delete those first (Owner dashboard).");
+      throw new Error(
+        "You still own restaurants — delete those first (Owner dashboard).",
+      );
     }
     const phone = user.phone;
     if (!phone) throw new Error("No phone number on this account.");
@@ -567,7 +602,9 @@ export const startAccountDelete = mutation({
     if (prior) await ctx.db.delete(prior._id);
 
     const code = await generateOtpToken();
-    const codeHash = encodeHexLowerCase(await sha256(new TextEncoder().encode(code)));
+    const codeHash = encodeHexLowerCase(
+      await sha256(new TextEncoder().encode(code)),
+    );
     await ctx.db.insert("accountDeleteRequests", {
       userId,
       codeHash,
@@ -577,7 +614,7 @@ export const startAccountDelete = mutation({
 
     // Send the code to the user's own phone (scheduled like other SMS sends).
     // Graceful no-op when Twilio is off.
-    await ctx.scheduler.runAfter(0, api.sms.sendOtpSms, { phone, code });
+    await ctx.scheduler.runAfter(0, internal.sms.sendOtpSms, { phone, code });
     return { started: true };
   },
 });
@@ -619,7 +656,9 @@ export const deleteAccount = mutation({
       throw new Error("That code has expired. Request a new one.");
     }
 
-    const codeHash = encodeHexLowerCase(await sha256(new TextEncoder().encode(code)));
+    const codeHash = encodeHexLowerCase(
+      await sha256(new TextEncoder().encode(code)),
+    );
     if (codeHash !== pending.codeHash) {
       throw new Error("Incorrect code. Try again.");
     }
@@ -635,7 +674,9 @@ export const deleteAccount = mutation({
       .withIndex("by_owner", (q) => q.eq("ownerId", userId))
       .collect();
     if (owned.length > 0) {
-      throw new Error("You still own restaurants — delete those first (Owner dashboard).");
+      throw new Error(
+        "You still own restaurants — delete those first (Owner dashboard).",
+      );
     }
 
     await cascadeDeleteUser(ctx, userId);

@@ -20,13 +20,12 @@ import {
 // helpers
 // ---------------------------------------------------------------------------
 
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
-
 type SpiceLevel = "mild" | "medium" | "hot" | "very_hot";
-const SPICE_VALUES: SpiceLevel[] = ["mild", "medium", "hot", "very_hot"];
 
 const MAX_TAGS = 12;
 const MAX_TAG_LEN = 40;
+const SEARCH_CANDIDATE_LIMIT = 100;
+const RECOMMENDATION_CANDIDATE_LIMIT = 100;
 
 /** Trim, dedupe, and cap an attribute list (tags / allergens / ingredients). */
 function sanitizeTags(tags?: string[]): string[] | undefined {
@@ -142,9 +141,14 @@ export const search = query({
       restaurants = await ctx.db
         .query("restaurants")
         .withSearchIndex("search_name", (q) => q.search("searchText", args.q!.trim()))
-        .collect();
+        .take(SEARCH_CANDIDATE_LIMIT);
+    } else if (args.city) {
+      restaurants = await ctx.db
+        .query("restaurants")
+        .withIndex("by_city", (q) => q.eq("city", args.city!))
+        .take(SEARCH_CANDIDATE_LIMIT);
     } else {
-      restaurants = await ctx.db.query("restaurants").collect();
+      restaurants = await ctx.db.query("restaurants").take(SEARCH_CANDIDATE_LIMIT);
     }
 
     // Disabled restaurants never surface in Explore/search.
@@ -153,20 +157,12 @@ export const search = query({
     if (args.city) filtered = filtered.filter((r) => r.city === args.city);
     if (args.solo) filtered = filtered.filter((r) => r.features.soloFriendly === true);
 
-    // PERF-FIX: Batch-fetch sections instead of N+1 per-restaurant queries
     if (args.seat || args.nonSmoking) {
-      const ids = new Set(filtered.map((r) => r._id));
-      const allSections = await ctx.db.query("sections").collect();
-      const sectionsByRestaurant = new Map<string, typeof allSections>();
-      for (const s of allSections) {
-        if (ids.has(s.restaurantId)) {
-          const list = sectionsByRestaurant.get(s.restaurantId) ?? [];
-          list.push(s);
-          sectionsByRestaurant.set(s.restaurantId, list);
-        }
-      }
-      filtered = filtered.filter((r) => {
-        const secs = sectionsByRestaurant.get(r._id) ?? [];
+      const sections = await Promise.all(filtered.map((r) =>
+        ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
+      ));
+      filtered = filtered.filter((r, index) => {
+        const secs = sections[index] ?? [];
         if (!secs.length) return false;
         if (args.seat && !secs.some((s) => s.kind === args.seat)) return false;
         if (args.nonSmoking && !secs.some((s) => !s.smoking)) return false;
@@ -174,21 +170,13 @@ export const search = query({
       });
     }
 
-    // PERF-FIX: Batch-fetch menu items instead of N+1 per-restaurant queries
     if (args.dietary && args.dietary.trim()) {
       const tag = args.dietary.trim().toLowerCase();
-      const ids = new Set(filtered.map((r) => r._id));
-      const allItems = await ctx.db.query("menuItems").collect();
-      const itemsByRestaurant = new Map<string, typeof allItems>();
-      for (const item of allItems) {
-        if (ids.has(item.restaurantId)) {
-          const list = itemsByRestaurant.get(item.restaurantId) ?? [];
-          list.push(item);
-          itemsByRestaurant.set(item.restaurantId, list);
-        }
-      }
-      filtered = filtered.filter((r) => {
-        const items = itemsByRestaurant.get(r._id) ?? [];
+      const menuItems = await Promise.all(filtered.map((r) =>
+        ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
+      ));
+      filtered = filtered.filter((_r, index) => {
+        const items = menuItems[index] ?? [];
         return items.some(
           (it) => it.available && (it.tags ?? []).some((t) => t.toLowerCase() === tag),
         );
@@ -240,6 +228,13 @@ export const get = query({
 export const menuForRestaurant = query({
   args: { id: v.id("restaurants") },
   handler: async (ctx, { id }) => {
+    const restaurant = await ctx.db.get(id);
+    if (!restaurant) return { menuDocs: [] };
+    if (restaurant.disabled) {
+      const userId = await getAuthUserId(ctx);
+      const caller = userId ? await ctx.db.get(userId) : null;
+      if (restaurant.ownerId !== userId && caller?.role !== "admin") return { menuDocs: [] };
+    }
     const [menus, rawItems] = await Promise.all([
       ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
       ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
@@ -375,8 +370,8 @@ export const forYou = query({
     if (!user) return [];
 
     const [restaurants, pastBookings] = await Promise.all([
-      ctx.db.query("restaurants").collect(),
-      ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).collect(),
+      ctx.db.query("restaurants").take(RECOMMENDATION_CANDIDATE_LIMIT),
+      ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(100),
     ]);
 
     const favs = new Set(user.favorites ?? []);
@@ -391,25 +386,21 @@ export const forYou = query({
       pastRestaurants.filter(Boolean).map((r) => r!.cuisine.toLowerCase()),
     );
 
-    // PERF-FIX: Batch-fetch ALL menu items in one query instead of per-restaurant
-    const allMenuItems = dietary.length > 0
-      ? await ctx.db.query("menuItems").collect()
+    const menuItems = dietary.length > 0
+      ? await Promise.all(restaurants.map((r) =>
+          ctx.db.query("menuItems").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
+        ))
       : [];
-    const itemsByRestaurant = new Map<string, typeof allMenuItems>();
-    for (const item of allMenuItems) {
-      const list = itemsByRestaurant.get(item.restaurantId) ?? [];
-      list.push(item);
-      itemsByRestaurant.set(item.restaurantId, list);
-    }
 
     const scored: { id: Id<"restaurants">; score: number }[] = [];
-    for (const r of restaurants) {
+    for (let index = 0; index < restaurants.length; index++) {
+      const r = restaurants[index]!;
       if (r.disabled) continue; // never recommend a disabled venue
       let score = 0;
       if (favs.has(r._id)) score += 3;
       if (pastCuisines.has(r.cuisine.toLowerCase())) score += 2;
       if (dietary.length > 0) {
-        const items = itemsByRestaurant.get(r._id) ?? [];
+        const items = menuItems[index] ?? [];
         const matches = dietary.some((d) =>
           items.some((it) => it.available && (it.tags ?? []).some((t) => t.toLowerCase() === d)),
         );

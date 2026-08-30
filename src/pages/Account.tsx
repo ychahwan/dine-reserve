@@ -40,6 +40,7 @@ import { OCCASIONS } from "@/lib/format";
 import { DIETARY_TAGS } from "@/lib/menu";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { clearOfflineBookingsCache } from "@/pages/MyBookings";
 
 const SEAT_OPTIONS = [
   { value: "inside", key: "common.inside", icon: Sofa },
@@ -61,10 +62,26 @@ export default function Account() {
 
   // OTP-only diners have no password yet — setting one for the first time
   // doesn't require a "current" password.
-  const hasPassword = useQuery(
-    api.users.hasPasswordAccount,
-    user?.phone ? { phone: user.phone } : "skip",
-  );
+  const checkPhoneAccount = useMutation(api.users.checkPhoneAccount);
+  const [hasPassword, setHasPassword] = useState<{ exists: boolean } | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.phone) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset async lookup state when the phone changes.
+      setHasPassword(undefined);
+      return;
+    }
+    checkPhoneAccount({ phone: user.phone })
+      .then((res) => {
+        if (!cancelled) setHasPassword(res);
+      })
+      .catch(() => {
+        if (!cancelled) setHasPassword(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.phone, checkPhoneAccount]);
   const needsCurrentPassword = hasPassword?.exists === true;
 
   const [name, setName] = useState("");
@@ -215,6 +232,10 @@ export default function Account() {
   };
 
   const handleSignOut = async () => {
+    // M-24: clear the offline booking-code cache for this user before the
+    // session ends, so it never lingers for the next signed-in user on
+    // this device.
+    clearOfflineBookingsCache(user?._id as string | undefined);
     await signOut();
     navigate("/");
   };
@@ -246,6 +267,9 @@ export default function Account() {
       toast.success(t("account.delDone"));
       setDelStep("idle");
       setDelCode("");
+      // M-24: erase the offline booking-code cache along with the account —
+      // the cascade backend delete doesn't reach client-side localStorage.
+      clearOfflineBookingsCache(user?._id as string | undefined);
       await signOut();
       navigate("/");
     } catch (err) {
@@ -699,7 +723,16 @@ export default function Account() {
                 {favorites.map((r) => (
                   <div key={r._id} className="flex items-center gap-3 rounded-xl border border-border/70 p-3">
                     {r.imageUrl ? (
-                      <img src={r.imageUrl} alt={r.name} className="size-11 shrink-0 rounded-lg object-cover" />
+                      <img
+                        src={r.imageUrl}
+                        alt={r.name}
+                        width={44}
+                        height={44}
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        className="size-11 shrink-0 rounded-lg object-cover"
+                      />
                     ) : (
                       <div className="flex size-11 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                         <Store className="size-5" />

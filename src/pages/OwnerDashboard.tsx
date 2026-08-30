@@ -14,25 +14,24 @@ import {
 import { Spinner } from "@/components/ui/spinner";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
+import type { Doc } from "@/convex/_generated/dataModel";
+import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery } from "convex/react";
 import { useTranslation } from "react-i18next";
-import {
-  CalendarDays,
-  Loader2,
-  MapPin,
-  Plus,
-  Store,
-  Users,
-  Wand2,
-} from "lucide-react";
+import { Loader2, MapPin, Plus, Store, Wand2 } from "lucide-react";
 import { useState } from "react";
-import { useNavigate } from "react-router";
+import { Navigate, useNavigate } from "react-router";
 import { cn } from "@/lib/utils";
 import { DEMO_RESTAURANT_NAMES } from "@/lib/demo";
-import { useToday } from "@/components/OwnerRestaurantTabs";
 import { toast } from "sonner";
 
-type FeatureKey = "inside" | "outside" | "bar" | "smoking" | "parking" | "liveMusic";
+type FeatureKey =
+  | "inside"
+  | "outside"
+  | "bar"
+  | "smoking"
+  | "parking"
+  | "liveMusic";
 
 const FEATURE_OPTIONS: { key: FeatureKey; label: string }[] = [
   { key: "inside", label: "Inside" },
@@ -60,6 +59,21 @@ const EMPTY_FEATURES: Record<FeatureKey, boolean> = {
 // (previously it listed a non-existent "Casa Oliva" and missed two real ones).
 
 export default function OwnerDashboard() {
+  const { user } = useAuth();
+  if (user === undefined) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner className="size-6" />
+      </div>
+    );
+  }
+  if (user === null) return <Navigate to="/" replace />;
+  if (user.role !== "owner" && user.role !== "admin")
+    return <Navigate to="/dashboard" replace />;
+  return <OwnerDashboardContent />;
+}
+
+function OwnerDashboardContent() {
   const { t } = useTranslation();
   const restaurants = useQuery(api.restaurants.listMine);
   const navigate = useNavigate();
@@ -75,7 +89,9 @@ export default function OwnerDashboard() {
   const [priceRange, setPriceRange] = useState<string>("$$");
   const [description, setDescription] = useState("");
   const [imageUrl, setImageUrl] = useState("");
-  const [features, setFeatures] = useState<Record<FeatureKey, boolean>>({ ...EMPTY_FEATURES });
+  const [features, setFeatures] = useState<Record<FeatureKey, boolean>>({
+    ...EMPTY_FEATURES,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -113,7 +129,9 @@ export default function OwnerDashboard() {
       toast.success("Restaurant created");
       navigate(`/owner/restaurant/${id}`);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not create the restaurant.");
+      setError(
+        err instanceof Error ? err.message : "Could not create the restaurant.",
+      );
       setSaving(false);
     }
   };
@@ -122,13 +140,17 @@ export default function OwnerDashboard() {
     <OwnerShell>
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-bold tracking-tight">{t("owner.yourRestaurants")}</h1>
+          <h1 className="text-xl font-bold tracking-tight">
+            {t("owner.yourRestaurants")}
+          </h1>
           <p className="mt-0.5 text-sm text-muted-foreground">
             {t("owner.manageSubtitle")}
           </p>
         </div>
         <Button size="sm" onClick={() => setShowCreate((s) => !s)}>
-          {showCreate ? t("common.close") : (
+          {showCreate ? (
+            t("common.close")
+          ) : (
             <>
               <Plus className="size-4" /> {t("owner.addRestaurant")}
             </>
@@ -140,32 +162,61 @@ export default function OwnerDashboard() {
       {showCreate && (
         <Card className="mt-5 rounded-2xl border-border/70 p-0 shadow-sm">
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">{t("owner.newRestaurant")}</CardTitle>
+            <CardTitle className="text-base">
+              {t("owner.newRestaurant")}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleCreate} className="space-y-4">
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="r-name">{t("owner.nameLabel")}</Label>
-                  <Input id="r-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t("owner.namePlaceholder")} required disabled={saving} />
+                  <Input
+                    id="r-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    placeholder={t("owner.namePlaceholder")}
+                    required
+                    disabled={saving}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="r-cuisine">{t("owner.cuisineLabel")}</Label>
-                  <Input id="r-cuisine" value={cuisine} onChange={(e) => setCuisine(e.target.value)} placeholder={t("owner.cuisinePlaceholder")} required disabled={saving} />
+                  <Input
+                    id="r-cuisine"
+                    value={cuisine}
+                    onChange={(e) => setCuisine(e.target.value)}
+                    placeholder={t("owner.cuisinePlaceholder")}
+                    required
+                    disabled={saving}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="r-city">{t("owner.cityLabel")}</Label>
-                  <Input id="r-city" value={city} onChange={(e) => setCity(e.target.value)} placeholder={t("owner.cityPlaceholder")} required disabled={saving} />
+                  <Input
+                    id="r-city"
+                    value={city}
+                    onChange={(e) => setCity(e.target.value)}
+                    placeholder={t("owner.cityPlaceholder")}
+                    required
+                    disabled={saving}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="r-price">{t("owner.priceRange")}</Label>
-                  <Select value={priceRange} onValueChange={setPriceRange} disabled={saving}>
+                  <Select
+                    value={priceRange}
+                    onValueChange={setPriceRange}
+                    disabled={saving}
+                  >
                     <SelectTrigger id="r-price" className="w-full">
                       <SelectValue placeholder={t("owner.pricePlaceholder")} />
                     </SelectTrigger>
                     <SelectContent>
                       {PRICE_OPTIONS.map((p) => (
-                        <SelectItem key={p} value={p}>{p}</SelectItem>
+                        <SelectItem key={p} value={p}>
+                          {p}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -173,25 +224,53 @@ export default function OwnerDashboard() {
               </div>
               <div className="space-y-2">
                 <Label htmlFor="r-address">{t("owner.addressLabel")}</Label>
-                <Input id="r-address" value={address} onChange={(e) => setAddress(e.target.value)} placeholder={t("owner.addressPlaceholder")} required disabled={saving} />
+                <Input
+                  id="r-address"
+                  value={address}
+                  onChange={(e) => setAddress(e.target.value)}
+                  placeholder={t("owner.addressPlaceholder")}
+                  required
+                  disabled={saving}
+                />
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
                   <Label htmlFor="r-phone">{t("owner.phoneLabel")}</Label>
-                  <Input id="r-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="+39 02 …" disabled={saving} />
+                  <Input
+                    id="r-phone"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value)}
+                    placeholder="+39 02 …"
+                    disabled={saving}
+                  />
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="r-image">{t("owner.photoUrl")}</Label>
-                  <Input id="r-image" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://…" disabled={saving} />
+                  <Input
+                    id="r-image"
+                    value={imageUrl}
+                    onChange={(e) => setImageUrl(e.target.value)}
+                    placeholder="https://…"
+                    disabled={saving}
+                  />
                 </div>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="r-desc">{t("owner.descLabel")}</Label>
-                <Textarea id="r-desc" value={description} onChange={(e) => setDescription(e.target.value)} rows={3} placeholder={t("owner.descPlaceholder")} disabled={saving} />
+                <Textarea
+                  id="r-desc"
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  rows={3}
+                  placeholder={t("owner.descPlaceholder")}
+                  disabled={saving}
+                />
               </div>
 
               <div>
-                <p className="mb-2 text-sm font-medium">{t("owner.amenities")}</p>
+                <p className="mb-2 text-sm font-medium">
+                  {t("owner.amenities")}
+                </p>
                 <div className="flex flex-wrap gap-2">
                   {FEATURE_OPTIONS.map((f) => (
                     <button
@@ -220,7 +299,8 @@ export default function OwnerDashboard() {
               <Button type="submit" className="w-full" disabled={saving}>
                 {saving ? (
                   <>
-                    <Loader2 className="size-4 animate-spin" /> {t("owner.saving")}
+                    <Loader2 className="size-4 animate-spin" />{" "}
+                    {t("owner.saving")}
                   </>
                 ) : (
                   t("owner.addRestaurant")
@@ -252,29 +332,25 @@ export default function OwnerDashboard() {
             </Button>
           </div>
         ) : (
-          restaurants.map((r) => <OwnerRestaurantCard key={r._id} id={r._id} />)
+          restaurants.map((restaurant) => (
+            <OwnerRestaurantCard key={restaurant._id} restaurant={restaurant} />
+          ))
         )}
       </div>
     </OwnerShell>
   );
 }
 
-/** Card that loads its own today-bookings count so the list stays cheap. */
-function OwnerRestaurantCard({ id }: { id: string }) {
-  const data = useQuery(api.restaurants.get, { id: id as never });
+/** Lightweight card backed by the already-subscribed owner restaurant list. */
+function OwnerRestaurantCard({
+  restaurant: r,
+}: {
+  restaurant: Doc<"restaurants">;
+}) {
   const navigate = useNavigate();
-  const todayKey = useToday();
-  const todays = useQuery(api.bookings.byRestaurant, {
-    restaurantId: id as never,
-    date: todayKey,
-  });
   const loadDemoRules = useMutation(api.demoRules.ensureDemoRules);
   const [demoLoading, setDemoLoading] = useState(false);
 
-  if (!data) return null;
-  const { restaurant: r, sections } = data;
-  const totalCapacity = sections.reduce((sum, s) => sum + s.capacity, 0);
-  const todayCount = (todays ?? []).filter((b) => b.status !== "cancelled").length;
   const isDemo = DEMO_RESTAURANT_NAMES.includes(r.name);
 
   const handleLoadDemo = async (e: React.MouseEvent) => {
@@ -286,7 +362,9 @@ function OwnerRestaurantCard({ id }: { id: string }) {
       await loadDemoRules({ restaurant: r.name, force: true });
       toast.success(`Example service windows loaded for ${r.name}`);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not load example windows.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not load example windows.",
+      );
     } finally {
       setDemoLoading(false);
     }
@@ -311,7 +389,15 @@ function OwnerRestaurantCard({ id }: { id: string }) {
       <Card className="group overflow-hidden rounded-2xl border-border/70 p-0 transition-all hover:-translate-y-0.5 hover:shadow-md">
         <div className="flex items-center gap-4 p-4">
           {r.imageUrl ? (
-            <img src={r.imageUrl} alt={r.name} className="size-14 shrink-0 rounded-xl object-cover" />
+            <img
+              src={r.imageUrl}
+              alt={r.name}
+              loading="lazy"
+              decoding="async"
+              width={56}
+              height={56}
+              className="size-14 shrink-0 rounded-xl object-cover"
+            />
           ) : (
             <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
               <Store className="size-6" />
@@ -326,12 +412,11 @@ function OwnerRestaurantCard({ id }: { id: string }) {
               <MapPin className="size-3" /> {r.neighborhood || r.city}, {r.city}
             </p>
             <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-              <Badge variant="outline" className="text-[10px]">{r.cuisine}</Badge>
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <Users className="size-3" /> {totalCapacity} seats
-              </span>
-              <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                <CalendarDays className="size-3" /> {todayCount} booked today
+              <Badge variant="outline" className="text-[10px]">
+                {r.cuisine}
+              </Badge>
+              <span className="text-[11px] text-muted-foreground">
+                Manage restaurant
               </span>
             </div>
             {isDemo && (
@@ -349,7 +434,9 @@ function OwnerRestaurantCard({ id }: { id: string }) {
               </button>
             )}
           </div>
-          <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5">→</span>
+          <span className="text-muted-foreground transition-transform group-hover:translate-x-0.5">
+            →
+          </span>
         </div>
       </Card>
     </div>

@@ -2,6 +2,11 @@ import { v } from "convex/values";
 import { action, internalQuery, mutation } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { getAuthUserId } from "@convex-dev/auth/server";
+import type {
+  FunctionArgs,
+  FunctionReference,
+  FunctionReturnType,
+} from "convex/server";
 
 /**
  * Platform settings — admin-editable API keys and configuration.
@@ -39,10 +44,20 @@ export const SETTING_KEYS = [
  * M-23: default-deny — every key NOT listed here is masked, so a future
  * sensitive setting can never leak by being forgotten in a deny-list.
  */
-const PUBLIC_KEYS = new Set([
-  "AI_SYSTEM_PROMPT",
-  "AI_MODEL",
-]);
+const PUBLIC_KEYS = new Set(["AI_SYSTEM_PROMPT", "AI_MODEL"]);
+
+export const ENV_REFERENCE_PREFIX = "env:";
+
+export function resolveSettingValue(
+  storedValue: string | undefined,
+  fallbackKey: string,
+): string | undefined {
+  if (!storedValue) return process.env[fallbackKey];
+  if (!storedValue.startsWith(ENV_REFERENCE_PREFIX)) return storedValue;
+  const envKey = storedValue.slice(ENV_REFERENCE_PREFIX.length);
+  if (!/^[A-Z][A-Z0-9_]{0,127}$/.test(envKey)) return undefined;
+  return process.env[envKey];
+}
 
 /**
  * Private, deterministic DB read for one setting row. C-1: internal-only so
@@ -55,7 +70,9 @@ export const getSettingDb = internalQuery({
       .query("appSettings")
       .withIndex("by_key", (q) => q.eq("key", key))
       .first();
-    return row ? { key: row.key, value: row.value, updatedAt: row.updatedAt } : null;
+    return row
+      ? { key: row.key, value: row.value, updatedAt: row.updatedAt }
+      : null;
   },
 });
 
@@ -81,7 +98,11 @@ export const getSettingRows = internalQuery({
   args: {},
   handler: async (ctx) => {
     const rows = await ctx.db.query("appSettings").collect();
-    return rows.map((r) => ({ key: r.key, value: r.value, updatedAt: r.updatedAt }));
+    return rows.map((r) => ({
+      key: r.key,
+      value: r.value,
+      updatedAt: r.updatedAt,
+    }));
   },
 });
 
@@ -97,19 +118,31 @@ export const listSettings = action({
     if (role !== "admin") throw new Error("Admins only.");
 
     const rows = await ctx.runQuery(internal.settings.getSettingRows, {});
-    const byKey = new Map<string, { key: string; value: string; updatedAt: number }>();
+    const byKey = new Map<
+      string,
+      { key: string; value: string; updatedAt: number }
+    >();
     for (const r of rows) byKey.set(r.key, r);
 
     return SETTING_KEYS.map((key) => {
       const row = byKey.get(key);
       const envValue = process.env[key];
+      const isEnvReference =
+        row?.value.startsWith(ENV_REFERENCE_PREFIX) ?? false;
       return {
         key,
-        configured: row ? true : false,
+        configured: isEnvReference
+          ? resolveSettingValue(row?.value, key) !== undefined
+          : row
+            ? true
+            : envValue !== undefined,
         // M-23: default-deny masking — only PUBLIC_KEYS values are shown
         // verbatim; everything else is masked to the last 4 chars.
-        masked:
-          row && PUBLIC_KEYS.has(key)
+        masked: isEnvReference
+          ? resolveSettingValue(row?.value, key)
+            ? "(env reference) configured"
+            : "(env reference) missing"
+          : row && PUBLIC_KEYS.has(key)
             ? row.value
             : row
               ? `••••${row.value.slice(-4)}`
@@ -118,7 +151,13 @@ export const listSettings = action({
                 : envValue
                   ? `(env) ••••${envValue.slice(-4)}`
                   : "",
-        source: row ? "db" : envValue ? "env" : "unset",
+        source: isEnvReference
+          ? "env-reference"
+          : row
+            ? "db"
+            : envValue
+              ? "env"
+              : "unset",
         updatedAt: row?.updatedAt ?? 0,
       };
     });
@@ -126,8 +165,9 @@ export const listSettings = action({
 });
 
 /**
- * Admin-only: upsert one setting. Empty value clears the stored value
- * (falls back to env). Secrets are never returned after storing.
+ * Admin-only: upsert one setting. `env:VARIABLE_NAME` stores only a reference
+ * and is preferred for provider secrets. Legacy plaintext values remain
+ * supported so existing admin-managed deployments do not break.
  */
 export const setSetting = mutation({
   args: { key: v.string(), value: v.string() },
@@ -141,6 +181,14 @@ export const setSetting = mutation({
       throw new Error(`Unknown setting: ${key}`);
     }
     const trimmed = value.trim();
+    if (
+      trimmed.startsWith(ENV_REFERENCE_PREFIX) &&
+      !/^[A-Z][A-Z0-9_]{0,127}$/.test(
+        trimmed.slice(ENV_REFERENCE_PREFIX.length),
+      )
+    ) {
+      throw new Error("Environment references must use env:VARIABLE_NAME.");
+    }
     const existing = await ctx.db
       .query("appSettings")
       .withIndex("by_key", (q) => q.eq("key", key))
@@ -149,14 +197,36 @@ export const setSetting = mutation({
       if (!trimmed) {
         await ctx.db.delete(existing._id);
       } else {
-        await ctx.db.patch(existing._id, { value: trimmed, updatedBy: userId, updatedAt: Date.now() });
+        await ctx.db.patch(existing._id, {
+          value: trimmed,
+          updatedBy: userId,
+          updatedAt: Date.now(),
+        });
       }
     } else if (trimmed) {
-      await ctx.db.insert("appSettings", { key, value: trimmed, updatedBy: userId, updatedAt: Date.now() });
+      await ctx.db.insert("appSettings", {
+        key,
+        value: trimmed,
+        updatedBy: userId,
+        updatedAt: Date.now(),
+      });
     }
     return { ok: true };
   },
 });
+
+/**
+ * Minimal shape of an ActionCtx needed to resolve settings via `runQuery`.
+ * Shared by ai.ts and twilio.ts so neither needs an untyped `any` ctx.
+ */
+export type SettingsReaderCtx = {
+  runQuery: <
+    Query extends FunctionReference<"query", "public" | "internal">,
+  >(
+    query: Query,
+    args: FunctionArgs<Query>,
+  ) => Promise<FunctionReturnType<Query>>;
+};
 
 /**
  * Server-only: resolve a setting's value — stored value wins, else env.
@@ -164,14 +234,14 @@ export const setSetting = mutation({
  * Not exposed to the client.
  */
 export async function getSetting(
-  ctx: { runQuery: (q: any, args: any) => Promise<any> },
+  ctx: SettingsReaderCtx,
   key: string,
 ): Promise<string | undefined> {
   try {
     const row = await ctx.runQuery(internal.settings.getSettingDb, { key });
-    if (row?.value) return row.value;
+    if (row?.value) return resolveSettingValue(row.value, key);
   } catch {
     // DB read failed (e.g. table not migrated yet) — fall through to env.
   }
-  return process.env[key];
+  return resolveSettingValue(undefined, key);
 }

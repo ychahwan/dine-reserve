@@ -1,4 +1,9 @@
-import { Camera, CameraResultType, CameraSource, Photo } from "@capacitor/camera";
+import {
+  Camera,
+  CameraResultType,
+  CameraSource,
+  Photo,
+} from "@capacitor/camera";
 import { useState, useCallback } from "react";
 
 interface UseCameraOptions {
@@ -18,6 +23,10 @@ interface UseCameraReturn {
   takePhoto: (options?: UseCameraOptions) => Promise<Photo | null>;
   pickFromGallery: (options?: UseCameraOptions) => Promise<Photo | null>;
   clearPhoto: () => void;
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 /**
@@ -41,17 +50,14 @@ export function useCamera(defaultOptions?: UseCameraOptions): UseCameraReturn {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const processPhoto = useCallback(
-    (result: Photo, options?: UseCameraOptions) => {
-      setPhoto(result);
-      // Null out when the result carries no base64 (Uri/DataUrl resultType) —
-      // otherwise a stale base64 from the previous capture lingers here while
-      // the UI previews the new photo, mismatching uploads (M-36).
-      setPhotoBase64(result.base64String ?? null);
-      return result;
-    },
-    [],
-  );
+  const processPhoto = useCallback((result: Photo) => {
+    setPhoto(result);
+    // Null out when the result carries no base64 (Uri/DataUrl resultType) —
+    // otherwise a stale base64 from the previous capture lingers here while
+    // the UI previews the new photo, mismatching uploads (M-36).
+    setPhotoBase64(result.base64String ?? null);
+    return result;
+  }, []);
 
   const takePhoto = useCallback(
     async (options?: UseCameraOptions): Promise<Photo | null> => {
@@ -59,7 +65,9 @@ export function useCamera(defaultOptions?: UseCameraOptions): UseCameraReturn {
       setError(null);
       try {
         const mergedOptions = {
-          quality: 90,
+          quality: 70,
+          width: 1600,
+          height: 1600,
           allowEditing: false,
           resultType: CameraResultType.Base64,
           source: CameraSource.Camera,
@@ -68,13 +76,16 @@ export function useCamera(defaultOptions?: UseCameraOptions): UseCameraReturn {
         };
 
         const result = await Camera.getPhoto(mergedOptions);
-        return processPhoto(result, options);
-      } catch (err: any) {
+        return processPhoto(result);
+      } catch (err: unknown) {
         // User cancelled - not an error
-        if (err?.message?.includes("cancel") || err?.message?.includes("Cancel")) {
+        if (
+          errorMessage(err, "").includes("cancel") ||
+          errorMessage(err, "").includes("Cancel")
+        ) {
           return null;
         }
-        setError(err?.message || "Failed to take photo");
+        setError(errorMessage(err, "Failed to take photo"));
         return null;
       } finally {
         setLoading(false);
@@ -89,7 +100,9 @@ export function useCamera(defaultOptions?: UseCameraOptions): UseCameraReturn {
       setError(null);
       try {
         const mergedOptions = {
-          quality: 90,
+          quality: 70,
+          width: 1600,
+          height: 1600,
           allowEditing: false,
           resultType: CameraResultType.Base64,
           source: CameraSource.Photos,
@@ -98,12 +111,15 @@ export function useCamera(defaultOptions?: UseCameraOptions): UseCameraReturn {
         };
 
         const result = await Camera.getPhoto(mergedOptions);
-        return processPhoto(result, options);
-      } catch (err: any) {
-        if (err?.message?.includes("cancel") || err?.message?.includes("Cancel")) {
+        return processPhoto(result);
+      } catch (err: unknown) {
+        if (
+          errorMessage(err, "").includes("cancel") ||
+          errorMessage(err, "").includes("Cancel")
+        ) {
           return null;
         }
-        setError(err?.message || "Failed to pick photo");
+        setError(errorMessage(err, "Failed to pick photo"));
         return null;
       } finally {
         setLoading(false);

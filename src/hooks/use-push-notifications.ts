@@ -4,7 +4,19 @@ import {
   PushNotificationActionPerformed,
   Token,
 } from "@capacitor/push-notifications";
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  useState,
+  useCallback,
+  useEffect,
+  useEffectEvent,
+  useRef,
+} from "react";
+
+const MAX_RECENT_NOTIFICATIONS = 50;
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
+}
 
 interface UsePushNotificationsOptions {
   autoRegister?: boolean;
@@ -48,24 +60,38 @@ export function usePushNotifications(
   options?: UsePushNotificationsOptions,
 ): UsePushNotificationsReturn {
   const [token, setToken] = useState<string | null>(null);
-  const [registrationError, setRegistrationError] = useState<string | null>(null);
-  const [notifications, setNotifications] = useState<PushNotificationSchema[]>([]);
+  const [registrationError, setRegistrationError] = useState<string | null>(
+    null,
+  );
+  const [notifications, setNotifications] = useState<PushNotificationSchema[]>(
+    [],
+  );
   const [loading, setLoading] = useState(false);
   const [registered, setRegistered] = useState(false);
 
-  const optionsRef = useRef(options);
-  optionsRef.current = options;
+  const handleNotificationReceived = useEffectEvent(
+    (notification: PushNotificationSchema) => {
+      options?.onNotificationReceived?.(notification);
+    },
+  );
+  const handleNotificationAction = useEffectEvent(
+    (action: PushNotificationActionPerformed) => {
+      options?.onNotificationAction?.(action);
+    },
+  );
 
   // Deferred resolution: register() awaits the token delivered asynchronously
   // by the "registration" listener instead of returning stale state (H-24).
-  const pendingResolveRef = useRef<((token: string | null) => void) | null>(null);
+  const pendingResolveRef = useRef<((token: string | null) => void) | null>(
+    null,
+  );
 
   const requestPermissions = useCallback(async (): Promise<boolean> => {
     try {
       const result = await PushNotifications.requestPermissions();
       return result.receive === "granted";
-    } catch (err: any) {
-      setRegistrationError(err?.message || "Failed to request permissions");
+    } catch (err: unknown) {
+      setRegistrationError(errorMessage(err, "Failed to request permissions"));
       return false;
     }
   }, []);
@@ -95,8 +121,10 @@ export function usePushNotifications(
         new Promise<null>((resolve) => setTimeout(() => resolve(null), 15_000)),
       ]);
       return result;
-    } catch (err: any) {
-      setRegistrationError(err?.message || "Failed to register for push notifications");
+    } catch (err: unknown) {
+      setRegistrationError(
+        errorMessage(err, "Failed to register for push notifications"),
+      );
       return null;
     } finally {
       pendingResolveRef.current = null;
@@ -109,16 +137,18 @@ export function usePushNotifications(
       await PushNotifications.unregister();
       setToken(null);
       setRegistered(false);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to unregister:", err);
     }
   }, []);
 
-  const getDeliveredNotifications = useCallback(async (): Promise<PushNotificationSchema[]> => {
+  const getDeliveredNotifications = useCallback(async (): Promise<
+    PushNotificationSchema[]
+  > => {
     try {
       const result = await PushNotifications.getDeliveredNotifications();
       return result.notifications;
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to get delivered notifications:", err);
       return [];
     }
@@ -128,7 +158,7 @@ export function usePushNotifications(
     try {
       await PushNotifications.removeAllDeliveredNotifications();
       setNotifications([]);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to clear delivered notifications:", err);
     }
   }, []);
@@ -149,8 +179,8 @@ export function usePushNotifications(
     // Listen for registration errors
     const regErrorListener = PushNotifications.addListener(
       "registrationError",
-      (error: any) => {
-        setRegistrationError(error?.message || "Registration failed");
+      (error: unknown) => {
+        setRegistrationError(errorMessage(error, "Registration failed"));
         pendingResolveRef.current?.(null);
         pendingResolveRef.current = null;
       },
@@ -160,8 +190,10 @@ export function usePushNotifications(
     const receivedListener = PushNotifications.addListener(
       "pushNotificationReceived",
       (notification: PushNotificationSchema) => {
-        setNotifications((prev) => [notification, ...prev]);
-        optionsRef.current?.onNotificationReceived?.(notification);
+        setNotifications((prev) =>
+          [notification, ...prev].slice(0, MAX_RECENT_NOTIFICATIONS),
+        );
+        handleNotificationReceived(notification);
       },
     );
 
@@ -169,7 +201,7 @@ export function usePushNotifications(
     const actionListener = PushNotifications.addListener(
       "pushNotificationActionPerformed",
       (action: PushNotificationActionPerformed) => {
-        optionsRef.current?.onNotificationAction?.(action);
+        handleNotificationAction(action);
       },
     );
 
@@ -184,6 +216,7 @@ export function usePushNotifications(
   // Auto-register if enabled
   useEffect(() => {
     if (options?.autoRegister) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- synchronize with the native OS registration API
       register();
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps

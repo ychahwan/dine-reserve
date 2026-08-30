@@ -38,10 +38,12 @@ import {
   useTablePagination,
   useSort,
   sortItems,
+  sanitizeCsvCell,
 } from "@/lib/use-table-pagination";
-import type { SortDirection } from "@/lib/use-table-pagination";
 
-type AuditEntry = NonNullable<ReturnType<typeof useQuery<typeof api.admin.auditLog>>>[number];
+type AuditEntry = NonNullable<
+  ReturnType<typeof useQuery<typeof api.admin.auditLog>>
+>[number];
 
 import { api } from "@/convex/_generated/api";
 
@@ -49,10 +51,14 @@ type SortKey = "action" | "target" | "details" | "when";
 
 function extractValue(row: AuditEntry, key: SortKey): string | number {
   switch (key) {
-    case "action": return row.action;
-    case "target": return row.targetUserId ? String(row.targetUserId) : "";
-    case "details": return row.details ?? "";
-    case "when": return row.createdAt;
+    case "action":
+      return row.action;
+    case "target":
+      return row.targetUserId ? String(row.targetUserId) : "";
+    case "details":
+      return row.details ?? "";
+    case "when":
+      return row.createdAt;
   }
 }
 
@@ -67,7 +73,9 @@ function exportToCsv(entries: AuditEntry[]) {
   ]);
   const csv = [headers, ...rows]
     .map((row) =>
-      row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(","),
+      row
+        .map((cell) => `"${sanitizeCsvCell(cell).replace(/"/g, '""')}"`)
+        .join(","),
     )
     .join("\n");
   const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
@@ -95,21 +103,18 @@ export default function AdminAudit() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
-  const { sort, toggleSort } = useSort<SortKey>({ key: "when", direction: "desc" });
+  const { sort, toggleSort } = useSort<SortKey>({
+    key: "when",
+    direction: "desc",
+  });
 
-  // Get unique action values for the filter dropdown.
-  // M-32: reuse the primary (already-loaded) query for facets; only hit a
-  // second unbounded query as a fallback when it comes back empty.
-  const allEntries = useQuery(
-    api.admin.auditLog,
-    entries !== undefined && entries.length > 0 ? "skip" : {},
-  );
+  // Derive available facets from the bounded primary result. A dedicated
+  // backend facets query is still needed for options outside this result set.
   const actionOptions = useMemo(() => {
-    const source = entries && entries.length > 0 ? entries : allEntries;
-    if (!source) return [];
-    const actions = new Set(source.map((e) => e.action));
+    if (!entries) return [];
+    const actions = new Set(entries.map((e) => e.action));
     return Array.from(actions).sort();
-  }, [entries, allEntries]);
+  }, [entries]);
 
   // Client-side date range filter
   const dateFiltered = useMemo(() => {
@@ -130,12 +135,13 @@ export default function AdminAudit() {
     [dateFiltered, sort.key, sort.direction],
   );
 
-  const { pageItems, page, setPage, totalPages, totalItems } = useTablePagination({
-    items: sorted,
-    sortKey: sort.key,
-    sortDirection: sort.direction,
-    pageSize: 25,
-  });
+  const { pageItems, page, setPage, totalPages, totalItems } =
+    useTablePagination({
+      items: sorted,
+      sortKey: sort.key,
+      sortDirection: sort.direction,
+      pageSize: 25,
+    });
 
   // H-26: only entries matching the current filters may be bulk-deleted —
   // selections made under other filters are ignored, not silently included.
@@ -145,7 +151,8 @@ export default function AdminAudit() {
   );
 
   // H-25: select-all is scoped to the current page's items.
-  const allPageSelected = pageItems.length > 0 && pageItems.every((e) => selected.has(e._id));
+  const allPageSelected =
+    pageItems.length > 0 && pageItems.every((e) => selected.has(e._id));
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -171,12 +178,16 @@ export default function AdminAudit() {
     if (busy || selectedVisibleIds.length === 0) return;
     setBusy(true);
     try {
-      const res = await deleteEntries({ ids: selectedVisibleIds as never[] });
+      const res = (await deleteEntries({
+        ids: selectedVisibleIds as never[],
+      })) as { deleted: number };
       toast.success(`${res.deleted} entries deleted.`);
       setSelected(new Set());
       setConfirmDelete(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete entries.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not delete entries.",
+      );
     } finally {
       setBusy(false);
     }
@@ -186,11 +197,13 @@ export default function AdminAudit() {
     if (busy) return;
     setBusy(true);
     try {
-      const res = await clearAuditLog();
+      const res = (await clearAuditLog()) as { cleared: number };
       toast.success(`Audit log cleared (${res.cleared} entries removed).`);
       setConfirmClear(false);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not clear the audit log.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not clear the audit log.",
+      );
       setConfirmClear(false);
     } finally {
       setBusy(false);
@@ -198,9 +211,8 @@ export default function AdminAudit() {
   };
 
   const handleExport = () => {
-    const toExport = selected.size > 0
-      ? sorted.filter((e) => selected.has(e._id))
-      : sorted;
+    const toExport =
+      selected.size > 0 ? sorted.filter((e) => selected.has(e._id)) : sorted;
     exportToCsv(toExport);
     toast.success(`Exported ${toExport.length} entries to CSV.`);
   };
@@ -217,9 +229,15 @@ export default function AdminAudit() {
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold tracking-tight">{t("admin.auditLog")}</h1>
+          <h1 className="text-2xl font-bold tracking-tight">
+            {t("admin.auditLog")}
+          </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            {entries.length} entries{search || actionFilter || dateFrom || dateTo ? ` (${dateFiltered.length} shown)` : ""}. Clearing it is itself logged.
+            {entries.length} entries
+            {search || actionFilter || dateFrom || dateTo
+              ? ` (${dateFiltered.length} shown)`
+              : ""}
+            . Clearing it is itself logged.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -233,7 +251,11 @@ export default function AdminAudit() {
               <Trash2 className="size-4" /> Delete ({selectedVisibleIds.length})
             </Button>
           )}
-          <Button variant="outline" onClick={handleExport} disabled={entries.length === 0}>
+          <Button
+            variant="outline"
+            onClick={handleExport}
+            disabled={entries.length === 0}
+          >
             <Download className="size-4" /> Export CSV
           </Button>
           <Button
@@ -255,34 +277,58 @@ export default function AdminAudit() {
           onChange={(e) => setSearch(e.target.value)}
           className="h-9 w-full sm:max-w-xs rounded-full text-sm"
         />
-        <Select value={actionFilter} onValueChange={(v) => setActionFilter(v === "all" ? "" : v)}>
+        <Select
+          value={actionFilter}
+          onValueChange={(v) => setActionFilter(v === "all" ? "" : v)}
+        >
           <SelectTrigger className="h-9 w-full sm:w-auto rounded-full text-sm">
             <SelectValue placeholder={t("admin.allActions")} />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">{t("admin.allActions")}</SelectItem>
             {actionOptions.map((a) => (
-              <SelectItem key={a} value={a}>{a}</SelectItem>
+              <SelectItem key={a} value={a}>
+                {a}
+              </SelectItem>
             ))}
           </SelectContent>
         </Select>
         <span className="text-xs text-muted-foreground">From</span>
-        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className="h-9 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground" />
+        <input
+          type="date"
+          value={dateFrom}
+          onChange={(e) => setDateFrom(e.target.value)}
+          className="h-9 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground"
+        />
         <span className="text-xs text-muted-foreground">To</span>
-        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className="h-9 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground" />
+        <input
+          type="date"
+          value={dateTo}
+          onChange={(e) => setDateTo(e.target.value)}
+          className="h-9 rounded-full border border-border bg-card px-3 text-sm text-muted-foreground"
+        />
         {(search || actionFilter || dateFrom || dateTo) && (
           <Button
             variant="ghost"
             size="sm"
             className="text-muted-foreground"
-            onClick={() => { setSearch(""); setActionFilter(""); setDateFrom(""); setDateTo(""); }}
+            onClick={() => {
+              setSearch("");
+              setActionFilter("");
+              setDateFrom("");
+              setDateTo("");
+            }}
           >
             Clear filters
           </Button>
         )}
       </div>
 
-      {entries.length === 0 && !search && !actionFilter && !dateFrom && !dateTo ? (
+      {entries.length === 0 &&
+      !search &&
+      !actionFilter &&
+      !dateFrom &&
+      !dateTo ? (
         <EmptyNote>No admin actions recorded yet.</EmptyNote>
       ) : pageItems.length === 0 ? (
         <EmptyNote>No entries match your filters.</EmptyNote>
@@ -299,15 +345,44 @@ export default function AdminAudit() {
                       aria-label="Select all"
                     />
                   </TableHead>
-                  <SortableHead label="Action" sortKey="action" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
-                  <SortableHead label="Target" sortKey="target" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden md:table-cell" />
-                  <SortableHead label="Details" sortKey="details" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} className="hidden sm:table-cell" />
-                  <SortableHead label="When" sortKey="when" activeSortKey={sort.key} direction={sort.direction} onToggle={toggleSort} />
+                  <SortableHead
+                    label="Action"
+                    sortKey="action"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                  />
+                  <SortableHead
+                    label="Target"
+                    sortKey="target"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden md:table-cell"
+                  />
+                  <SortableHead
+                    label="Details"
+                    sortKey="details"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                    className="hidden sm:table-cell"
+                  />
+                  <SortableHead
+                    label="When"
+                    sortKey="when"
+                    activeSortKey={sort.key}
+                    direction={sort.direction}
+                    onToggle={toggleSort}
+                  />
                 </TableRow>
               </TableHeader>
               <TableBody>
                 {pageItems.map((e) => (
-                  <TableRow key={e._id} className={selected.has(e._id) ? "bg-muted/50" : ""}>
+                  <TableRow
+                    key={e._id}
+                    className={selected.has(e._id) ? "bg-muted/50" : ""}
+                  >
                     <TableCell>
                       <Checkbox
                         checked={selected.has(e._id)}
@@ -316,10 +391,14 @@ export default function AdminAudit() {
                       />
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary" className="font-mono text-xs">{e.action}</Badge>
+                      <Badge variant="secondary" className="font-mono text-xs">
+                        {e.action}
+                      </Badge>
                     </TableCell>
                     <TableCell className="hidden font-mono text-xs text-muted-foreground md:table-cell">
-                      {e.targetUserId ? String(e.targetUserId).slice(0, 12) + "…" : "—"}
+                      {e.targetUserId
+                        ? String(e.targetUserId).slice(0, 12) + "…"
+                        : "—"}
                     </TableCell>
                     <TableCell className="hidden max-w-xs truncate text-sm text-muted-foreground sm:table-cell">
                       {e.details ?? "—"}
@@ -343,12 +422,18 @@ export default function AdminAudit() {
       )}
 
       {/* Bulk delete confirmation */}
-      <AlertDialog open={confirmDelete} onOpenChange={(open) => !open && !busy && setConfirmDelete(false)}>
+      <AlertDialog
+        open={confirmDelete}
+        onOpenChange={(open) => !open && !busy && setConfirmDelete(false)}
+      >
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">Delete {selectedVisibleIds.length} entries?</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">
+              Delete {selectedVisibleIds.length} entries?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              These entries will be permanently removed. This action cannot be undone.
+              These entries will be permanently removed. This action cannot be
+              undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -356,7 +441,10 @@ export default function AdminAudit() {
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={busy}
-              onClick={(e) => { e.preventDefault(); void handleBulkDelete(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleBulkDelete();
+              }}
             >
               {busy ? <Loader2 className="size-4 animate-spin" /> : "Delete"}
             </AlertDialogAction>
@@ -365,13 +453,19 @@ export default function AdminAudit() {
       </AlertDialog>
 
       {/* Clear all confirmation */}
-      <AlertDialog open={confirmClear} onOpenChange={(open) => !open && !busy && setConfirmClear(false)}>
+      <AlertDialog
+        open={confirmClear}
+        onOpenChange={(open) => !open && !busy && setConfirmClear(false)}
+      >
         <AlertDialogContent className="max-w-sm rounded-3xl">
           <AlertDialogHeader>
-            <AlertDialogTitle className="tracking-tight">{t("admin.clearAuditTitle")}</AlertDialogTitle>
+            <AlertDialogTitle className="tracking-tight">
+              {t("admin.clearAuditTitle")}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              All {entries?.length ?? 0} entries are permanently deleted. A single
-              "clearAuditLog" entry is kept so the clearing itself stays on record.
+              All {entries?.length ?? 0} entries are permanently deleted. A
+              single "clearAuditLog" entry is kept so the clearing itself stays
+              on record.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -379,9 +473,16 @@ export default function AdminAudit() {
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={busy}
-              onClick={(e) => { e.preventDefault(); void handleClear(); }}
+              onClick={(e) => {
+                e.preventDefault();
+                void handleClear();
+              }}
             >
-              {busy ? <Loader2 className="size-4 animate-spin" /> : "Clear audit log"}
+              {busy ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                "Clear audit log"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

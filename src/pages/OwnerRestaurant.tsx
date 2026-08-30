@@ -45,6 +45,7 @@ import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { api } from "@/convex/_generated/api";
+import { useAuth } from "@/hooks/use-auth";
 import { useMutation, useQuery } from "convex/react";
 import {
   AlertTriangle,
@@ -63,12 +64,19 @@ import {
   Users,
 } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, Navigate, useNavigate, useParams } from "react-router";
 import { cn } from "@/lib/utils";
 import { DAY_ROWS, KIND_LABEL, type Kind } from "@/lib/seating";
 import { toast } from "sonner";
 
-type FeatureKey = "inside" | "outside" | "bar" | "smoking" | "parking" | "liveMusic" | "soloFriendly";
+type FeatureKey =
+  | "inside"
+  | "outside"
+  | "bar"
+  | "smoking"
+  | "parking"
+  | "liveMusic"
+  | "soloFriendly";
 const FEATURE_OPTIONS: { key: FeatureKey; label: string }[] = [
   { key: "inside", label: "Inside" },
   { key: "outside", label: "Outside" },
@@ -89,14 +97,37 @@ const POLICY_OPTIONS = [
   { value: 48, label: "Free until 48 hours before" },
 ];
 
-type HoursRow = { dayOfWeek: number; open: string; close: string; enabled: boolean };
+type HoursRow = {
+  dayOfWeek: number;
+  open: string;
+  close: string;
+  enabled: boolean;
+};
 
 export default function OwnerRestaurant() {
+  const { user } = useAuth();
+  if (user === undefined) {
+    return (
+      <div className="flex min-h-dvh items-center justify-center">
+        <Spinner className="size-6" />
+      </div>
+    );
+  }
+  if (user === null) return <Navigate to="/" replace />;
+  if (user.role !== "owner" && user.role !== "admin")
+    return <Navigate to="/dashboard" replace />;
+  return <OwnerRestaurantContent />;
+}
+
+function OwnerRestaurantContent() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: id as never });
-  const menuData = useQuery(api.restaurants.menuForRestaurant, { id: id as never });
+  const menuData = useQuery(
+    api.restaurants.menuForRestaurant,
+    data?.isOwner ? { id: id as never } : "skip",
+  );
   const claimDemo = useMutation(api.restaurants.claimDemo);
   const [claiming, setClaiming] = useState(false);
   const [tab, setTab] = useState("overview");
@@ -134,16 +165,27 @@ export default function OwnerRestaurant() {
       {/* Header */}
       <div className="flex items-center gap-3">
         {r.imageUrl ? (
-          <img src={r.imageUrl} alt={r.name} className="size-12 shrink-0 rounded-xl object-cover" />
+          <img
+            src={r.imageUrl}
+            alt={r.name}
+            loading="lazy"
+            decoding="async"
+            width={48}
+            height={48}
+            className="size-12 shrink-0 rounded-xl object-cover"
+          />
         ) : (
           <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
             <Store className="size-6" />
           </div>
         )}
         <div className="min-w-0">
-          <h1 className="truncate text-lg font-bold tracking-tight">{r.name}</h1>
+          <h1 className="truncate text-lg font-bold tracking-tight">
+            {r.name}
+          </h1>
           <p className="flex items-center gap-1 text-xs text-muted-foreground">
-            <MapPin className="size-3" /> {r.neighborhood || r.city}, {r.city} · {r.cuisine}
+            <MapPin className="size-3" /> {r.neighborhood || r.city}, {r.city} ·{" "}
+            {r.cuisine}
           </p>
         </div>
       </div>
@@ -155,22 +197,33 @@ export default function OwnerRestaurant() {
             <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-700 dark:text-amber-400" />
             <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-amber-900 dark:text-amber-300">
-                You don't own {r.name} — that's why bookings and notifications look empty
+                You don't own {r.name} — that's why bookings and notifications
+                look empty
               </p>
               <p className="mt-1 text-xs leading-relaxed text-amber-800/90 dark:text-amber-200/80">
-                Bookings and notifications are only shown to the restaurant's owner account.
-                If you booked a table here with a different account, it won't appear in this
-                manager view. Sign in with the account that owns this restaurant, or take
-                ownership of this demo restaurant below.
+                Bookings and notifications are only shown to the restaurant's
+                owner account. If you booked a table here with a different
+                account, it won't appear in this manager view. Sign in with the
+                account that owns this restaurant, or take ownership of this
+                demo restaurant below.
               </p>
               <div className="mt-3 flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" asChild className="border-amber-700/30 text-amber-900 dark:text-amber-200">
+                <Button
+                  size="sm"
+                  variant="outline"
+                  asChild
+                  className="border-amber-700/30 text-amber-900 dark:text-amber-200"
+                >
                   <Link to={`/restaurant/${r._id}`}>
                     <Eye className="size-3.5" /> View as diner
                   </Link>
                 </Button>
                 {ownerIsDemo && (
-                  <Button size="sm" onClick={handleClaimDemo} disabled={claiming}>
+                  <Button
+                    size="sm"
+                    onClick={handleClaimDemo}
+                    disabled={claiming}
+                  >
                     {claiming ? (
                       <Loader2 className="size-3.5 animate-spin" />
                     ) : (
@@ -185,98 +238,121 @@ export default function OwnerRestaurant() {
         </div>
       )}
 
-      <Tabs value={tab} onValueChange={setTab} className="mt-5">
-        <TabsList className="no-scrollbar h-auto w-full justify-start gap-1 overflow-x-auto bg-transparent p-0">
-          {[
-            { key: "overview", label: "Profile" },
-            { key: "seating", label: "Seating" },
-            { key: "hours", label: "Hours" },
-            { key: "slots", label: "Slot rules" },
-            { key: "availability", label: "Availability" },
-            { key: "menu", label: "Menu" },
-            { key: "bookings", label: "Bookings" },
-            { key: "customers", label: "Customers" },
-            { key: "orders", label: "Orders", badge: "orders" as const },
-            { key: "requests", label: "Requests", badge: "assists" as const },
-            { key: "menuideas", label: "Menu ideas", badge: "menuRequests" as const },
-            { key: "gifts", label: "Gifts", badge: "gifts" as const },
-            { key: "walkins", label: "Walk-ins" },
-            { key: "stories", label: "Stories" },
-            { key: "insights", label: "Insights" },
-            { key: "notifications", label: "Notifications", badge: "notifications" as const },
-          ].map((t) => (
-            <TabsTrigger
-              key={t.key}
-              value={t.key}
-              className="shrink-0 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
-            >
-              {t.key === "insights" && <BarChart3 className="mr-1 size-3" />}
-              {t.label}
-              {t.badge === "notifications" && (
-                <NotificationsBadge restaurantId={r._id} active={tab === "notifications"} />
-              )}
-              {t.badge === "gifts" && <OwnerGiftsTabCount restaurantId={r._id} />}
-              {t.badge && t.badge !== "notifications" && t.badge !== "gifts" && (
-                <DiningTabCount restaurantId={r._id} kind={t.badge} />
-              )}
-            </TabsTrigger>
-          ))}
-        </TabsList>
+      {isOwner ? (
+        <Tabs value={tab} onValueChange={setTab} className="mt-5">
+          <TabsList className="no-scrollbar h-auto w-full justify-start gap-1 overflow-x-auto bg-transparent p-0">
+            {[
+              { key: "overview", label: "Profile" },
+              { key: "seating", label: "Seating" },
+              { key: "hours", label: "Hours" },
+              { key: "slots", label: "Slot rules" },
+              { key: "availability", label: "Availability" },
+              { key: "menu", label: "Menu" },
+              { key: "bookings", label: "Bookings" },
+              { key: "customers", label: "Customers" },
+              { key: "orders", label: "Orders", badge: "orders" as const },
+              { key: "requests", label: "Requests", badge: "assists" as const },
+              {
+                key: "menuideas",
+                label: "Menu ideas",
+                badge: "menuRequests" as const,
+              },
+              { key: "gifts", label: "Gifts", badge: "gifts" as const },
+              { key: "walkins", label: "Walk-ins" },
+              { key: "stories", label: "Stories" },
+              { key: "insights", label: "Insights" },
+              {
+                key: "notifications",
+                label: "Notifications",
+                badge: "notifications" as const,
+              },
+            ].map((t) => (
+              <TabsTrigger
+                key={t.key}
+                value={t.key}
+                className="shrink-0 rounded-full border border-border bg-card px-3.5 py-1.5 text-xs font-medium data-[state=active]:border-primary data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"
+              >
+                {t.key === "insights" && <BarChart3 className="mr-1 size-3" />}
+                {t.label}
+                {t.badge === "notifications" && (
+                  <NotificationsBadge
+                    restaurantId={r._id}
+                    active={tab === "notifications"}
+                  />
+                )}
+                {t.badge === "gifts" && (
+                  <OwnerGiftsTabCount restaurantId={r._id} />
+                )}
+                {t.badge &&
+                  t.badge !== "notifications" &&
+                  t.badge !== "gifts" && (
+                    <DiningTabCount restaurantId={r._id} kind={t.badge} />
+                  )}
+              </TabsTrigger>
+            ))}
+          </TabsList>
 
-        <TabsContent value="overview" className="mt-5">
-          <OverviewTab restaurantId={r._id} menuCount={menuCount} />
-        </TabsContent>
-        <TabsContent value="seating" className="mt-5">
-          <SeatingTab restaurantId={r._id} sections={sections} />
-        </TabsContent>
-        <TabsContent value="hours" className="mt-5">
-          <HoursTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="slots" className="mt-5">
-          <SlotRulesTab restaurantId={r._id} sections={sections} />
-        </TabsContent>
-        <TabsContent value="availability" className="mt-5">
-          <AvailabilityTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="menu" className="mt-5">
-          <OwnerMenuTab restaurantId={r._id} menuDocs={menuDocs} />
-        </TabsContent>
-        <TabsContent value="bookings" className="mt-5">
-          <BookingsTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="customers" className="mt-5">
-          <OwnerCustomersTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="orders" className="mt-5">
-          <OwnerOrdersTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="requests" className="mt-5">
-          <OwnerAssistsTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="menuideas" className="mt-5">
-          <OwnerMenuRequestsTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="gifts" className="mt-5">
-          <OwnerGiftsTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="walkins" className="mt-5">
-          <WalkInApproval restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="stories" className="mt-5">
-          <OwnerStoriesTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="insights" className="mt-5">
-          <OwnerInsightsTab restaurantId={r._id} />
-        </TabsContent>
-        <TabsContent value="notifications" className="mt-5">
-          <OwnerNotificationsTab restaurantId={r._id} />
-        </TabsContent>
-      </Tabs>
+          <TabsContent value="overview" className="mt-5">
+            <OverviewTab restaurantId={r._id} menuCount={menuCount} />
+          </TabsContent>
+          <TabsContent value="seating" className="mt-5">
+            <SeatingTab restaurantId={r._id} sections={sections} />
+          </TabsContent>
+          <TabsContent value="hours" className="mt-5">
+            <HoursTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="slots" className="mt-5">
+            <SlotRulesTab restaurantId={r._id} sections={sections} />
+          </TabsContent>
+          <TabsContent value="availability" className="mt-5">
+            <AvailabilityTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="menu" className="mt-5">
+            <OwnerMenuTab restaurantId={r._id} menuDocs={menuDocs} />
+          </TabsContent>
+          <TabsContent value="bookings" className="mt-5">
+            <BookingsTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="customers" className="mt-5">
+            <OwnerCustomersTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="orders" className="mt-5">
+            <OwnerOrdersTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="requests" className="mt-5">
+            <OwnerAssistsTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="menuideas" className="mt-5">
+            <OwnerMenuRequestsTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="gifts" className="mt-5">
+            <OwnerGiftsTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="walkins" className="mt-5">
+            <WalkInApproval restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="stories" className="mt-5">
+            <OwnerStoriesTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="insights" className="mt-5">
+            <OwnerInsightsTab restaurantId={r._id} />
+          </TabsContent>
+          <TabsContent value="notifications" className="mt-5">
+            <OwnerNotificationsTab restaurantId={r._id} />
+          </TabsContent>
+        </Tabs>
+      ) : null}
     </OwnerShell>
   );
 }
 
-function NotificationsBadge({ restaurantId, active }: { restaurantId: string; active: boolean }) {
+function NotificationsBadge({
+  restaurantId,
+  active,
+}: {
+  restaurantId: string;
+  active: boolean;
+}) {
   const unread = useQuery(api.notifications.unreadCount, {
     restaurantId: restaurantId as never,
   });
@@ -285,7 +361,9 @@ function NotificationsBadge({ restaurantId, active }: { restaurantId: string; ac
     <span
       className={cn(
         "ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4",
-        active ? "bg-primary-foreground/20 text-primary-foreground" : "bg-destructive text-white",
+        active
+          ? "bg-primary-foreground/20 text-primary-foreground"
+          : "bg-destructive text-white",
       )}
     >
       {unread > 99 ? "99+" : unread}
@@ -297,12 +375,19 @@ function NotificationsBadge({ restaurantId, active }: { restaurantId: string; ac
 // Overview: edit profile + amenities + cancellation policy
 // ---------------------------------------------------------------------------
 
-function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCount: number }) {
+function OverviewTab({
+  restaurantId,
+  menuCount,
+}: {
+  restaurantId: string;
+  menuCount: number;
+}) {
   const { t } = useTranslation();
   const data = useQuery(api.restaurants.get, { id: restaurantId as never });
   const update = useMutation(api.restaurants.update);
-  const setCancellationPolicy = useMutation(api.restaurants.setCancellationPolicy);
-  const updateSocialize = useMutation(api.restaurants.updateSocializeSettings);
+  const setCancellationPolicy = useMutation(
+    api.restaurants.setCancellationPolicy,
+  );
 
   const [form, setForm] = useState({
     name: "",
@@ -315,7 +400,13 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
     imageUrl: "",
   });
   const [features, setFeatures] = useState<Record<FeatureKey, boolean>>({
-    inside: true, outside: false, bar: false, smoking: false, parking: false, liveMusic: false, soloFriendly: false,
+    inside: true,
+    outside: false,
+    bar: false,
+    smoking: false,
+    parking: false,
+    liveMusic: false,
+    soloFriendly: false,
   });
   const [policyHours, setPolicyHours] = useState(0);
   const [socEnabled, setSocEnabled] = useState(true);
@@ -328,6 +419,7 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
   useEffect(() => {
     if (!data) return;
     const r = data.restaurant;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize the controlled owner form from the loaded record.
     setForm({
       name: r.name,
       cuisine: r.cuisine,
@@ -352,13 +444,18 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
     setSocMinVisits(String(r.socialize?.minVisits ?? 0));
   }, [data]);
 
-  const totalCapacity = (data?.sections ?? []).reduce((sum, s) => sum + s.capacity, 0);
+  const totalCapacity = (data?.sections ?? []).reduce(
+    (sum, s) => sum + s.capacity,
+    0,
+  );
   const todayKey = useToday();
   const todays = useQuery(api.bookings.byRestaurant, {
     restaurantId: restaurantId as never,
     date: todayKey,
   });
-  const todayCount = (todays ?? []).filter((b) => b.status !== "cancelled").length;
+  const todayCount = (todays ?? []).filter(
+    (b) => b.status !== "cancelled",
+  ).length;
 
   // L-34: single parse/clamp point for the Socialize min-visits input.
   const socMinVisitsNum = Number.isFinite(Number(socMinVisits))
@@ -369,7 +466,12 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
     e.preventDefault();
     setError(null);
     // L-37: HTML `required` accepts whitespace-only values — trim-validate first.
-    if (!form.name.trim() || !form.cuisine.trim() || !form.city.trim() || !form.address.trim()) {
+    if (
+      !form.name.trim() ||
+      !form.cuisine.trim() ||
+      !form.city.trim() ||
+      !form.address.trim()
+    ) {
       setError("Name, cuisine, city and address are required.");
       return;
     }
@@ -380,7 +482,9 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
       try {
         await run();
       } catch (err) {
-        throw new Error(`${label}: ${err instanceof Error ? err.message : "failed"}`);
+        throw new Error(
+          `${label}: ${err instanceof Error ? err.message : "failed"}`,
+        );
       }
     };
     try {
@@ -407,14 +511,9 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
         }),
       );
       await step("Cancellation policy", () =>
-        setCancellationPolicy({ restaurantId: restaurantId as never, hours: policyHours }),
-      );
-      await step("Socialize room", () =>
-        updateSocialize({
+        setCancellationPolicy({
           restaurantId: restaurantId as never,
-          enabled: socEnabled,
-          minVisits: socMinVisitsNum,
-          blockedUserIds: (data?.restaurant.socialize?.blockedUserIds ?? []) as never[],
+          hours: policyHours,
         }),
       );
       toast.success("Restaurant updated");
@@ -428,40 +527,80 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
   return (
     <div className="space-y-4 pb-6">
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Seats" value={String(totalCapacity)} icon={<Users className="size-4" />} />
-        <StatCard label="Sections" value={String(data?.sections.length ?? 0)} icon={<Sofa className="size-4" />} />
-        <StatCard label="Booked today" value={String(todayCount)} icon={<CalendarDays className="size-4" />} />
-        <StatCard label="Menus" value={String(menuCount)} icon={<ChefHat className="size-4" />} />
+        <StatCard
+          label="Seats"
+          value={String(totalCapacity)}
+          icon={<Users className="size-4" />}
+        />
+        <StatCard
+          label="Sections"
+          value={String(data?.sections.length ?? 0)}
+          icon={<Sofa className="size-4" />}
+        />
+        <StatCard
+          label="Booked today"
+          value={String(todayCount)}
+          icon={<CalendarDays className="size-4" />}
+        />
+        <StatCard
+          label="Menus"
+          value={String(menuCount)}
+          icon={<ChefHat className="size-4" />}
+        />
       </div>
 
       <Card className="rounded-2xl border-border/70 p-0 shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">{t("owner.restaurantProfile")}</CardTitle>
+          <CardTitle className="text-base">
+            {t("owner.restaurantProfile")}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSave} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="p-name">Name *</Label>
-                <Input id="p-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} required />
+                <Input
+                  id="p-name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="p-cuisine">Cuisine *</Label>
-                <Input id="p-cuisine" value={form.cuisine} onChange={(e) => setForm({ ...form, cuisine: e.target.value })} required />
+                <Input
+                  id="p-cuisine"
+                  value={form.cuisine}
+                  onChange={(e) =>
+                    setForm({ ...form, cuisine: e.target.value })
+                  }
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="p-city">City *</Label>
-                <Input id="p-city" value={form.city} onChange={(e) => setForm({ ...form, city: e.target.value })} required />
+                <Input
+                  id="p-city"
+                  value={form.city}
+                  onChange={(e) => setForm({ ...form, city: e.target.value })}
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="p-price">Price range</Label>
-                <Select value={form.priceRange} onValueChange={(v) => setForm({ ...form, priceRange: v })}>
+                <Select
+                  value={form.priceRange}
+                  onValueChange={(v) => setForm({ ...form, priceRange: v })}
+                >
                   <SelectTrigger id="p-price" className="w-full">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     {["$", "$$", "$$$", "$$$$"].map((p) => (
-                      <SelectItem key={p} value={p}>{p}</SelectItem>
+                      <SelectItem key={p} value={p}>
+                        {p}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -469,21 +608,44 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
             </div>
             <div className="space-y-2">
               <Label htmlFor="p-address">Address *</Label>
-              <Input id="p-address" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} required />
+              <Input
+                id="p-address"
+                value={form.address}
+                onChange={(e) => setForm({ ...form, address: e.target.value })}
+                required
+              />
             </div>
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="p-phone">Phone</Label>
-                <Input id="p-phone" value={form.phone} onChange={(e) => setForm({ ...form, phone: e.target.value })} />
+                <Input
+                  id="p-phone"
+                  value={form.phone}
+                  onChange={(e) => setForm({ ...form, phone: e.target.value })}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="p-image">Photo URL</Label>
-                <Input id="p-image" value={form.imageUrl} onChange={(e) => setForm({ ...form, imageUrl: e.target.value })} placeholder="https://…" />
+                <Input
+                  id="p-image"
+                  value={form.imageUrl}
+                  onChange={(e) =>
+                    setForm({ ...form, imageUrl: e.target.value })
+                  }
+                  placeholder="https://…"
+                />
               </div>
             </div>
             <div className="space-y-2">
               <Label htmlFor="p-desc">Description</Label>
-              <Textarea id="p-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} rows={3} />
+              <Textarea
+                id="p-desc"
+                value={form.description}
+                onChange={(e) =>
+                  setForm({ ...form, description: e.target.value })
+                }
+                rows={3}
+              />
             </div>
 
             <div>
@@ -493,7 +655,9 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
                   <button
                     key={f.key}
                     type="button"
-                    onClick={() => setFeatures((x) => ({ ...x, [f.key]: !x[f.key] }))}
+                    onClick={() =>
+                      setFeatures((x) => ({ ...x, [f.key]: !x[f.key] }))
+                    }
                     className={cn(
                       "rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                       features[f.key]
@@ -510,7 +674,8 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
             {/* No-show protection */}
             <div>
               <Label htmlFor="p-policy" className="flex items-center gap-1.5">
-                <ShieldCheck className="size-3.5 text-primary" /> Cancellation policy
+                <ShieldCheck className="size-3.5 text-primary" /> Cancellation
+                policy
               </Label>
               <Select
                 value={String(policyHours)}
@@ -521,12 +686,15 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
                 </SelectTrigger>
                 <SelectContent>
                   {POLICY_OPTIONS.map((p) => (
-                    <SelectItem key={p.value} value={String(p.value)}>{p.label}</SelectItem>
+                    <SelectItem key={p.value} value={String(p.value)}>
+                      {p.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
               <p className="mt-1.5 text-xs text-muted-foreground">
-                Shown to diners before they book and when they cancel — helps cut no-shows.
+                Shown to diners before they book and when they cancel — helps
+                cut no-shows.
               </p>
             </div>
 
@@ -536,18 +704,27 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
                 <Users className="size-3.5 text-primary" /> Socialize room
               </Label>
               <p className="mt-1 text-xs text-muted-foreground">
-                Control who can see each other in the Socialize room at your venue.
+                Control who can see each other in the Socialize room at your
+                venue.
               </p>
               <div className="mt-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-sm font-medium">Enable Socialize</p>
-                    <p className="text-xs text-muted-foreground">{t("owner.socializeHint")}</p>
+                    <p className="text-xs text-muted-foreground">
+                      {t("owner.socializeHint")}
+                    </p>
                   </div>
-                  <Switch checked={socEnabled} onCheckedChange={setSocEnabled} />
+                  <Switch
+                    checked={socEnabled}
+                    onCheckedChange={setSocEnabled}
+                    disabled
+                  />
                 </div>
                 {socEnabled && (
-                  <div className="space-y-1.5">                     <Label className="text-xs">{t("owner.minVisits")}</Label>
+                  <div className="space-y-1.5">
+                    {" "}
+                    <Label className="text-xs">{t("owner.minVisits")}</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         type="number"
@@ -556,24 +733,40 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
                         value={socMinVisits}
                         onChange={(e) => setSocMinVisits(e.target.value)}
                         className="h-8 w-20 rounded-lg text-sm"
+                        disabled
                       />
                       <span className="text-xs text-muted-foreground">
-                        {socMinVisitsNum === 0 ? "Any confirmed diner" : `${socMinVisitsNum}+ completed visit${socMinVisitsNum === 1 ? "" : "s"}`}
+                        {socMinVisitsNum === 0
+                          ? "Any confirmed diner"
+                          : `${socMinVisitsNum}+ completed visit${socMinVisitsNum === 1 ? "" : "s"}`}
                       </span>
                     </div>
                     <p className="text-[11px] text-muted-foreground">
-                      Set to 0 so any checked-in diner can be visible. Higher values restrict the room to returning customers.
+                      Set to 0 so any checked-in diner can be visible. Higher
+                      values restrict the room to returning customers.
                     </p>
                   </div>
                 )}
+                <p className="rounded-lg bg-amber-500/10 px-3 py-2 text-[11px] text-amber-700 dark:text-amber-400">
+                  Socialize settings are read-only until atomic blocklist
+                  updates are available.
+                </p>
               </div>
             </div>
 
             {error && (
-              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
             )}
             <Button type="submit" disabled={saving} className="w-full">
-              {saving ? <><Loader2 className="size-4 animate-spin" /> Saving…</> : "Save changes"}
+              {saving ? (
+                <>
+                  <Loader2 className="size-4 animate-spin" /> Saving…
+                </>
+              ) : (
+                "Save changes"
+              )}
             </Button>
           </form>
         </CardContent>
@@ -582,7 +775,15 @@ function OverviewTab({ restaurantId, menuCount }: { restaurantId: string; menuCo
   );
 }
 
-function StatCard({ label, value, icon }: { label: string; value: string; icon: React.ReactNode }) {
+function StatCard({
+  label,
+  value,
+  icon,
+}: {
+  label: string;
+  value: string;
+  icon: React.ReactNode;
+}) {
   return (
     <Card className="rounded-2xl border-border/70 p-3.5 shadow-sm">
       <p className="text-xs text-muted-foreground">{label}</p>
@@ -598,19 +799,41 @@ function StatCard({ label, value, icon }: { label: string; value: string; icon: 
 // Seating: sections CRUD
 // ---------------------------------------------------------------------------
 
-function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections: { _id: string; name: string; kind: Kind; smoking: boolean; capacity: number; description?: string }[] }) {
+function SeatingTab({
+  restaurantId,
+  sections,
+}: {
+  restaurantId: string;
+  sections: {
+    _id: string;
+    name: string;
+    kind: Kind;
+    smoking: boolean;
+    capacity: number;
+    description?: string;
+  }[];
+}) {
   const addSection = useMutation(api.restaurants.addSection);
   const updateSection = useMutation(api.restaurants.updateSection);
   const deleteSection = useMutation(api.restaurants.deleteSection);
 
   const [editingId, setEditingId] = useState<string | null>(null);
   // L-34: hold the raw capacity string so clearing the field doesn't snap to 1.
-  const [form, setForm] = useState({ name: "", kind: "inside" as Kind, smoking: false, capacity: "24", description: "" });
+  const [form, setForm] = useState({
+    name: "",
+    kind: "inside" as Kind,
+    smoking: false,
+    capacity: "24",
+    description: "",
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // KB-15: window.confirm is blocked in the sandboxed preview iframe —
   // confirm destructive deletes with an in-app dialog instead.
-  const [sectionToDelete, setSectionToDelete] = useState<{ id: string; name: string } | null>(null);
+  const [sectionToDelete, setSectionToDelete] = useState<{
+    id: string;
+    name: string;
+  } | null>(null);
   const [deletingSection, setDeletingSection] = useState(false);
 
   const confirmDeleteSection = async () => {
@@ -621,17 +844,32 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
       toast.success("Section deleted");
       setSectionToDelete(null);
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not delete section.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not delete section.",
+      );
     } finally {
       setDeletingSection(false);
     }
   };
 
-  const resetForm = () => setForm({ name: "", kind: "inside", smoking: false, capacity: "24", description: "" });
+  const resetForm = () =>
+    setForm({
+      name: "",
+      kind: "inside",
+      smoking: false,
+      capacity: "24",
+      description: "",
+    });
 
   const startEdit = (s: (typeof sections)[number]) => {
     setEditingId(s._id);
-    setForm({ name: s.name, kind: s.kind, smoking: s.smoking, capacity: String(s.capacity), description: s.description ?? "" });
+    setForm({
+      name: s.name,
+      kind: s.kind,
+      smoking: s.smoking,
+      capacity: String(s.capacity),
+      description: s.description ?? "",
+    });
   };
 
   const handleSave = async (e: React.FormEvent) => {
@@ -672,7 +910,8 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
     }
   };
 
-  const handleDelete = (s: (typeof sections)[number]) => setSectionToDelete({ id: s._id, name: s.name });
+  const handleDelete = (s: (typeof sections)[number]) =>
+    setSectionToDelete({ id: s._id, name: s.name });
 
   return (
     <div className="space-y-4 pb-6">
@@ -685,12 +924,20 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
         {sections.map((s) => {
           const meta = KIND_LABEL[s.kind];
           return (
-            <Card key={s._id} className="rounded-2xl border-border/70 p-4 shadow-sm">
+            <Card
+              key={s._id}
+              className="rounded-2xl border-border/70 p-4 shadow-sm"
+            >
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <p className="font-semibold">{s.name}</p>
-                    <span className={cn("flex size-6 items-center justify-center rounded-lg", meta.cls)}>
+                    <span
+                      className={cn(
+                        "flex size-6 items-center justify-center rounded-lg",
+                        meta.cls,
+                      )}
+                    >
                       <meta.icon className="size-3.5" />
                     </span>
                   </div>
@@ -701,15 +948,32 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
                         <Cigarette className="size-3" /> Smoking
                       </span>
                     )}
-                    <span className="flex items-center gap-1"><Users className="size-3" /> {s.capacity} seats</span>
+                    <span className="flex items-center gap-1">
+                      <Users className="size-3" /> {s.capacity} seats
+                    </span>
                   </p>
-                  {s.description && <p className="mt-1 text-xs text-muted-foreground">{s.description}</p>}
+                  {s.description && (
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {s.description}
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 gap-1">
-                  <Button variant="ghost" size="icon-sm" aria-label="Edit" onClick={() => startEdit(s)}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Edit"
+                    onClick={() => startEdit(s)}
+                  >
                     <Pencil className="size-4" />
                   </Button>
-                  <Button variant="ghost" size="icon-sm" aria-label="Delete" className="text-destructive" onClick={() => handleDelete(s)}>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label="Delete"
+                    className="text-destructive"
+                    onClick={() => handleDelete(s)}
+                  >
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
@@ -721,19 +985,32 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
 
       <Card className="rounded-2xl border-border/70 p-0 shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">{editingId ? "Edit seating area" : "Add seating area"}</CardTitle>
+          <CardTitle className="text-base">
+            {editingId ? "Edit seating area" : "Add seating area"}
+          </CardTitle>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSave} className="space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label htmlFor="s-name">Name *</Label>
-                <Input id="s-name" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Terrace" required />
+                <Input
+                  id="s-name"
+                  value={form.name}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  placeholder="e.g. Terrace"
+                  required
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="s-kind">Zone</Label>
-                <Select value={form.kind} onValueChange={(v) => setForm({ ...form, kind: v as Kind })}>
-                  <SelectTrigger id="s-kind" className="w-full"><SelectValue /></SelectTrigger>
+                <Select
+                  value={form.kind}
+                  onValueChange={(v) => setForm({ ...form, kind: v as Kind })}
+                >
+                  <SelectTrigger id="s-kind" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="inside">Inside</SelectItem>
                     <SelectItem value="outside">Outside</SelectItem>
@@ -749,7 +1026,9 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
                   min={1}
                   max={500}
                   value={form.capacity}
-                  onChange={(e) => setForm({ ...form, capacity: e.target.value })}
+                  onChange={(e) =>
+                    setForm({ ...form, capacity: e.target.value })
+                  }
                 />
               </div>
               <div className="flex items-end pb-1">
@@ -769,18 +1048,40 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
             </div>
             <div className="space-y-2">
               <Label htmlFor="s-desc">Description</Label>
-              <Input id="s-desc" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="e.g. Heated terrace, 8 tables" />
+              <Input
+                id="s-desc"
+                value={form.description}
+                onChange={(e) =>
+                  setForm({ ...form, description: e.target.value })
+                }
+                placeholder="e.g. Heated terrace, 8 tables"
+              />
             </div>
-            {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+            {error && (
+              <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {error}
+              </p>
+            )}
             <div className="flex gap-2">
               <Button type="submit" disabled={saving} className="flex-1">
-                {saving ? <><Loader2 className="size-4 animate-spin" /> Saving…</> : editingId ? "Save changes" : "Add section"}
+                {saving ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Saving…
+                  </>
+                ) : editingId ? (
+                  "Save changes"
+                ) : (
+                  "Add section"
+                )}
               </Button>
               {editingId && (
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => { setEditingId(null); resetForm(); }}
+                  onClick={() => {
+                    setEditingId(null);
+                    resetForm();
+                  }}
                 >
                   Cancel
                 </Button>
@@ -807,7 +1108,9 @@ function SeatingTab({ restaurantId, sections }: { restaurantId: string; sections
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={deletingSection}>Keep it</AlertDialogCancel>
+            <AlertDialogCancel disabled={deletingSection}>
+              Keep it
+            </AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-white hover:bg-destructive/90"
               disabled={deletingSection}
@@ -833,13 +1136,19 @@ function HoursTab({ restaurantId }: { restaurantId: string }) {
   const data = useQuery(api.restaurants.get, { id: restaurantId as never });
   const saveHours = useMutation(api.restaurants.saveHours);
   const [rows, setRows] = useState<HoursRow[]>(
-    DAY_ROWS.map((d) => ({ dayOfWeek: d.dow, open: "17:00", close: "23:00", enabled: false })),
+    DAY_ROWS.map((d) => ({
+      dayOfWeek: d.dow,
+      open: "17:00",
+      close: "23:00",
+      enabled: false,
+    })),
   );
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!data) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- initialize controlled hours from the loaded restaurant.
     setRows(
       DAY_ROWS.map((d) => {
         const h = data.hours.find((x) => x.dayOfWeek === d.dow);
@@ -854,7 +1163,9 @@ function HoursTab({ restaurantId }: { restaurantId: string }) {
   }, [data]);
 
   const patchRow = (dow: number, patch: Partial<HoursRow>) =>
-    setRows((rs) => rs.map((r) => (r.dayOfWeek === dow ? { ...r, ...patch } : r)));
+    setRows((rs) =>
+      rs.map((r) => (r.dayOfWeek === dow ? { ...r, ...patch } : r)),
+    );
 
   const handleSave = async () => {
     setError(null);
@@ -872,18 +1183,23 @@ function HoursTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-4 pb-6">
       <p className="text-sm text-muted-foreground">
-        These hours generate the free-spot ledger for each day. Closed days show as
-        unavailable to diners.
+        These hours generate the free-spot ledger for each day. Closed days show
+        as unavailable to diners.
       </p>
       <Card className="rounded-2xl border-border/70 p-0 shadow-sm">
         <CardContent className="divide-y divide-border/60 p-0">
           {rows.map((row) => {
             const day = DAY_ROWS.find((d) => d.dow === row.dayOfWeek)!;
             return (
-              <div key={row.dayOfWeek} className="flex items-center gap-3 px-4 py-3">
+              <div
+                key={row.dayOfWeek}
+                className="flex items-center gap-3 px-4 py-3"
+              >
                 <button
                   type="button"
-                  onClick={() => patchRow(row.dayOfWeek, { enabled: !row.enabled })}
+                  onClick={() =>
+                    patchRow(row.dayOfWeek, { enabled: !row.enabled })
+                  }
                   className={cn(
                     "flex w-28 shrink-0 items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors",
                     row.enabled
@@ -891,7 +1207,12 @@ function HoursTab({ restaurantId }: { restaurantId: string }) {
                       : "border-border bg-card text-muted-foreground",
                   )}
                 >
-                  <span className={cn("size-2 rounded-full", row.enabled ? "bg-current" : "bg-muted-foreground/40")} />
+                  <span
+                    className={cn(
+                      "size-2 rounded-full",
+                      row.enabled ? "bg-current" : "bg-muted-foreground/40",
+                    )}
+                  />
                   {day.label}
                 </button>
                 {row.enabled ? (
@@ -899,28 +1220,44 @@ function HoursTab({ restaurantId }: { restaurantId: string }) {
                     <Input
                       type="time"
                       value={row.open}
-                      onChange={(e) => patchRow(row.dayOfWeek, { open: e.target.value })}
+                      onChange={(e) =>
+                        patchRow(row.dayOfWeek, { open: e.target.value })
+                      }
                       className="h-9 flex-1"
                     />
                     <span className="text-xs text-muted-foreground">to</span>
                     <Input
                       type="time"
                       value={row.close}
-                      onChange={(e) => patchRow(row.dayOfWeek, { close: e.target.value })}
+                      onChange={(e) =>
+                        patchRow(row.dayOfWeek, { close: e.target.value })
+                      }
                       className="h-9 flex-1"
                     />
                   </div>
                 ) : (
-                  <span className="flex-1 text-xs text-muted-foreground">Closed</span>
+                  <span className="flex-1 text-xs text-muted-foreground">
+                    Closed
+                  </span>
                 )}
               </div>
             );
           })}
         </CardContent>
       </Card>
-      {error && <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">{error}</p>}
+      {error && (
+        <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+          {error}
+        </p>
+      )}
       <Button onClick={handleSave} disabled={saving} className="w-full">
-        {saving ? <><Loader2 className="size-4 animate-spin" /> Saving…</> : "Save weekly hours"}
+        {saving ? (
+          <>
+            <Loader2 className="size-4 animate-spin" /> Saving…
+          </>
+        ) : (
+          "Save weekly hours"
+        )}
       </Button>
     </div>
   );

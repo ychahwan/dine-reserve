@@ -12,7 +12,7 @@
  * console Settings page can change them at runtime without a redeploy.
  */
 
-import { internal } from "./_generated/api";
+import { getSetting, type SettingsReaderCtx } from "./settings";
 
 /** Result of a send attempt. `sent: true` only on an HTTP 2xx. */
 export type TwilioSendResult = {
@@ -38,14 +38,15 @@ export type TwilioSendResult = {
  * Sender ID (e.g. "Beity") routes far more reliably into markets like
  * Lebanon than a raw US long code.
  */
-async function twilioConfig(ctx: { runQuery: (q: any, a: any) => Promise<any> } | undefined) {
+async function twilioConfig(
+  ctx: SettingsReaderCtx | undefined,
+) {
   const env = process.env;
   // Read a value from admin settings if present, else from the environment.
   const setting = async (key: string): Promise<string | undefined> => {
     if (ctx) {
       try {
-        const row = await ctx.runQuery(internal.settings.getSettingDb, { key });
-        if (row?.value) return row.value;
+        return await getSetting(ctx, key);
       } catch {
         // fall through to env
       }
@@ -91,15 +92,17 @@ async function twilioConfig(ctx: { runQuery: (q: any, a: any) => Promise<any> } 
 export async function sendTwilioMessage(
   to: string,
   body: string,
-  ctx?: { runQuery: (q: any, a: any) => Promise<any> },
+  ctx?: SettingsReaderCtx,
 ): Promise<TwilioSendResult> {
   const cfg = await twilioConfig(ctx);
-  if (!cfg) return { sent: false, skipped: true, reason: "twilio not configured" };
+  if (!cfg)
+    return { sent: false, skipped: true, reason: "twilio not configured" };
   // Normalize phone to E.164 format: strip spaces/dashes, ensure + prefix
   if (!to) return { sent: false, skipped: true, reason: "invalid phone" };
   const cleaned = to.replace(/[\s\-()]/g, "");
   to = cleaned.startsWith("+") ? cleaned : "+" + cleaned.replace(/^0+/, "");
-  if (!/^\+\d{8,15}$/.test(to)) return { sent: false, skipped: true, reason: "invalid phone" };
+  if (!/^\+\d{8,15}$/.test(to))
+    return { sent: false, skipped: true, reason: "invalid phone" };
 
   const params = new URLSearchParams();
   params.set("To", to);
@@ -116,15 +119,18 @@ export async function sendTwilioMessage(
     const timer = setTimeout(() => controller.abort(), 10_000);
     let res: Response;
     try {
-      res = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${cfg.accountSid}/Messages.json`, {
-        method: "POST",
-        headers: {
-          Authorization: cfg.authHeader,
-          "Content-Type": "application/x-www-form-urlencoded",
+      res = await fetch(
+        `https://api.twilio.com/2010-04-01/Accounts/${cfg.accountSid}/Messages.json`,
+        {
+          method: "POST",
+          headers: {
+            Authorization: cfg.authHeader,
+            "Content-Type": "application/x-www-form-urlencoded",
+          },
+          body: params,
+          signal: controller.signal,
         },
-        body: params,
-        signal: controller.signal,
-      });
+      );
     } finally {
       clearTimeout(timer);
     }

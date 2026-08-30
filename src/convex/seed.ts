@@ -1,11 +1,16 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, MutationCtx } from "./_generated/server";
+import { internalMutation, mutation, MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ensureSlotsForDate } from "./availability";
 import { applyDemoRules } from "./demoRules";
 import { safeGet } from "./helpers";
-import { DEFAULT_AI_KNOWLEDGE, DEFAULT_AI_SEMANTIC_RULES, DEFAULT_AI_SYSTEM_PROMPT } from "./aiPolicy";
+import {
+  DEFAULT_AI_KNOWLEDGE,
+  DEFAULT_AI_SEMANTIC_RULES,
+  DEFAULT_AI_SYSTEM_PROMPT,
+} from "./aiPolicy";
+import { runStressSeed } from "./stressSeed";
 
 // ---------------------------------------------------------------------------
 // helpers
@@ -30,33 +35,103 @@ const SEED_GIFTS: Record<
   { name: string; emoji: string; description?: string; priceCents: number }[]
 > = {
   Trullo: [
-    { name: "Aperol spritz", emoji: "🍊", description: "Sunset in a glass", priceCents: 900 },
-    { name: "House negroni", emoji: "🥃", description: "Gin, Campari, sweet vermouth", priceCents: 1200 },
-    { name: "Panna cotta", emoji: "🍮", description: "Vanilla bean, berries", priceCents: 800 },
+    {
+      name: "Aperol spritz",
+      emoji: "🍊",
+      description: "Sunset in a glass",
+      priceCents: 900,
+    },
+    {
+      name: "House negroni",
+      emoji: "🥃",
+      description: "Gin, Campari, sweet vermouth",
+      priceCents: 1200,
+    },
+    {
+      name: "Panna cotta",
+      emoji: "🍮",
+      description: "Vanilla bean, berries",
+      priceCents: 800,
+    },
   ],
   "Sakura House": [
-    { name: "Yuzu highball", emoji: "🍋", description: "Yuzu, soda, ice", priceCents: 1100 },
-    { name: "Sake flight", emoji: "🍶", description: "Three pours, chef's pick", priceCents: 1500 },
-    { name: "Mochi trio", emoji: "🍡", description: "Matcha, strawberry, black sesame", priceCents: 700 },
+    {
+      name: "Yuzu highball",
+      emoji: "🍋",
+      description: "Yuzu, soda, ice",
+      priceCents: 1100,
+    },
+    {
+      name: "Sake flight",
+      emoji: "🍶",
+      description: "Three pours, chef's pick",
+      priceCents: 1500,
+    },
+    {
+      name: "Mochi trio",
+      emoji: "🍡",
+      description: "Matcha, strawberry, black sesame",
+      priceCents: 700,
+    },
   ],
   "Beit Zaytoun": [
-    { name: "Rose lemonade", emoji: "🌹", description: "Rosewater, mint, lemon", priceCents: 700 },
-    { name: "Baklava trio", emoji: "🍯", description: "Pistachio, walnut, cashew", priceCents: 800 },
+    {
+      name: "Rose lemonade",
+      emoji: "🌹",
+      description: "Rosewater, mint, lemon",
+      priceCents: 700,
+    },
+    {
+      name: "Baklava trio",
+      emoji: "🍯",
+      description: "Pistachio, walnut, cashew",
+      priceCents: 800,
+    },
   ],
   "La Brasa": [
-    { name: "Margarita", emoji: "🍹", description: "Tequila, lime, salt rim", priceCents: 1000 },
-    { name: "Churros & cajeta", emoji: "🍩", description: "Warm churros, goat-milk caramel", priceCents: 800 },
+    {
+      name: "Margarita",
+      emoji: "🍹",
+      description: "Tequila, lime, salt rim",
+      priceCents: 1000,
+    },
+    {
+      name: "Churros & cajeta",
+      emoji: "🍩",
+      description: "Warm churros, goat-milk caramel",
+      priceCents: 800,
+    },
   ],
   "Meridian Kitchen": [
-    { name: "Rooftop cocktail", emoji: "🍸", description: "Ask the bartender", priceCents: 1100 },
-    { name: "Tasting dessert", emoji: "🍰", description: "Chef's fusion pick", priceCents: 900 },
+    {
+      name: "Rooftop cocktail",
+      emoji: "🍸",
+      description: "Ask the bartender",
+      priceCents: 1100,
+    },
+    {
+      name: "Tasting dessert",
+      emoji: "🍰",
+      description: "Chef's fusion pick",
+      priceCents: 900,
+    },
   ],
 };
 
 /** Fallback list for demo restaurants without a curated set. */
 const DEFAULT_GIFTS = [
-  { name: "House drink", emoji: "🍸", description: "Ask the bartender", priceCents: 900 },
-  { name: "Dessert to share", emoji: "🍰", description: "Chef's pick", priceCents: 800 },
+  {
+    name: "House drink",
+    emoji: "🍸",
+    description: "Ask the bartender",
+    priceCents: 900,
+  },
+  {
+    name: "Dessert to share",
+    emoji: "🍰",
+    description: "Chef's pick",
+    priceCents: 800,
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -64,18 +139,54 @@ const DEFAULT_GIFTS = [
 // ---------------------------------------------------------------------------
 
 const FIRST_NAMES = [
-  "Ava", "Leo", "Mia", "Noah", "Zoe", "Liam", "Emma", "Ethan", "Grace", "Lucas",
-  "Sofia", "Mason", "Chloe", "Oscar", "Ruby", "Felix", "Nora", "Adam", "Ivy", "Owen",
+  "Ava",
+  "Leo",
+  "Mia",
+  "Noah",
+  "Zoe",
+  "Liam",
+  "Emma",
+  "Ethan",
+  "Grace",
+  "Lucas",
+  "Sofia",
+  "Mason",
+  "Chloe",
+  "Oscar",
+  "Ruby",
+  "Felix",
+  "Nora",
+  "Adam",
+  "Ivy",
+  "Owen",
 ];
 const LAST_NAMES = [
-  "Rossi", "Bianchi", "Romano", "Ferrari", "Esposito", "Ricci", "Marino", "Greco",
-  "Conti", "De Luca", "Costa", "Fontana", "Villa", "Rinaldi", "Caruso", "Moretti",
-  "Barbieri", "Santoro", "Mariani", "Serra",
+  "Rossi",
+  "Bianchi",
+  "Romano",
+  "Ferrari",
+  "Esposito",
+  "Ricci",
+  "Marino",
+  "Greco",
+  "Conti",
+  "De Luca",
+  "Costa",
+  "Fontana",
+  "Villa",
+  "Rinaldi",
+  "Caruso",
+  "Moretti",
+  "Barbieri",
+  "Santoro",
+  "Mariani",
+  "Serra",
 ];
 
 function customerName(i: number): string {
   const first = FIRST_NAMES[i % FIRST_NAMES.length];
-  const last = LAST_NAMES[Math.floor(i / FIRST_NAMES.length) % LAST_NAMES.length];
+  const last =
+    LAST_NAMES[Math.floor(i / FIRST_NAMES.length) % LAST_NAMES.length];
   return `${first} ${last}`;
 }
 
@@ -91,25 +202,59 @@ async function runSeed(ctx: MutationCtx) {
   const now = Date.now();
 
   // ----------------------------------------------- users (demo identities)
-  const mkUser = async (name: string, email: string, role?: "owner" | "customer", phone?: string) => {
+  const mkUser = async (
+    name: string,
+    email: string,
+    role?: "owner" | "customer",
+    phone?: string,
+  ) => {
     const id = await ctx.db.insert("users", { name, email, role, phone });
     return id;
   };
   // Demo restaurant owners use @kamix.demo addresses so ownerIsDemoAccount /
   // claimDemo can identify them and a fresh sign-in can take over the venue.
-  const ownerMarco = await mkUser("Marco", "marco@kamix.demo", "owner", "+15550001001");
-  const ownerYuki = await mkUser("Yuki", "yuki@kamix.demo", "owner", "+15550001002");
-  const ownerRania = await mkUser("Rania", "rania@kamix.demo", "owner", "+15550001003");
-  const ownerLuis = await mkUser("Luis", "luis@kamix.demo", "owner", "+15550001004");
-  const ownerNoah = await mkUser("Noah", "noah@kamix.demo", "owner", "+15550001005");
+  const ownerMarco = await mkUser(
+    "Marco",
+    "marco@kamix.demo",
+    "owner",
+    "+15550001001",
+  );
+  const ownerYuki = await mkUser(
+    "Yuki",
+    "yuki@kamix.demo",
+    "owner",
+    "+15550001002",
+  );
+  const ownerRania = await mkUser(
+    "Rania",
+    "rania@kamix.demo",
+    "owner",
+    "+15550001003",
+  );
+  const ownerLuis = await mkUser(
+    "Luis",
+    "luis@kamix.demo",
+    "owner",
+    "+15550001004",
+  );
+  const ownerNoah = await mkUser(
+    "Noah",
+    "noah@kamix.demo",
+    "owner",
+    "+15550001005",
+  );
 
   // ------------------------------------------------- 100 demo customers
   // customers[0] = Ava, customers[1] = Leo (kept as the two "hero" accounts
   // used below for sample bookings / waitlist / reviews); the remaining 98
   // are generated for a realistic customer base.
   const customers: Id<"users">[] = [];
-  customers.push(await mkUser("Ava", "ava@kamix.demo", "customer", "+15550001111"));
-  customers.push(await mkUser("Leo", "leo@kamix.demo", "customer", "+15550002222"));
+  customers.push(
+    await mkUser("Ava", "ava@kamix.demo", "customer", "+15550001111"),
+  );
+  customers.push(
+    await mkUser("Leo", "leo@kamix.demo", "customer", "+15550002222"),
+  );
   for (let i = 2; i < 100; i++) {
     const name = customerName(i);
     const email = `customer${i + 1}@kamix.demo`;
@@ -131,8 +276,17 @@ async function runSeed(ctx: MutationCtx) {
     priceRange: "$$$",
     description:
       "Wood-fired pasta and natural wine in a candle-lit dining room. Ask for the terrace in summer.",
-    imageUrl: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=900&q=70",
-    features: { inside: true, outside: true, bar: true, smoking: false, parking: true, liveMusic: true, soloFriendly: true },
+    imageUrl:
+      "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=900&q=70",
+    features: {
+      inside: true,
+      outside: true,
+      bar: true,
+      smoking: false,
+      parking: true,
+      liveMusic: true,
+      soloFriendly: true,
+    },
     searchText: "",
     createdAt: now,
   });
@@ -147,8 +301,17 @@ async function runSeed(ctx: MutationCtx) {
     priceRange: "$$$$",
     description:
       "Omakase counter and a quiet sake bar. Eight seats at the counter, booked out weeks ahead.",
-    imageUrl: "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=900&q=70",
-    features: { inside: true, outside: false, bar: true, smoking: false, parking: false, liveMusic: false, soloFriendly: true },
+    imageUrl:
+      "https://images.unsplash.com/photo-1579871494447-9811cf80d66c?w=900&q=70",
+    features: {
+      inside: true,
+      outside: false,
+      bar: true,
+      smoking: false,
+      parking: false,
+      liveMusic: false,
+      soloFriendly: true,
+    },
     searchText: "",
     createdAt: now,
   });
@@ -163,8 +326,17 @@ async function runSeed(ctx: MutationCtx) {
     priceRange: "$$",
     description:
       "Family-style mezze on a sun-drenched terrace — hummus, kibbeh, and slow-grilled shawarma.",
-    imageUrl: "https://images.unsplash.com/photo-1544025162-d76694265947?w=900&q=70",
-    features: { inside: true, outside: true, bar: true, smoking: false, parking: false, liveMusic: true, soloFriendly: true },
+    imageUrl:
+      "https://images.unsplash.com/photo-1544025162-d76694265947?w=900&q=70",
+    features: {
+      inside: true,
+      outside: true,
+      bar: true,
+      smoking: false,
+      parking: false,
+      liveMusic: true,
+      soloFriendly: true,
+    },
     searchText: "",
     createdAt: now,
   });
@@ -179,8 +351,17 @@ async function runSeed(ctx: MutationCtx) {
     priceRange: "$$$$",
     description:
       "Wood-fired tacos and mezcal over open flame. Late-night bar section with a smoking terrace.",
-    imageUrl: "https://images.unsplash.com/photo-1600891964092-4316c288032e?w=900&q=70",
-    features: { inside: true, outside: true, bar: true, smoking: true, parking: true, liveMusic: true, soloFriendly: true },
+    imageUrl:
+      "https://images.unsplash.com/photo-1600891964092-4316c288032e?w=900&q=70",
+    features: {
+      inside: true,
+      outside: true,
+      bar: true,
+      smoking: true,
+      parking: true,
+      liveMusic: true,
+      soloFriendly: true,
+    },
     searchText: "",
     createdAt: now,
   });
@@ -195,15 +376,32 @@ async function runSeed(ctx: MutationCtx) {
     priceRange: "$$$",
     description:
       "A rooftop kitchen crossing continents — wagyu burgers, pad thai, and butter chicken under the stars.",
-    imageUrl: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=70",
-    features: { inside: true, outside: true, bar: true, smoking: false, parking: false, liveMusic: true, soloFriendly: true },
+    imageUrl:
+      "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=70",
+    features: {
+      inside: true,
+      outside: true,
+      bar: true,
+      smoking: false,
+      parking: false,
+      liveMusic: true,
+      soloFriendly: true,
+    },
     searchText: "",
     createdAt: now,
   });
 
   for (const r of [trullo, sakura, zaytoun, brasa, meridian]) {
     const doc = await ctx.db.get(r);
-    const searchText = [doc!.name, doc!.cuisine, doc!.city, doc!.neighborhood ?? "", doc!.description ?? ""].join(" ").toLowerCase();
+    const searchText = [
+      doc!.name,
+      doc!.cuisine,
+      doc!.city,
+      doc!.neighborhood ?? "",
+      doc!.description ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
     // no-show protection: Trullo demoes the free-cancel-until policy
     await ctx.db.patch(r, {
       searchText,
@@ -212,30 +410,83 @@ async function runSeed(ctx: MutationCtx) {
   }
 
   // ------------------------------------------------------------- sections
-  const sec = async (restaurantId: string, name: string, kind: "inside" | "outside" | "bar", smoking: boolean, capacity: number) =>
-    ctx.db.insert("sections", { restaurantId: restaurantId as never, name, kind, smoking, capacity });
+  const sec = async (
+    restaurantId: string,
+    name: string,
+    kind: "inside" | "outside" | "bar",
+    smoking: boolean,
+    capacity: number,
+  ) =>
+    ctx.db.insert("sections", {
+      restaurantId: restaurantId as never,
+      name,
+      kind,
+      smoking,
+      capacity,
+    });
 
   const trulloInside = await sec(trullo, "Dining room", "inside", false, 32);
   const trulloTerrace = await sec(trullo, "Terrace", "outside", false, 16);
-  const sakuraCounter = await sec(sakura, "Omakase counter", "inside", false, 12);
+  const sakuraCounter = await sec(
+    sakura,
+    "Omakase counter",
+    "inside",
+    false,
+    12,
+  );
   const sakuraBar = await sec(sakura, "Sake bar", "bar", false, 10);
   const zaytounTerrace = await sec(zaytoun, "Terrace", "outside", false, 24);
   const zaytounDining = await sec(zaytoun, "Dining room", "inside", false, 24);
   const brasaMain = await sec(brasa, "Main hall", "inside", false, 40);
   const brasaTerrace = await sec(brasa, "Smoking terrace", "outside", true, 14);
   const brasaBar = await sec(brasa, "Grill bar", "bar", false, 12);
-  const meridianDining = await sec(meridian, "Dining room", "inside", false, 30);
+  const meridianDining = await sec(
+    meridian,
+    "Dining room",
+    "inside",
+    false,
+    30,
+  );
   const meridianRooftop = await sec(meridian, "Rooftop", "outside", false, 20);
 
   // ---------------------------------------------------------------- hours
-  const hours: { restaurantId: string; dayOfWeek: number; open: string; close: string; enabled: boolean }[] = [];
-  const addHours = (restaurantId: string, dow: number, open: string, close: string, enabled: boolean) =>
-    hours.push({ restaurantId, dayOfWeek: dow, open, close, enabled });
+  const hours: {
+    restaurantId: string;
+    dayOfWeek: number;
+    open: string;
+    close: string;
+    enabled: boolean;
+  }[] = [];
+  const addHours = (
+    restaurantId: string,
+    dow: number,
+    open: string,
+    close: string,
+    enabled: boolean,
+  ) => hours.push({ restaurantId, dayOfWeek: dow, open, close, enabled });
   for (const dow of [0, 1, 2, 3, 4, 5, 6]) {
-    addHours(trullo, dow, dow === 6 || dow === 0 ? "12:00" : "17:30", "23:30", true);
-    addHours(sakura, dow, dow === 6 || dow === 0 ? "12:00" : "18:00", "23:00", true);
+    addHours(
+      trullo,
+      dow,
+      dow === 6 || dow === 0 ? "12:00" : "17:30",
+      "23:30",
+      true,
+    );
+    addHours(
+      sakura,
+      dow,
+      dow === 6 || dow === 0 ? "12:00" : "18:00",
+      "23:00",
+      true,
+    );
     addHours(zaytoun, dow, "12:00", "23:30", true);
-    addHours(brasa, dow, dow === 6 || dow === 0 ? "12:00" : "19:00", "00:30", true);
+    addHours(
+      brasa,
+      dow,
+      dow === 6 || dow === 0 ? "12:00" : "19:00",
+      "00:30",
+      true,
+    );
     addHours(meridian, dow, "12:00", "23:00", true);
   }
   for (const h of hours) await ctx.db.insert("hours", h as never);
@@ -247,8 +498,16 @@ async function runSeed(ctx: MutationCtx) {
   await applyDemoRules(ctx, now);
 
   // ---------------------------------------------------------------- menus
-  const mkMenu = async (restaurantId: string, name: string, description?: string) =>
-    ctx.db.insert("menus", { restaurantId: restaurantId as never, name, description });
+  const mkMenu = async (
+    restaurantId: string,
+    name: string,
+    description?: string,
+  ) =>
+    ctx.db.insert("menus", {
+      restaurantId: restaurantId as never,
+      name,
+      description,
+    });
   const mkItem = async (
     menuId: string,
     restaurantId: string,
@@ -285,14 +544,16 @@ async function runSeed(ctx: MutationCtx) {
   await mkItem(trulloMenu, trullo, "Negroni", 1200, {
     category: "Drinks",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1551538827-9c037cb4f32a?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1551538827-9c037cb4f32a?w=400&q=70",
     tags: ["House-made"],
     ingredients: ["Gin", "Campari", "Sweet vermouth", "Orange peel"],
   });
   await mkItem(trulloMenu, trullo, "Burrata & prosciutto", 1400, {
     category: "Starters",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1628088062854-d1870b4553da?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1628088062854-d1870b4553da?w=400&q=70",
     tags: ["Local"],
     allergens: ["Dairy"],
     ingredients: ["Burrata", "Parma prosciutto", "Rocket", "EVOO"],
@@ -301,7 +562,8 @@ async function runSeed(ctx: MutationCtx) {
     category: "Pasta",
     popular: true,
     description: "Pecorino romano, black pepper, tonnarelli",
-    imageUrl: "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1601050690597-df0568f70950?w=400&q=70",
     tags: ["Vegetarian", "House-made"],
     allergens: ["Gluten", "Dairy"],
     ingredients: ["Tonnarelli", "Pecorino romano", "Black pepper", "Sea salt"],
@@ -314,7 +576,8 @@ async function runSeed(ctx: MutationCtx) {
   });
   await mkItem(trulloMenu, trullo, "Panna cotta", 800, {
     category: "Dessert",
-    imageUrl: "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1488477181946-6428a0291777?w=400&q=70",
     tags: ["Vegetarian", "House-made"],
     allergens: ["Dairy"],
     ingredients: ["Cream", "Vanilla", "Berries"],
@@ -324,7 +587,8 @@ async function runSeed(ctx: MutationCtx) {
   await mkItem(sakuraMenu, sakura, "Nigiri set (8 pcs)", 4200, {
     category: "Sushi",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1579584425555-c3ce17fd4351?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1579584425555-c3ce17fd4351?w=400&q=70",
     tags: ["Chef's special"],
     allergens: ["Fish", "Gluten"],
     ingredients: ["Sushi rice", "Tuna", "Salmon", "Eel", "Soy"],
@@ -352,7 +616,8 @@ async function runSeed(ctx: MutationCtx) {
   await mkItem(zaytounMenu, zaytoun, "Hummus", 700, {
     category: "Mezze",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1615937691194-97dbd3ffcd28?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1615937691194-97dbd3ffcd28?w=400&q=70",
     tags: ["Vegan", "Shareable"],
     ingredients: ["Chickpeas", "Tahini", "Lemon", "Olive oil"],
   });
@@ -385,7 +650,8 @@ async function runSeed(ctx: MutationCtx) {
   await mkItem(brasaMenu, brasa, "Tacos al pastor", 1300, {
     category: "Tacos",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1565299585323-38d6b0865b47?w=400&q=70",
     tags: ["Chef's special", "Grilled"],
     ingredients: ["Pork", "Pineapple", "Onion", "Cilantro", "Corn tortilla"],
   });
@@ -414,11 +680,16 @@ async function runSeed(ctx: MutationCtx) {
     ingredients: ["Tequila", "Lime", "Triple sec"],
   });
 
-  const meridianMenu = await mkMenu(meridian, "Rooftop Fusion", "Global small plates");
+  const meridianMenu = await mkMenu(
+    meridian,
+    "Rooftop Fusion",
+    "Global small plates",
+  );
   await mkItem(meridianMenu, meridian, "Wagyu burger", 2200, {
     category: "Mains",
     popular: true,
-    imageUrl: "https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=70",
+    imageUrl:
+      "https://images.unsplash.com/photo-1550547660-d9450f859349?w=400&q=70",
     tags: ["Chef's special", "Grilled"],
     allergens: ["Gluten", "Dairy"],
     ingredients: ["Wagyu beef", "Brioche bun", "Truffle aioli", "Cheddar"],
@@ -520,13 +791,25 @@ async function runSeed(ctx: MutationCtx) {
   });
 
   // consume the seats those bookings occupy (mirrors createBooking's decrement)
-  const consume = async (slotTime: string, sectionId: string, restaurantId: string, partySize: number) => {
+  const consume = async (
+    slotTime: string,
+    sectionId: string,
+    restaurantId: string,
+    partySize: number,
+  ) => {
     const slots = await ctx.db
       .query("slots")
-      .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId as never).eq("date", today))
+      .withIndex("by_restaurant_date", (q) =>
+        q.eq("restaurantId", restaurantId as never).eq("date", today),
+      )
       .collect();
-    const slot = slots.find((s) => s.sectionId === sectionId && s.time === slotTime);
-    if (slot) await ctx.db.patch(slot._id, { remaining: Math.max(0, slot.remaining - partySize) });
+    const slot = slots.find(
+      (s) => s.sectionId === sectionId && s.time === slotTime,
+    );
+    if (slot)
+      await ctx.db.patch(slot._id, {
+        remaining: Math.max(0, slot.remaining - partySize),
+      });
   };
   await consume("17:30", trulloInside, trullo, 2);
   await consume("18:00", sakuraCounter, sakura, 2);
@@ -536,9 +819,13 @@ async function runSeed(ctx: MutationCtx) {
   // visible right away: Sakura omakase counter, 8:00 PM today.
   const sakuraSlots = await ctx.db
     .query("slots")
-    .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", sakura as never).eq("date", today))
+    .withIndex("by_restaurant_date", (q) =>
+      q.eq("restaurantId", sakura as never).eq("date", today),
+    )
     .collect();
-  const soldOut = sakuraSlots.find((s) => s.sectionId === sakuraCounter && s.time === "20:00");
+  const soldOut = sakuraSlots.find(
+    (s) => s.sectionId === sakuraCounter && s.time === "20:00",
+  );
   if (soldOut) await ctx.db.patch(soldOut._id, { remaining: 0 });
   await ctx.db.insert("waitlist", {
     restaurantId: sakura,
@@ -585,13 +872,31 @@ async function runSeed(ctx: MutationCtx) {
   // A fresh environment starts with a governed semantic layer instead of an
   // empty prompt. Admins can review and modify these records in AI Workspace.
   for (const entry of DEFAULT_AI_KNOWLEDGE) {
-    await ctx.db.insert("aiKnowledge", { ...entry, updatedBy: ownerMarco, updatedAt: now });
+    await ctx.db.insert("aiKnowledge", {
+      ...entry,
+      updatedBy: ownerMarco,
+      updatedAt: now,
+    });
   }
   for (const entry of DEFAULT_AI_SEMANTIC_RULES) {
-    await ctx.db.insert("aiSemanticRules", { ...entry, updatedBy: ownerMarco, updatedAt: now });
+    await ctx.db.insert("aiSemanticRules", {
+      ...entry,
+      updatedBy: ownerMarco,
+      updatedAt: now,
+    });
   }
-  await ctx.db.insert("appSettings", { key: "AI_SYSTEM_PROMPT", value: DEFAULT_AI_SYSTEM_PROMPT, updatedBy: ownerMarco, updatedAt: now });
-  await ctx.db.insert("appSettings", { key: "AI_MODEL", value: "gemini-2.0-flash", updatedBy: ownerMarco, updatedAt: now });
+  await ctx.db.insert("appSettings", {
+    key: "AI_SYSTEM_PROMPT",
+    value: DEFAULT_AI_SYSTEM_PROMPT,
+    updatedBy: ownerMarco,
+    updatedAt: now,
+  });
+  await ctx.db.insert("appSettings", {
+    key: "AI_MODEL",
+    value: "gemini-2.0-flash",
+    updatedBy: ownerMarco,
+    updatedAt: now,
+  });
   await ctx.db.insert("reviews", {
     restaurantId: sakura,
     userId: leo,
@@ -615,7 +920,7 @@ async function runSeed(ctx: MutationCtx) {
   };
 }
 
-export const seed = mutation({
+export const seed = internalMutation({
   args: {},
   handler: runSeed,
 });
@@ -632,11 +937,8 @@ export const seed = mutation({
 export const ensureDemoData = mutation({
   args: {},
   handler: async (ctx) => {
-    const seeded = await runSeed(ctx);
-    if (!seeded.seeded) {
-      await runRetrofit(ctx);
-    }
-    return seeded;
+    const existing = await ctx.db.query("restaurants").first();
+    return { seeded: existing !== null };
   },
 });
 
@@ -658,30 +960,112 @@ const SEED_ITEM_ATTRS: Record<
     spiceLevel?: "mild" | "medium" | "hot" | "very_hot";
   }
 > = {
-  "Negroni": { tags: ["House-made"], ingredients: ["Gin", "Campari", "Sweet vermouth", "Orange peel"] },
-  "Burrata & prosciutto": { tags: ["Local"], allergens: ["Dairy"], ingredients: ["Burrata", "Parma prosciutto", "Rocket", "EVOO"] },
-  "Cacio e pepe": { tags: ["Vegetarian", "House-made"], allergens: ["Gluten", "Dairy"], ingredients: ["Tonnarelli", "Pecorino romano", "Black pepper", "Sea salt"] },
-  "Tagliatelle al ragù": { tags: ["House-made"], allergens: ["Gluten", "Dairy"], ingredients: ["Fresh tagliatelle", "Beef ragù", "Tomato", "Parmesan"] },
+  Negroni: {
+    tags: ["House-made"],
+    ingredients: ["Gin", "Campari", "Sweet vermouth", "Orange peel"],
+  },
+  "Burrata & prosciutto": {
+    tags: ["Local"],
+    allergens: ["Dairy"],
+    ingredients: ["Burrata", "Parma prosciutto", "Rocket", "EVOO"],
+  },
+  "Cacio e pepe": {
+    tags: ["Vegetarian", "House-made"],
+    allergens: ["Gluten", "Dairy"],
+    ingredients: ["Tonnarelli", "Pecorino romano", "Black pepper", "Sea salt"],
+  },
+  "Tagliatelle al ragù": {
+    tags: ["House-made"],
+    allergens: ["Gluten", "Dairy"],
+    ingredients: ["Fresh tagliatelle", "Beef ragù", "Tomato", "Parmesan"],
+  },
   "Panna cotta": { tags: ["Vegetarian", "House-made"], allergens: ["Dairy"] },
-  "Nigiri set (8 pcs)": { tags: ["Chef's special"], allergens: ["Fish", "Gluten"], ingredients: ["Sushi rice", "Tuna", "Salmon", "Eel", "Soy"] },
-  "Salmon sashimi": { tags: ["Raw"], allergens: ["Fish"], ingredients: ["Fresh salmon", "Daikon", "Wasabi", "Soy"] },
+  "Nigiri set (8 pcs)": {
+    tags: ["Chef's special"],
+    allergens: ["Fish", "Gluten"],
+    ingredients: ["Sushi rice", "Tuna", "Salmon", "Eel", "Soy"],
+  },
+  "Salmon sashimi": {
+    tags: ["Raw"],
+    allergens: ["Fish"],
+    ingredients: ["Fresh salmon", "Daikon", "Wasabi", "Soy"],
+  },
   "Miso soup": { tags: ["Vegan"], allergens: ["Soy", "Gluten"] },
-  "Yuzu highball": { tags: ["House-made"], ingredients: ["Yuzu", "Soda", "Ice"] },
-  "Hummus": { tags: ["Vegan", "Shareable"], ingredients: ["Chickpeas", "Tahini", "Lemon", "Olive oil"] },
-  "Tabbouleh": { tags: ["Vegan", "Shareable"], ingredients: ["Parsley", "Bulgur", "Tomato", "Lemon"] },
-  "Kibbeh": { tags: ["Fried"], allergens: ["Gluten"], ingredients: ["Bulgur", "Ground beef", "Pine nuts", "Spices"] },
-  "Chicken shawarma": { tags: ["Grilled"], ingredients: ["Chicken", "Garlic sauce", "Pickles", "Flatbread"] },
-  "Baklava": { tags: ["Vegetarian", "Shareable"], allergens: ["Nuts", "Gluten"], ingredients: ["Phyllo", "Pistachio", "Honey syrup"] },
-  "Tacos al pastor": { tags: ["Chef's special", "Grilled"], ingredients: ["Pork", "Pineapple", "Onion", "Cilantro", "Corn tortilla"] },
-  "Guacamole": { tags: ["Vegan", "Shareable"], ingredients: ["Avocado", "Lime", "Cilantro", "Serrano chile"] },
-  "Elote": { tags: ["Vegetarian", "Spicy"], spiceLevel: "medium", allergens: ["Dairy"], ingredients: ["Grilled corn", "Cotija", "Chili powder", "Lime"] },
-  "Carne asada 400g": { tags: ["Grilled"], ingredients: ["Skirt steak", "Chimichurri", "Charred lime"] },
-  "Margarita": { tags: ["House-made"], ingredients: ["Tequila", "Lime", "Triple sec"] },
-  "Wagyu burger": { tags: ["Chef's special", "Grilled"], allergens: ["Gluten", "Dairy"], ingredients: ["Wagyu beef", "Brioche bun", "Truffle aioli", "Cheddar"] },
-  "Pad thai": { tags: ["Spicy"], spiceLevel: "medium", allergens: ["Peanuts", "Shellfish", "Gluten"], ingredients: ["Rice noodles", "Shrimp", "Peanuts", "Tamarind"] },
-  "Butter chicken curry": { tags: ["Mild spice"], spiceLevel: "mild", allergens: ["Dairy"], ingredients: ["Chicken", "Tomato", "Cream", "Garam masala"] },
-  "Poke bowl": { tags: ["Raw", "Gluten-free"], allergens: ["Fish", "Soy"], ingredients: ["Ahi tuna", "Rice", "Avocado", "Edamame", "Ponzu"] },
-  "Rooftop tiramisu": { tags: ["Vegetarian"], allergens: ["Dairy", "Gluten", "Eggs"], ingredients: ["Mascarpone", "Espresso", "Cocoa", "Ladyfingers"] },
+  "Yuzu highball": {
+    tags: ["House-made"],
+    ingredients: ["Yuzu", "Soda", "Ice"],
+  },
+  Hummus: {
+    tags: ["Vegan", "Shareable"],
+    ingredients: ["Chickpeas", "Tahini", "Lemon", "Olive oil"],
+  },
+  Tabbouleh: {
+    tags: ["Vegan", "Shareable"],
+    ingredients: ["Parsley", "Bulgur", "Tomato", "Lemon"],
+  },
+  Kibbeh: {
+    tags: ["Fried"],
+    allergens: ["Gluten"],
+    ingredients: ["Bulgur", "Ground beef", "Pine nuts", "Spices"],
+  },
+  "Chicken shawarma": {
+    tags: ["Grilled"],
+    ingredients: ["Chicken", "Garlic sauce", "Pickles", "Flatbread"],
+  },
+  Baklava: {
+    tags: ["Vegetarian", "Shareable"],
+    allergens: ["Nuts", "Gluten"],
+    ingredients: ["Phyllo", "Pistachio", "Honey syrup"],
+  },
+  "Tacos al pastor": {
+    tags: ["Chef's special", "Grilled"],
+    ingredients: ["Pork", "Pineapple", "Onion", "Cilantro", "Corn tortilla"],
+  },
+  Guacamole: {
+    tags: ["Vegan", "Shareable"],
+    ingredients: ["Avocado", "Lime", "Cilantro", "Serrano chile"],
+  },
+  Elote: {
+    tags: ["Vegetarian", "Spicy"],
+    spiceLevel: "medium",
+    allergens: ["Dairy"],
+    ingredients: ["Grilled corn", "Cotija", "Chili powder", "Lime"],
+  },
+  "Carne asada 400g": {
+    tags: ["Grilled"],
+    ingredients: ["Skirt steak", "Chimichurri", "Charred lime"],
+  },
+  Margarita: {
+    tags: ["House-made"],
+    ingredients: ["Tequila", "Lime", "Triple sec"],
+  },
+  "Wagyu burger": {
+    tags: ["Chef's special", "Grilled"],
+    allergens: ["Gluten", "Dairy"],
+    ingredients: ["Wagyu beef", "Brioche bun", "Truffle aioli", "Cheddar"],
+  },
+  "Pad thai": {
+    tags: ["Spicy"],
+    spiceLevel: "medium",
+    allergens: ["Peanuts", "Shellfish", "Gluten"],
+    ingredients: ["Rice noodles", "Shrimp", "Peanuts", "Tamarind"],
+  },
+  "Butter chicken curry": {
+    tags: ["Mild spice"],
+    spiceLevel: "mild",
+    allergens: ["Dairy"],
+    ingredients: ["Chicken", "Tomato", "Cream", "Garam masala"],
+  },
+  "Poke bowl": {
+    tags: ["Raw", "Gluten-free"],
+    allergens: ["Fish", "Soy"],
+    ingredients: ["Ahi tuna", "Rice", "Avocado", "Edamame", "Ponzu"],
+  },
+  "Rooftop tiramisu": {
+    tags: ["Vegetarian"],
+    allergens: ["Dairy", "Gluten", "Eggs"],
+    ingredients: ["Mascarpone", "Espresso", "Cocoa", "Ladyfingers"],
+  },
 };
 
 /**
@@ -703,12 +1087,20 @@ async function runRetrofit(ctx: MutationCtx) {
     // identities) rather than real user docs — never crash the retrofit.
     const owner = await safeGet<Doc<"users">>(ctx, r.ownerId);
     const email = owner?.email ?? "";
-    if (!(email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo"))) continue;
+    if (!(email.endsWith("@kamix.demo") || email.endsWith("@seatly.demo")))
+      continue;
 
     // solo-friendly flag (defaults match the current seed)
     if (r.features.soloFriendly === undefined) {
-      const solo = ["Sakura House", "Beit Zaytoun", "La Brasa", "Meridian Kitchen"].includes(r.name);
-      await ctx.db.patch(r._id, { features: { ...r.features, soloFriendly: solo } });
+      const solo = [
+        "Sakura House",
+        "Beit Zaytoun",
+        "La Brasa",
+        "Meridian Kitchen",
+      ].includes(r.name);
+      await ctx.db.patch(r._id, {
+        features: { ...r.features, soloFriendly: solo },
+      });
       patchedRestaurants++;
     }
 
@@ -728,7 +1120,8 @@ async function runRetrofit(ctx: MutationCtx) {
       } = {};
       if (!it.tags && def.tags) patch.tags = def.tags;
       if (!it.allergens && def.allergens) patch.allergens = def.allergens;
-      if (!it.ingredients && def.ingredients) patch.ingredients = def.ingredients;
+      if (!it.ingredients && def.ingredients)
+        patch.ingredients = def.ingredients;
       if (!it.spiceLevel && def.spiceLevel) patch.spiceLevel = def.spiceLevel;
       if (Object.keys(patch).length > 0) {
         await ctx.db.patch(it._id, patch);
@@ -760,7 +1153,7 @@ async function runRetrofit(ctx: MutationCtx) {
   return { patchedRestaurants, patchedItems, patchedGifts };
 }
 
-export const retrofitDemoData = mutation({
+export const retrofitDemoData = internalMutation({
   args: {},
   handler: runRetrofit,
 });
@@ -798,8 +1191,26 @@ const REVIEW_TEXTS = [
 ];
 
 const REVIEWERS = [
-  "Ava", "Leo", "Mia", "Noah", "Zoe", "Liam", "Emma", "Ethan", "Grace", "Lucas",
-  "Sofia", "Mason", "Chloe", "Oscar", "Ruby", "Felix", "Nora", "Adam", "Ivy", "Owen",
+  "Ava",
+  "Leo",
+  "Mia",
+  "Noah",
+  "Zoe",
+  "Liam",
+  "Emma",
+  "Ethan",
+  "Grace",
+  "Lucas",
+  "Sofia",
+  "Mason",
+  "Chloe",
+  "Oscar",
+  "Ruby",
+  "Felix",
+  "Nora",
+  "Adam",
+  "Ivy",
+  "Owen",
 ];
 
 /** Deterministic PRNG so every run produces the same dataset. */
@@ -830,11 +1241,14 @@ function bookingTimeMs(date: string, time: string): number {
 }
 
 /** Pick n distinct items (weighted toward popular) from a menu list. */
-function pickItems<T extends { _id: string; name: string; priceCents: number; popular?: boolean }>(
-  rand: () => number,
-  items: T[],
-  max: number,
-): T[] {
+function pickItems<
+  T extends {
+    _id: string;
+    name: string;
+    priceCents: number;
+    popular?: boolean;
+  },
+>(rand: () => number, items: T[], max: number): T[] {
   if (items.length === 0) return [];
   const weighted = items.flatMap((it) => Array(it.popular ? 3 : 1).fill(it));
   const picked: T[] = [];
@@ -846,14 +1260,16 @@ function pickItems<T extends { _id: string; name: string; priceCents: number; po
     used.add(candidate._id);
     picked.push(candidate);
   }
-  return picked.length > 0 ? picked : [items[Math.floor(rand() * items.length)]!];
+  return picked.length > 0
+    ? picked
+    : [items[Math.floor(rand() * items.length)]!];
 }
 
 /**
  * Generate the realistic history for all demo restaurants. Admin-only (it
  * writes a lot of rows). Safe to re-run — skips restaurants with data.
  */
-export const generateDemoActivity = mutation({
+export const generateDemoActivity = internalMutation({
   args: {},
   handler: async (ctx) => {
     // Admin-only: this writes a lot of rows; diners shouldn't trigger it.
@@ -873,16 +1289,24 @@ export const generateDemoActivity = mutation({
       const owner = await safeGet<Doc<"users">>(ctx, r.ownerId);
       if (owner?.email?.endsWith("@kamix.demo")) demo.push(r);
     }
-    if (demo.length === 0) return { seeded: false, reason: "no demo restaurants" };
+    if (demo.length === 0)
+      return { seeded: false, reason: "no demo restaurants" };
 
     // demo diners = the seeded customer accounts (@kamix.demo)
     const allUsers = await ctx.db.query("users").collect();
     const diners = allUsers.filter(
       (u) => u.email?.endsWith("@kamix.demo") && u.role === "customer",
     );
-    if (diners.length < 5) return { seeded: false, reason: "not enough demo diners" };
+    if (diners.length < 5)
+      return { seeded: false, reason: "not enough demo diners" };
 
-    const totals = { restaurants: 0, bookings: 0, orders: 0, reviews: 0, waitlist: 0 };
+    const totals = {
+      restaurants: 0,
+      bookings: 0,
+      orders: 0,
+      reviews: 0,
+      waitlist: 0,
+    };
 
     for (const r of demo) {
       // idempotency: only generate for restaurants with little/no history
@@ -910,14 +1334,17 @@ export const generateDemoActivity = mutation({
 
       const times: string[] = [];
       for (const h of hours.filter((x) => x.enabled)) {
-        const open = Number(h.open.slice(0, 2)) * 60 + Number(h.open.slice(3, 5));
-        const close = Number(h.close.slice(0, 2)) * 60 + Number(h.close.slice(3, 5));
+        const open =
+          Number(h.open.slice(0, 2)) * 60 + Number(h.open.slice(3, 5));
+        const close =
+          Number(h.close.slice(0, 2)) * 60 + Number(h.close.slice(3, 5));
         for (let m = open + 60; m <= close - 30; m += 30) {
           const t = `${String(Math.floor(m / 60) % 24).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
           if (!times.includes(t)) times.push(t);
         }
       }
-      if (times.length === 0) times.push("19:00", "19:30", "20:00", "20:30", "21:00", "21:30");
+      if (times.length === 0)
+        times.push("19:00", "19:30", "20:00", "20:30", "21:00", "21:30");
 
       let restaurantBookings = 0;
       let restaurantOrders = 0;
@@ -947,13 +1374,23 @@ export const generateDemoActivity = mutation({
           if (status === "cancelled") continue; // cancelled rows add no signal
 
           const diner = diners[Math.floor(rand() * diners.length)]!;
-          const section = sections.length > 0 ? sections[Math.floor(rand() * sections.length)] : null;
+          const section =
+            sections.length > 0
+              ? sections[Math.floor(rand() * sections.length)]
+              : null;
           const time = times[Math.floor(rand() * times.length)]!;
-          const partySize = [1, 2, 2, 2, 3, 3, 4, 4, 5][Math.floor(rand() * 9)]!;
+          const partySize = [1, 2, 2, 2, 3, 3, 4, 4, 5][
+            Math.floor(rand() * 9)
+          ]!;
           const createdOffset = 1 + Math.floor(rand() * 72) * 3600_000; // booked 1h–3d ahead
-          const createdAt = isPast ? bookingTimeMs(date, time) - createdOffset : now - createdOffset;
+          const createdAt = isPast
+            ? bookingTimeMs(date, time) - createdOffset
+            : now - createdOffset;
           const checkedInAt =
-            status === "completed" ? bookingTimeMs(date, time) + Math.floor((rand() - 0.4) * 30 * 60_000) : undefined;
+            status === "completed"
+              ? bookingTimeMs(date, time) +
+                Math.floor((rand() - 0.4) * 30 * 60_000)
+              : undefined;
 
           const code = randomCode(rand);
           const bookingId = await ctx.db.insert("bookings", {
@@ -971,13 +1408,27 @@ export const generateDemoActivity = mutation({
             smoking: section?.smoking,
             status: status as "confirmed" | "completed" | "no_show",
             code,
-            notes: rand() < 0.15 ? "Birthday" : rand() < 0.1 ? "Window table please" : undefined,
-            occasion: rand() < 0.12 ? ["Birthday", "Anniversary", "Date night", "Business"][Math.floor(rand() * 4)] : undefined,
+            notes:
+              rand() < 0.15
+                ? "Birthday"
+                : rand() < 0.1
+                  ? "Window table please"
+                  : undefined,
+            occasion:
+              rand() < 0.12
+                ? ["Birthday", "Anniversary", "Date night", "Business"][
+                    Math.floor(rand() * 4)
+                  ]
+                : undefined,
             createdAt,
-            updatedAt: status === "completed" && checkedInAt ? checkedInAt + 70 * 60_000 : createdAt,
+            updatedAt:
+              status === "completed" && checkedInAt
+                ? checkedInAt + 70 * 60_000
+                : createdAt,
             smsSent: true,
             reminderSent: isPast ? true : undefined,
-            checkedInAt: checkedInAt && checkedInAt > 0 ? checkedInAt : undefined,
+            checkedInAt:
+              checkedInAt && checkedInAt > 0 ? checkedInAt : undefined,
           });
           restaurantBookings++;
 
@@ -991,10 +1442,15 @@ export const generateDemoActivity = mutation({
                 name: it.name,
                 priceCents: it.priceCents,
                 quantity,
-                ingredients: (it.ingredients ?? undefined) as string[] | undefined,
+                ingredients: (it.ingredients ?? undefined) as
+                  | string[]
+                  | undefined,
               };
             });
-            const totalCents = items.reduce((s, it) => s + it.priceCents * it.quantity, 0);
+            const totalCents = items.reduce(
+              (s, it) => s + it.priceCents * it.quantity,
+              0,
+            );
             const orderAt = (checkedInAt ?? createdAt) + 15 * 60_000;
             await ctx.db.insert("dineOrders", {
               bookingId,
@@ -1012,7 +1468,16 @@ export const generateDemoActivity = mutation({
           // verified review for a share of completed visits
           if (status === "completed" && rand() < 0.4) {
             const ratingRoll = rand();
-            const rating = ratingRoll < 0.05 ? 1 : ratingRoll < 0.15 ? 2 : ratingRoll < 0.3 ? 3 : ratingRoll < 0.6 ? 4 : 5;
+            const rating =
+              ratingRoll < 0.05
+                ? 1
+                : ratingRoll < 0.15
+                  ? 2
+                  : ratingRoll < 0.3
+                    ? 3
+                    : ratingRoll < 0.6
+                      ? 4
+                      : 5;
             await ctx.db.insert("reviews", {
               restaurantId: r._id,
               userId: diner._id,
@@ -1030,10 +1495,13 @@ export const generateDemoActivity = mutation({
       const future = daysFromNow(1 + Math.floor(rand() * 3));
       const slots = await ctx.db
         .query("slots")
-        .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", r._id).eq("date", future))
+        .withIndex("by_restaurant_date", (q) =>
+          q.eq("restaurantId", r._id).eq("date", future),
+        )
         .collect();
       const full = slots.filter((s) => s.remaining === 0);
-      const target = full.length > 0 ? full[Math.floor(rand() * full.length)] : null;
+      const target =
+        full.length > 0 ? full[Math.floor(rand() * full.length)] : null;
       if (target) {
         const diner = diners[Math.floor(rand() * diners.length)]!;
         await ctx.db.insert("waitlist", {
@@ -1115,7 +1583,7 @@ async function wipeAll(ctx: MutationCtx) {
 }
 
 /** `npm run wipe` — remove all data, keep the schema and code intact. */
-export const wipeAllData = mutation({
+export const wipeAllData = internalMutation({
   args: {},
   handler: async (ctx) => {
     const deleted = await wipeAll(ctx);
@@ -1130,11 +1598,17 @@ export const wipeAllData = mutation({
  * today/tomorrow, waitlist, and reviews. Always produces a fresh, consistent
  * dataset.
  */
-export const resetData = mutation({
+export const resetData = internalMutation({
   args: {},
   handler: async (ctx) => {
     const deleted = await wipeAll(ctx);
     const seeded = await runSeed(ctx);
     return { deleted, seeded };
   },
+});
+
+/** Backward-compatible CLI target for the existing `seed:stressSeed` script. */
+export const stressSeed = internalMutation({
+  args: {},
+  handler: runStressSeed,
 });

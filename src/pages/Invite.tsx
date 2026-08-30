@@ -97,7 +97,13 @@ export default function Invite() {
         <Card className="overflow-hidden rounded-3xl border-border/70 p-0 shadow-sm">
           <div className="relative h-40 w-full">
             {restaurant?.imageUrl ? (
-              <img src={restaurant.imageUrl} alt={restaurant.name} className="h-full w-full object-cover" />
+              <img
+                src={restaurant.imageUrl}
+                alt={restaurant.name}
+                decoding="async"
+                referrerPolicy="no-referrer"
+                className="h-full w-full object-cover"
+              />
             ) : (
               <div className="flex h-full w-full items-center justify-center bg-primary/10 text-primary">
                 <Store className="size-10" />

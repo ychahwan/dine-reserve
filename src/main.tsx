@@ -17,13 +17,19 @@ const Dashboard = lazy(() => import("./pages/Dashboard.tsx"));
 const SetPassword = lazy(() => import("./pages/SetPassword.tsx"));
 const AdminShell = lazy(() => import("./components/AdminShell.tsx"));
 const AdminDashboard = lazy(() => import("./pages/admin/AdminDashboard.tsx"));
-const AdminRestaurants = lazy(() => import("./pages/admin/AdminRestaurants.tsx"));
-const AdminRestaurantDetail = lazy(() => import("./pages/admin/AdminRestaurantDetail.tsx"));
+const AdminRestaurants = lazy(
+  () => import("./pages/admin/AdminRestaurants.tsx"),
+);
+const AdminRestaurantDetail = lazy(
+  () => import("./pages/admin/AdminRestaurantDetail.tsx"),
+);
 const AdminUsers = lazy(() => import("./pages/admin/AdminUsers.tsx"));
 const AdminUserDetail = lazy(() => import("./pages/admin/AdminUserDetail.tsx"));
 const AdminReviews = lazy(() => import("./pages/admin/AdminReviews.tsx"));
 const AdminAI = lazy(() => import("./pages/admin/AdminAI.tsx"));
-const AdminReviewDetail = lazy(() => import("./pages/admin/AdminReviewDetail.tsx"));
+const AdminReviewDetail = lazy(
+  () => import("./pages/admin/AdminReviewDetail.tsx"),
+);
 const AdminAudit = lazy(() => import("./pages/admin/AdminAudit.tsx"));
 const AdminSettings = lazy(() => import("./pages/admin/AdminSettings.tsx"));
 const AdminRegister = lazy(() => import("./pages/admin/AdminRegister.tsx"));
@@ -65,14 +71,23 @@ class RootErrorBoundary extends React.Component<
   }
   render() {
     if (this.state.hasError) {
+      const isDevelopment = import.meta.env.DEV;
       return (
         <div className="min-h-screen flex items-center justify-center bg-background text-foreground p-6">
           <div className="max-w-lg text-center">
-            <p className="text-sm font-semibold">Preview runtime error</p>
-            <p className="mt-2 text-xs text-muted-foreground break-words">
-              {this.state.message}
+            <p className="text-sm font-semibold">
+              {isDevelopment ? "Preview runtime error" : "Something went wrong"}
             </p>
-            {this.state.stack && (
+            {isDevelopment ? (
+              <p className="mt-2 text-xs text-muted-foreground break-words">
+                {this.state.message}
+              </p>
+            ) : (
+              <p className="mt-2 text-xs text-muted-foreground">
+                Reference: KMX-UI-ROOT
+              </p>
+            )}
+            {isDevelopment && this.state.stack && (
               <pre className="mt-3 text-left text-[10px] leading-4 text-muted-foreground/80 max-h-40 overflow-auto rounded border border-border/60 p-2">
                 {this.state.stack}
               </pre>
@@ -89,7 +104,9 @@ class RootErrorBoundary extends React.Component<
 // when the deployment is missing its Convex URL (L-41).
 const CONVEX_URL = import.meta.env.VITE_CONVEX_URL as string | undefined;
 if (!CONVEX_URL) {
-  throw new Error("VITE_CONVEX_URL is not set — cannot connect to the backend.");
+  throw new Error(
+    "VITE_CONVEX_URL is not set — cannot connect to the backend.",
+  );
 }
 const convex = new ConvexReactClient(CONVEX_URL);
 
@@ -132,124 +149,129 @@ function RouteSyncer() {
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <RootErrorBoundary>        <ConvexAuthProvider client={convex}>
-          <BrowserRouter>
+    <RootErrorBoundary>
+      {" "}
+      <ConvexAuthProvider client={convex}>
+        <BrowserRouter>
           {/* Inside the router so push-tap handlers can use navigate() */}
           <NotificationHandler>
-          <RouteSyncer />
-          <Suspense fallback={<RouteLoading />}>
-            <Routes>
-              <Route path="/" element={<Landing />} />
-              <Route
-                path="/auth"
-                element={<AuthPage redirectAfterAuth="/dashboard" />}
-              />
-              {/* Role router: onboarding → customer / owner workspace */}
-              <Route
-                path="/dashboard"
-                element={
-                  <RequireAuth>
-                    <Dashboard />
-                  </RequireAuth>
-                }
-              />
-              {/* Forced password change for restaurant accounts tagged by admin */}
-              <Route
-                path="/set-password"
-                element={
-                  <RequireAuth>
-                    <SetPassword />
-                  </RequireAuth>
-                }
-              />
-              {/* Platform admin console (role-gated in AdminShell) */}
-              <Route
-                path="/admin"
-                element={
-                  <RequireAuth>
-                    <AdminShell />
-                  </RequireAuth>
-                }
-              >
-                <Route index element={<AdminDashboard />} />
-                <Route path="restaurants" element={<AdminRestaurants />} />
-                <Route path="restaurants/:id" element={<AdminRestaurantDetail />} />
-                <Route path="users" element={<AdminUsers />} />
-                <Route path="users/:id" element={<AdminUserDetail />} />
-                <Route path="reviews" element={<AdminReviews />} />
-                <Route path="reviews/:id" element={<AdminReviewDetail />} />
-                <Route path="ai" element={<AdminAI />} />
-                <Route path="audit" element={<AdminAudit />} />
-                <Route path="settings" element={<AdminSettings />} />
-                <Route path="register" element={<AdminRegister />} />
-                <Route path="tag" element={<AdminTag />} />
-              </Route>
-              {/* Customer app */}
-              <Route
-                path="/explore"
-                element={
-                  <RequireAuth>
-                    <Explore />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/restaurant/:id"
-                element={
-                  <RequireAuth>
-                    <RestaurantDetail />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/bookings"
-                element={
-                  <RequireAuth>
-                    <MyBookings />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/notifications"
-                element={
-                  <RequireAuth>
-                    <Notifications />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/account"
-                element={
-                  <RequireAuth>
-                    <Account />
-                  </RequireAuth>
-                }
-              />
-              {/* Owner app */}
-              <Route
-                path="/owner"
-                element={
-                  <RequireAuth>
-                    <OwnerDashboard />
-                  </RequireAuth>
-                }
-              />
-              <Route
-                path="/owner/restaurant/:id"
-                element={
-                  <RequireAuth>
-                    <OwnerRestaurant />
-                  </RequireAuth>
-                }
-              />
-              {/* Group invites — public on purpose: anonymous visitors view the
+            <RouteSyncer />
+            <Suspense fallback={<RouteLoading />}>
+              <Routes>
+                <Route path="/" element={<Landing />} />
+                <Route
+                  path="/auth"
+                  element={<AuthPage redirectAfterAuth="/dashboard" />}
+                />
+                {/* Role router: onboarding → customer / owner workspace */}
+                <Route
+                  path="/dashboard"
+                  element={
+                    <RequireAuth>
+                      <Dashboard />
+                    </RequireAuth>
+                  }
+                />
+                {/* Forced password change for restaurant accounts tagged by admin */}
+                <Route
+                  path="/set-password"
+                  element={
+                    <RequireAuth>
+                      <SetPassword />
+                    </RequireAuth>
+                  }
+                />
+                {/* Platform admin console (role-gated in AdminShell) */}
+                <Route
+                  path="/admin"
+                  element={
+                    <RequireAuth>
+                      <AdminShell />
+                    </RequireAuth>
+                  }
+                >
+                  <Route index element={<AdminDashboard />} />
+                  <Route path="restaurants" element={<AdminRestaurants />} />
+                  <Route
+                    path="restaurants/:id"
+                    element={<AdminRestaurantDetail />}
+                  />
+                  <Route path="users" element={<AdminUsers />} />
+                  <Route path="users/:id" element={<AdminUserDetail />} />
+                  <Route path="reviews" element={<AdminReviews />} />
+                  <Route path="reviews/:id" element={<AdminReviewDetail />} />
+                  <Route path="ai" element={<AdminAI />} />
+                  <Route path="audit" element={<AdminAudit />} />
+                  <Route path="settings" element={<AdminSettings />} />
+                  <Route path="register" element={<AdminRegister />} />
+                  <Route path="tag" element={<AdminTag />} />
+                </Route>
+                {/* Customer app */}
+                <Route
+                  path="/explore"
+                  element={
+                    <RequireAuth>
+                      <Explore />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/restaurant/:id"
+                  element={
+                    <RequireAuth>
+                      <RestaurantDetail />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/bookings"
+                  element={
+                    <RequireAuth>
+                      <MyBookings />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/notifications"
+                  element={
+                    <RequireAuth>
+                      <Notifications />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/account"
+                  element={
+                    <RequireAuth>
+                      <Account />
+                    </RequireAuth>
+                  }
+                />
+                {/* Owner app */}
+                <Route
+                  path="/owner"
+                  element={
+                    <RequireAuth>
+                      <OwnerDashboard />
+                    </RequireAuth>
+                  }
+                />
+                <Route
+                  path="/owner/restaurant/:id"
+                  element={
+                    <RequireAuth>
+                      <OwnerRestaurant />
+                    </RequireAuth>
+                  }
+                />
+                {/* Group invites — public on purpose: anonymous visitors view the
                   invite first and are sent to /auth only when they confirm
                   (H-22). The backend enforces auth on byCode/confirmGuest. */}
-              <Route path="/invite/:code" element={<Invite />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Suspense>
-        </NotificationHandler>
+                <Route path="/invite/:code" element={<Invite />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Suspense>
+          </NotificationHandler>
         </BrowserRouter>
         <Toaster />
       </ConvexAuthProvider>

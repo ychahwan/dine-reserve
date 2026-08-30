@@ -3,20 +3,22 @@ import { v } from "convex/values";
 import { mutation, query, MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import {
-  ASSIST_STATUS,
   ASSIST_TEMPLATE,
   MENU_REQUEST_STATUS,
-  ORDER_ITEM,
   ORDER_STATUS,
 } from "./schema";
 import { notifyRestaurant } from "./notifications";
 import { safeGet } from "./helpers";
 import { awardPoints, POINTS } from "./loyalty";
 import { assistNoteSchema, menuRequestSchema, parseOrThrow, placeOrderSchema } from "./validation";
+import { checkRateLimit } from "./rateLimit";
 
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
+
+const DINING_LIST_LIMIT = 100;
+const OPEN_COUNT_SCAN_LIMIT = 500;
 
 /** Today's local date as "YYYY-MM-DD". */
 function todayKey(): string {
@@ -180,6 +182,7 @@ export const placeOrder = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to order.");
     const booking = await requireConfirmedBookingParticipant(ctx, userId, bookingId);
+    await checkRateLimit(ctx, { key: "placeOrder", userId, limit: 10, windowMs: 60_000 });
 
     // Zod: non-empty order, ≤50 lines, integer quantities 1–20, capped notes.
     parseOrThrow(placeOrderSchema, { items, note });
@@ -267,15 +270,17 @@ export const myOrders = query({
 
 /** Owner view: every dine-in order for the restaurant, with diner + booking. */
 export const restaurantOrders = query({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
+  args: { restaurantId: v.id("restaurants"), limit: v.optional(v.number()) },
+  handler: async (ctx, { restaurantId, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     if (!(await isOwnerOf(ctx, userId, restaurantId))) return [];
+    const effectiveLimit = Math.min(Math.max(Math.floor(limit ?? DINING_LIST_LIMIT), 1), 200);
     const orders = await ctx.db
       .query("dineOrders")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .order("desc")
+      .take(effectiveLimit);
     const [diners, bookings] = await Promise.all([
       Promise.all(orders.map((o) => safeGet<Doc<"users">>(ctx, o.userId))),
       Promise.all(orders.map((o) => safeGet<Doc<"bookings">>(ctx, o.bookingId))),
@@ -404,12 +409,15 @@ export const billForBooking = query({
       .withIndex("by_booking", (q) => q.eq("bookingId", bookingId))
       .collect();
     const billableGifts = gifts.filter((g) => g.status !== "cancelled");
-    const senders = await Promise.all(
-      billableGifts.map((g) => safeGet<Doc<"users">>(ctx, g.senderUserId)),
-    );
+    const participantIds = [...new Set([
+      ...billable.map((order) => order.userId),
+      ...billableGifts.map((gift) => gift.senderUserId),
+    ])];
+    const participantDocs = await Promise.all(participantIds.map((id) => safeGet<Doc<"users">>(ctx, id)));
+    const participants = new Map(participantIds.map((id, index) => [id, participantDocs[index]]));
     for (let i = 0; i < billableGifts.length; i++) {
       const g = billableGifts[i]!;
-      const senderName = senders[i]?.name ?? "Guest";
+      const senderName = participants.get(g.senderUserId)?.name ?? "Guest";
       linesMap.set(`gift|${g._id}`, {
         _rowId: g._id,
         name: `${g.emoji} ${g.name}`,
@@ -442,7 +450,7 @@ export const billForBooking = query({
         existing.orderCount++;
         existing.subtotalCents += order.totalCents;
       } else {
-        const user = await safeGet<Doc<"users">>(ctx, order.userId);
+        const user = participants.get(order.userId);
         userBreakdown.set(order.userId, {
           userId: order.userId,
           name: user?.name ?? "Guest",
@@ -458,7 +466,7 @@ export const billForBooking = query({
       if (existing) {
         existing.subtotalCents += gift.priceCents;
       } else {
-        const user = await safeGet<Doc<"users">>(ctx, gift.senderUserId);
+        const user = participants.get(gift.senderUserId);
         userBreakdown.set(gift.senderUserId, {
           userId: gift.senderUserId,
           name: user?.name ?? "Guest",
@@ -478,7 +486,6 @@ export const billForBooking = query({
       lines,
       totalCents,
       orderCount: billable.length,
-      orders,
       breakdown, // Per-user split
       paid: false, // payments arrive in a later milestone
     };
@@ -555,6 +562,7 @@ export const sendAssist = mutation({
     if (userId === null) throw new Error("Please sign in.");
     const booking = await requireConfirmedBookingParticipant(ctx, userId, bookingId);
     parseOrThrow(assistNoteSchema, { note });
+    await checkRateLimit(ctx, { key: "sendAssist", userId, limit: 10, windowMs: 60_000 });
 
     const id = await ctx.db.insert("assistRequests", {
       bookingId: booking._id,
@@ -604,15 +612,17 @@ export const myAssists = query({
 
 /** Owner view: every ping for the restaurant, newest first. */
 export const restaurantAssists = query({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
+  args: { restaurantId: v.id("restaurants"), limit: v.optional(v.number()) },
+  handler: async (ctx, { restaurantId, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     if (!(await isOwnerOf(ctx, userId, restaurantId))) return [];
+    const effectiveLimit = Math.min(Math.max(Math.floor(limit ?? DINING_LIST_LIMIT), 1), 200);
     const items = await ctx.db
       .query("assistRequests")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .order("desc")
+      .take(effectiveLimit);
     const [diners, bookings] = await Promise.all([
       Promise.all(items.map((a) => safeGet<Doc<"users">>(ctx, a.userId))),
       Promise.all(items.map((a) => safeGet<Doc<"bookings">>(ctx, a.bookingId))),
@@ -675,7 +685,7 @@ export const cancelAssist = mutation({
 export const createMenuRequest = mutation({
   args: {
     restaurantId: v.id("restaurants"),
-    bookingId: v.optional(v.id("bookings")),
+    bookingId: v.id("bookings"),
     name: v.string(),
     description: v.optional(v.string()),
   },
@@ -683,23 +693,20 @@ export const createMenuRequest = mutation({
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
     parseOrThrow(menuRequestSchema, { name, description });
+    const booking = await requireConfirmedBookingParticipant(ctx, userId, bookingId);
+    await checkRateLimit(ctx, { key: "createMenuRequest", userId, limit: 5, windowMs: 60_000 });
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
     const cleanName = name.trim().slice(0, 100);
-
-    if (bookingId) {
-      const booking = await ctx.db.get(bookingId);
-      if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
-      if (booking.restaurantId !== restaurantId) {
-        throw new Error("That booking isn't at this restaurant.");
-      }
+    if (booking.restaurantId !== restaurantId) {
+      throw new Error("That booking isn't at this restaurant.");
     }
 
     const now = Date.now();
     const id = await ctx.db.insert("menuRequests", {
       restaurantId,
       userId,
-      ...(bookingId ? { bookingId } : {}),
+      bookingId,
       name: cleanName,
       description: description?.trim().slice(0, 400) || undefined,
       status: "new",
@@ -735,15 +742,17 @@ export const myMenuRequests = query({
 
 /** Owner view: every off-menu request, newest first. */
 export const restaurantMenuRequests = query({
-  args: { restaurantId: v.id("restaurants") },
-  handler: async (ctx, { restaurantId }) => {
+  args: { restaurantId: v.id("restaurants"), limit: v.optional(v.number()) },
+  handler: async (ctx, { restaurantId, limit }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
     if (!(await isOwnerOf(ctx, userId, restaurantId))) return [];
+    const effectiveLimit = Math.min(Math.max(Math.floor(limit ?? DINING_LIST_LIMIT), 1), 200);
     const items = await ctx.db
       .query("menuRequests")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .order("desc")
+      .take(effectiveLimit);
     const [diners, bookings] = await Promise.all([
       Promise.all(items.map((m) => (m.userId ? safeGet<Doc<"users">>(ctx, m.userId) : null))),
       Promise.all(items.map((m) => (m.bookingId ? safeGet<Doc<"bookings">>(ctx, m.bookingId) : null))),
@@ -797,9 +806,9 @@ export const openCounts = query({
     if (userId === null) return { orders: 0, assists: 0, menuRequests: 0 };
     if (!(await isOwnerOf(ctx, userId, restaurantId))) return { orders: 0, assists: 0, menuRequests: 0 };
     const [orders, assists, menuRequests] = await Promise.all([
-      ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
-      ctx.db.query("assistRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
-      ctx.db.query("menuRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).filter((q) => q.or(q.eq(q.field("status"), "open"), q.eq(q.field("status"), "preparing"))).take(OPEN_COUNT_SCAN_LIMIT),
+      ctx.db.query("assistRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).filter((q) => q.eq(q.field("status"), "open")).take(OPEN_COUNT_SCAN_LIMIT),
+      ctx.db.query("menuRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).filter((q) => q.or(q.eq(q.field("status"), "new"), q.eq(q.field("status"), "in_progress"))).take(OPEN_COUNT_SCAN_LIMIT),
     ]);
     return {
       orders: orders.filter((o) => o.status === "open" || o.status === "preparing").length,

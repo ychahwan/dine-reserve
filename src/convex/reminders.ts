@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { api, internal } from "./_generated/api";
+import { internal } from "./_generated/api";
 import { internalMutation, internalAction } from "./_generated/server";
 
 /**
@@ -49,14 +49,27 @@ export const scheduleRemindersForDate = internalMutation({
     const confirmed = candidates.filter(
       (b) => b.status === "confirmed" && !b.reminderSent,
     );
+    const restaurantPromises = new Map(
+      [...new Set(confirmed.map((booking) => booking.restaurantId))].map(
+        (restaurantId) => [restaurantId, ctx.db.get(restaurantId)] as const,
+      ),
+    );
+    const restaurants = new Map(
+      await Promise.all(
+        [...restaurantPromises].map(
+          async ([restaurantId, promise]) =>
+            [restaurantId, await promise] as const,
+        ),
+      ),
+    );
 
     let scheduled = 0;
     for (const booking of confirmed) {
       if (!booking.phone) continue; // nothing to text
-      const restaurant = await ctx.db.get(booking.restaurantId);
+      const restaurant = restaurants.get(booking.restaurantId);
       if (!restaurant) continue;
 
-      await ctx.scheduler.runAfter(0, api.sms.sendBookingReminder, {
+      await ctx.scheduler.runAfter(0, internal.sms.sendBookingReminder, {
         to: booking.phone,
         restaurantName: restaurant.name,
         city: restaurant.city,

@@ -11,9 +11,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useAuth } from "@/hooks/use-auth";
 import { api } from "@/convex/_generated/api";
-import { useMutation, useQuery } from "convex/react";
+import { useMutation } from "convex/react";
 import { KeyRound, Loader2, ShieldCheck } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Navigate, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 
@@ -36,10 +36,26 @@ export default function SetPassword() {
 
   // Check if the user already has a password account. If not (OTP-only
   // user tagged as restaurant), the "current password" field is unnecessary.
-  const hasPassword = useQuery(
-    api.users.hasPasswordAccount,
-    user?.phone ? { phone: user.phone } : "skip",
-  );
+  const checkPhoneAccount = useMutation(api.users.checkPhoneAccount);
+  const [hasPassword, setHasPassword] = useState<{ exists: boolean } | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    if (!user?.phone) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- reset async lookup state when the phone changes.
+      setHasPassword(undefined);
+      return;
+    }
+    checkPhoneAccount({ phone: user.phone })
+      .then((res) => {
+        if (!cancelled) setHasPassword(res);
+      })
+      .catch(() => {
+        if (!cancelled) setHasPassword(undefined);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.phone, checkPhoneAccount]);
 
   const showCurrentPassword = hasPassword?.exists === true;
   const passwordStatusLoading = hasPassword === undefined;

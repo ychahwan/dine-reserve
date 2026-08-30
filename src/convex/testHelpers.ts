@@ -22,7 +22,7 @@ export const clearRateLimits = mutation({
 });
 
 /** Wipe rate limits (no auth required). */
-export const wipeRateLimits = mutation({
+export const wipeRateLimits = internalMutation({
   args: {},
   handler: async (ctx) => {
     const rows = await ctx.db.query("rateLimits").collect();
@@ -36,7 +36,7 @@ export const wipeRateLimits = mutation({
  * Deletes ALL auth accounts for the admin phone and recreates them
  * by patching with the correct Scrypt hash.
  */
-export const fixAdminAuth = mutation({
+export const fixAdminAuth = internalMutation({
   args: { password: v.string() },
   handler: async (ctx, { password }) => {
     const phone = "+96176683661";
@@ -94,22 +94,47 @@ const TEST_PASSWORD = "KamixTest2026!";
  * Seed all test accounts (5 customers + 2 owners).
  * Safe to re-run — deletes existing users with matching phones first.
  */
-export const seedAllTestUsers = mutation({
+export const seedAllTestUsers = internalMutation({
   args: {},
   handler: async (ctx) => {
     const accounts = [
       // 5 Customers
-      { phone: "+96171111111", name: "Layla Customer", role: "customer" as const },
-      { phone: "+96172222222", name: "Omar Customer", role: "customer" as const },
-      { phone: "+96173333333", name: "Sara Customer", role: "customer" as const },
-      { phone: "+96174444444", name: "Ali Customer", role: "customer" as const },
-      { phone: "+96175555555", name: "Nour Customer", role: "customer" as const },
+      {
+        phone: "+96171111111",
+        name: "Layla Customer",
+        role: "customer" as const,
+      },
+      {
+        phone: "+96172222222",
+        name: "Omar Customer",
+        role: "customer" as const,
+      },
+      {
+        phone: "+96173333333",
+        name: "Sara Customer",
+        role: "customer" as const,
+      },
+      {
+        phone: "+96174444444",
+        name: "Ali Customer",
+        role: "customer" as const,
+      },
+      {
+        phone: "+96175555555",
+        name: "Nour Customer",
+        role: "customer" as const,
+      },
       // 2 Owners
       { phone: "+96176666666", name: "Bilal Owner", role: "owner" as const },
       { phone: "+96177777777", name: "Rima Owner", role: "owner" as const },
     ];
 
-    const results: { phone: string; name: string; role: string; action: string }[] = [];
+    const results: {
+      phone: string;
+      name: string;
+      role: string;
+      action: string;
+    }[] = [];
 
     for (const acct of accounts) {
       // Delete any existing user with this phone
@@ -128,7 +153,7 @@ export const seedAllTestUsers = mutation({
         const phoneAccounts = await ctx.db
           .query("authAccounts")
           .withIndex("providerAndAccountId", (q) =>
-            q.eq("provider", "password").eq("providerAccountId", acct.phone)
+            q.eq("provider", "password").eq("providerAccountId", acct.phone),
           )
           .collect();
         for (const a of phoneAccounts) await ctx.db.delete(a._id);
@@ -156,7 +181,12 @@ export const seedAllTestUsers = mutation({
         phone: acct.phone,
       });
 
-      results.push({ phone: acct.phone, name: acct.name, role: acct.role, action: "created" });
+      results.push({
+        phone: acct.phone,
+        name: acct.name,
+        role: acct.role,
+        action: "created",
+      });
     }
 
     // Create restaurants for the 2 owners
@@ -170,9 +200,19 @@ export const seedAllTestUsers = mutation({
         neighborhood: "Hamra",
         phone: "+96176666666",
         priceRange: "$$",
-        description: "Authentic Lebanese grilled meats and mezze in the heart of Hamra.",
-        imageUrl: "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=900&q=70",
-        features: { inside: true, outside: true, bar: true, smoking: false, parking: false, liveMusic: false, soloFriendly: true },
+        description:
+          "Authentic Lebanese grilled meats and mezze in the heart of Hamra.",
+        imageUrl:
+          "https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=900&q=70",
+        features: {
+          inside: true,
+          outside: true,
+          bar: true,
+          smoking: false,
+          parking: false,
+          liveMusic: false,
+          soloFriendly: true,
+        },
       },
       {
         ownerPhone: "+96177777777",
@@ -183,9 +223,19 @@ export const seedAllTestUsers = mutation({
         neighborhood: "Gemmayze",
         phone: "+96177777777",
         priceRange: "$$$",
-        description: "Wood-fired pizza and handmade pasta with a Mediterranean twist.",
-        imageUrl: "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=70",
-        features: { inside: true, outside: true, bar: false, smoking: false, parking: true, liveMusic: true, soloFriendly: false },
+        description:
+          "Wood-fired pizza and handmade pasta with a Mediterranean twist.",
+        imageUrl:
+          "https://images.unsplash.com/photo-1414235077428-338989a2e8c0?w=900&q=70",
+        features: {
+          inside: true,
+          outside: true,
+          bar: false,
+          smoking: false,
+          parking: true,
+          liveMusic: true,
+          soloFriendly: false,
+        },
       },
     ];
 
@@ -203,7 +253,12 @@ export const seedAllTestUsers = mutation({
         .filter((q) => q.eq(q.field("ownerId"), owner._id))
         .first();
       if (existing) {
-        results.push({ phone: r.ownerPhone, name: r.name, role: "owner", action: "restaurant-exists" });
+        results.push({
+          phone: r.ownerPhone,
+          name: r.name,
+          role: "owner",
+          action: "restaurant-exists",
+        });
         continue;
       }
 
@@ -219,7 +274,9 @@ export const seedAllTestUsers = mutation({
         description: r.description,
         imageUrl: r.imageUrl,
         features: r.features,
-        searchText: [r.name, r.cuisine, r.city, r.neighborhood, r.description].join(" ").toLowerCase(),
+        searchText: [r.name, r.cuisine, r.city, r.neighborhood, r.description]
+          .join(" ")
+          .toLowerCase(),
         createdAt: Date.now(),
       });
 
@@ -232,7 +289,12 @@ export const seedAllTestUsers = mutation({
         smoking: false,
       });
 
-      results.push({ phone: r.ownerPhone, name: r.name, role: "owner", action: "restaurant-created" });
+      results.push({
+        phone: r.ownerPhone,
+        name: r.name,
+        role: "owner",
+        action: "restaurant-created",
+      });
     }
 
     return { accounts: results, password: TEST_PASSWORD };
@@ -260,7 +322,7 @@ export const fixAdminUser = internalMutation({
     const passwordAccount = await ctx.db
       .query("authAccounts")
       .withIndex("providerAndAccountId", (q) =>
-        q.eq("provider", "password").eq("providerAccountId", phone)
+        q.eq("provider", "password").eq("providerAccountId", phone),
       )
       .first();
     if (passwordAccount) await ctx.db.patch(passwordAccount._id, { userId });
@@ -268,11 +330,14 @@ export const fixAdminUser = internalMutation({
     const otpAccount = await ctx.db
       .query("authAccounts")
       .withIndex("providerAndAccountId", (q) =>
-        q.eq("provider", "phone-otp").eq("providerAccountId", phone)
+        q.eq("provider", "phone-otp").eq("providerAccountId", phone),
       )
       .first();
     if (otpAccount) await ctx.db.patch(otpAccount._id, { userId });
 
-    return { userId, linked: { password: !!passwordAccount, otp: !!otpAccount } };
+    return {
+      userId,
+      linked: { password: !!passwordAccount, otp: !!otpAccount },
+    };
   },
 });

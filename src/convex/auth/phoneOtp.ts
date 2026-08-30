@@ -1,7 +1,20 @@
 import { Phone } from "@convex-dev/auth/providers/Phone";
 import { RandomReader, generateRandomString } from "@oslojs/crypto/random";
+import type { FunctionArgs, FunctionReference } from "convex/server";
 import { internal } from "../_generated/api";
 import { sendTwilioMessage } from "../twilio";
+import { assertOtpCode } from "../sms";
+import type { SettingsReaderCtx } from "../settings";
+
+/** Minimal shape of a MutationCtx needed to run the OTP-send rate limit. */
+type RateLimitCtx = {
+  runMutation: <
+    Mutation extends FunctionReference<"mutation", "public" | "internal">,
+  >(
+    ref: Mutation,
+    args: FunctionArgs<Mutation>,
+  ) => Promise<void>;
+};
 
 /**
  * Generate a 6-digit numeric verification token.
@@ -18,18 +31,15 @@ export async function generateOtpToken(): Promise<string> {
 }
 
 /**
- * H-11 (partial mitigation): per-phone rate limit on OTP *sends* so an
- * attacker cannot spam codes (or flood a victim's phone) via repeated
- * signIn attempts. The remaining gap is that token *verification* itself
- * is handled inside @convex-dev/auth with no attempt counter — a 6-digit
- * code within its validity window is still brute-forceable in theory;
- * mitigated by the short TTL below and the send cap. Documented tradeoff:
- * fixing it requires either upstream support or a custom credentials flow.
- * The backing limiter lives in rateLimit.ts (slash-free module path so the
- * generated `internal` API exposes it type-safely).
+ * Sending is limited per destination and deployment-wide. Verification is
+ * bounded by @convex-dev/auth's authRateLimits implementation, which records
+ * each failed code attempt by identifier before returning from the auth store.
+ * The installed API exposes its threshold only on the top-level convexAuth
+ * config, outside provider hooks; the shorter challenge below further limits
+ * exposure without replacing the library's atomic verification flow.
  */
 export async function enforceOtpSendRateLimit(
-  ctx: { runMutation: (ref: any, args: any) => Promise<any> },
+  ctx: RateLimitCtx,
   phone: string,
 ): Promise<void> {
   await ctx.runMutation(internal.rateLimit.checkOtpSendRateLimit, { phone });
@@ -46,15 +56,16 @@ export async function enforceOtpSendRateLimit(
 export async function sendOtpSms(
   phone: string,
   token: string,
-  ctx?: { runQuery: (q: any, args: any) => Promise<any> },
+  ctx?: SettingsReaderCtx,
 ): Promise<void> {
-  const body = `Your Kamix verification code is: ${token}. It expires in 10 minutes.`;
+  assertOtpCode(token);
+  const body = `Your Kamix verification code is: ${token}. It expires in 5 minutes.`;
   await sendTwilioMessage(phone, body, ctx);
 }
 
 export const phoneOtp = Phone({
   id: "phone-otp",
-  maxAge: 60 * 10, // 10 minutes (H-11: shorter window shrinks brute-force time)
+  maxAge: 60 * 5,
   generateVerificationToken: generateOtpToken,
   async sendVerificationRequest({ identifier: phone, token }, ctx) {
     await enforceOtpSendRateLimit(ctx, phone);

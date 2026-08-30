@@ -2,7 +2,6 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { internalMutation, mutation, query } from "./_generated/server";
 import { internal } from "./_generated/api";
-import type { Id } from "./_generated/dataModel";
 import { attemptBooking, type BookingArgs } from "./bookings";
 import { bookingArgsSchema, parseOrThrow } from "./validation";
 
@@ -35,6 +34,7 @@ const QUEUE_ARGS = {
 
 /** M-4: cap on a single user's simultaneously queued requests (flood guard). */
 const MAX_ACTIVE_QUEUED_PER_USER = 10;
+const QUEUE_HISTORY_LIMIT = 50;
 
 /** Join the booking queue for a slot. Returns the queue entry + line position. */
 export const enqueue = mutation({
@@ -72,7 +72,11 @@ export const enqueue = mutation({
     // part of the key. Re-requesting the same slot with a different size
     // patches the existing entry instead of double-queuing (processSlot would
     // otherwise book both entries).
-    const mine = await ctx.db.query("bookingQueue").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
+    const mine = await ctx.db
+      .query("bookingQueue")
+      .withIndex("by_user", (q) => q.eq("userId", userId))
+      .filter((q) => q.eq(q.field("status"), "queued"))
+      .take(MAX_ACTIVE_QUEUED_PER_USER + 1);
     const dup = mine.find(
       (e) =>
         e.status === "queued" &&
@@ -95,7 +99,8 @@ export const enqueue = mutation({
       const sameSlot = await ctx.db
         .query("bookingQueue")
         .withIndex("by_slot", (q) => q.eq("restaurantId", args.restaurantId).eq("date", args.date).eq("time", args.time))
-        .collect();
+        .filter((q) => q.eq(q.field("status"), "queued"))
+        .take(1_000);
       const position = sameSlot.filter((e) => e.status === "queued" && e.createdAt <= dup.createdAt).length;
       return { entry: await ctx.db.get(dup._id), position };
     }
@@ -129,7 +134,8 @@ export const enqueue = mutation({
     const sameSlot = await ctx.db
       .query("bookingQueue")
       .withIndex("by_slot", (q) => q.eq("restaurantId", args.restaurantId).eq("date", args.date).eq("time", args.time))
-      .collect();
+      .filter((q) => q.eq(q.field("status"), "queued"))
+      .take(1_000);
     const position = sameSlot.filter((e) => e.status === "queued" && e.createdAt <= createdAt).length;
 
     return { entry: await ctx.db.get(entryId), position };
@@ -151,20 +157,23 @@ const TERMINAL_RETENTION_MS = 48 * 60 * 60 * 1000;
 export const processSlot = internalMutation({
   args: { restaurantId: v.id("restaurants"), date: v.string(), time: v.string() },
   handler: async (ctx, { restaurantId, date, time }) => {
-    const entries = await ctx.db
+    const queued = await ctx.db
       .query("bookingQueue")
       .withIndex("by_slot", (q) => q.eq("restaurantId", restaurantId).eq("date", date).eq("time", time))
-      .collect();
+      .filter((q) => q.eq(q.field("status"), "queued"))
+      .order("asc")
+      .take(DRAIN_BATCH + 1);
 
-    // L-8: archive old terminal rows so repeated scans stay small.
     const staleCutoff = Date.now() - TERMINAL_RETENTION_MS;
+    const stale = await ctx.db
+      .query("bookingQueue")
+      .withIndex("by_slot", (q) => q.eq("restaurantId", restaurantId).eq("date", date).eq("time", time))
+      .filter((q) => q.and(q.neq(q.field("status"), "queued"), q.lt(q.field("processedAt"), staleCutoff)))
+      .take(DRAIN_BATCH);
     await Promise.all(
-      entries
-        .filter((e) => e.status !== "queued" && (e.processedAt ?? 0) < staleCutoff)
-        .map((e) => ctx.db.delete(e._id)),
+      stale.map((e) => ctx.db.delete(e._id)),
     );
 
-    const queued = entries.filter((e) => e.status === "queued").sort((a, b) => a.createdAt - b.createdAt);
     const batch = queued.slice(0, DRAIN_BATCH);
 
     for (const entry of batch) {
@@ -217,7 +226,7 @@ export const myEntries = query({
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
-    const entries = await ctx.db.query("bookingQueue").withIndex("by_user", (q) => q.eq("userId", userId)).collect();
+    const entries = await ctx.db.query("bookingQueue").withIndex("by_user", (q) => q.eq("userId", userId)).order("desc").take(QUEUE_HISTORY_LIMIT);
     const restaurants = await Promise.all(entries.map((e) => ctx.db.get(e.restaurantId)));
     return entries
       .map((e, i) => ({

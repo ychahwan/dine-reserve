@@ -4,6 +4,11 @@ import { query, QueryCtx } from "./_generated/server";
 import type { Id } from "./_generated/dataModel";
 import { dateSchema, parseOrThrow } from "./validation";
 
+const MAX_ANALYTICS_ROWS = 5000;
+const MAX_ORDER_ROWS = 1000;
+const PREDICTION_HISTORY_DAYS = 12 * 7;
+const MAX_PREDICTION_ROWS = 5000;
+
 // ---------------------------------------------------------------------------
 // Idea #3 — Real-time wait time intelligence
 //
@@ -14,7 +19,11 @@ import { dateSchema, parseOrThrow } from "./validation";
 // Reported as a rolling average per restaurant; nothing is fabricated.
 // ---------------------------------------------------------------------------
 
-async function isOwnerOf(ctx: QueryCtx, userId: string, restaurantId: Id<"restaurants">) {
+async function isOwnerOf(
+  ctx: QueryCtx,
+  userId: string,
+  restaurantId: Id<"restaurants">,
+) {
   const restaurant = await ctx.db.get(restaurantId);
   return !!restaurant && restaurant.ownerId === userId;
 }
@@ -50,7 +59,7 @@ export const waitTimes = query({
       .withIndex("by_restaurant_date", (q) =>
         q.eq("restaurantId", restaurantId).gte("date", cutoffKey),
       )
-      .collect();
+      .take(MAX_ANALYTICS_ROWS);
     const window = bookings.filter((b) => b.status !== "cancelled");
 
     const lateDelays: number[] = [];
@@ -69,17 +78,26 @@ export const waitTimes = query({
         const dayKey = `${new Date(b.checkedInAt).getFullYear()}-${String(new Date(b.checkedInAt).getMonth() + 1).padStart(2, "0")}-${String(new Date(b.checkedInAt).getDate()).padStart(2, "0")}`;
         if (dayKey === b.date) {
           const bookedMin = minutesOf(b.time);
-          const arrivedMin = new Date(b.checkedInAt).getHours() * 60 + new Date(b.checkedInAt).getMinutes();
+          const arrivedMin =
+            new Date(b.checkedInAt).getHours() * 60 +
+            new Date(b.checkedInAt).getMinutes();
           lateDelays.push(arrivedMin - bookedMin);
         }
       }
       // seat time: check-in → completed (updatedAt is the status-change stamp)
-      if (b.checkedInAt && b.status === "completed" && b.updatedAt > b.checkedInAt) {
+      if (
+        b.checkedInAt &&
+        b.status === "completed" &&
+        b.updatedAt > b.checkedInAt
+      ) {
         seatTimes.push(Math.round((b.updatedAt - b.checkedInAt) / 60_000));
       }
     }
 
-    const avg = (xs: number[]) => (xs.length > 0 ? Math.round(xs.reduce((a, x) => a + x, 0) / xs.length) : null);
+    const avg = (xs: number[]) =>
+      xs.length > 0
+        ? Math.round(xs.reduce((a, x) => a + x, 0) / xs.length)
+        : null;
     const late = avg(lateDelays);
     const seat = avg(seatTimes);
 
@@ -126,19 +144,28 @@ export const publicWaitSignal = query({
       .withIndex("by_restaurant_date", (q) =>
         q.eq("restaurantId", restaurantId).gte("date", cutoffKey),
       )
-      .collect();
+      .take(MAX_ANALYTICS_ROWS);
     const window = bookings.filter((b) => b.status !== "cancelled");
     const seatTimes: number[] = [];
     for (const b of window) {
-      if (b.checkedInAt && b.status === "completed" && b.updatedAt > b.checkedInAt) {
+      if (
+        b.checkedInAt &&
+        b.status === "completed" &&
+        b.updatedAt > b.checkedInAt
+      ) {
         seatTimes.push(Math.round((b.updatedAt - b.checkedInAt) / 60_000));
       }
     }
     if (seatTimes.length < 3) return null; // not enough data — don't guess
-    const avg = Math.round(seatTimes.reduce((a, x) => a + x, 0) / seatTimes.length);
+    const avg = Math.round(
+      seatTimes.reduce((a, x) => a + x, 0) / seatTimes.length,
+    );
     return {
       avgSeatMinutes: avg,
-      label: avg >= 90 ? `~${Math.round(avg / 60)}h${avg % 60 ? ` ${avg % 60}m` : ""} visits` : `~${avg} min visits`,
+      label:
+        avg >= 90
+          ? `~${Math.round(avg / 60)}h${avg % 60 ? ` ${avg % 60}m` : ""} visits`
+          : `~${avg} min visits`,
     };
   },
 });
@@ -170,19 +197,33 @@ export const analytics2 = query({
     // M-21: ranged query on by_restaurant_date (see waitTimes); orders keep
     // the by_restaurant scan — dineOrders has no date index to range on.
     const [bookings, orders] = await Promise.all([
-      ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).gte("date", cutoffKey)).collect(),
-      ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
+      ctx.db
+        .query("bookings")
+        .withIndex("by_restaurant_date", (q) =>
+          q.eq("restaurantId", restaurantId).gte("date", cutoffKey),
+        )
+        .take(MAX_ANALYTICS_ROWS),
+      ctx.db
+        .query("dineOrders")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+        .order("desc")
+        .take(MAX_ORDER_ROWS),
     ]);
     const window = bookings.filter((b) => b.status !== "cancelled");
-    const validOrders = orders.filter((o) => o.status !== "cancelled");
+    const cutoffTime = cutoff.getTime();
+    const validOrders = orders.filter(
+      (o) => o.status !== "cancelled" && o.createdAt >= cutoffTime,
+    );
 
     // ── repeat rate: diners with >1 visit in window ────────────────────────
     const visitsByUser = new Map<string, number>();
-    for (const b of window) visitsByUser.set(b.userId, (visitsByUser.get(b.userId) ?? 0) + 1);
+    for (const b of window)
+      visitsByUser.set(b.userId, (visitsByUser.get(b.userId) ?? 0) + 1);
     let repeaters = 0;
     for (const n of visitsByUser.values()) if (n > 1) repeaters++;
     const uniqueDiners = visitsByUser.size;
-    const repeatRate = uniqueDiners > 0 ? Math.round((repeaters / uniqueDiners) * 100) : 0;
+    const repeatRate =
+      uniqueDiners > 0 ? Math.round((repeaters / uniqueDiners) * 100) : 0;
 
     // ── heatmap: day-of-week × hour ────────────────────────────────────────
     const heat: { day: number; hour: number; covers: number }[] = [];
@@ -200,9 +241,16 @@ export const analytics2 = query({
     heat.sort((a, b) => a.day - b.day || a.hour - b.hour);
 
     // ── top diners by visits ───────────────────────────────────────────────
-    const spendByUser = new Map<string, { visits: number; covers: number; spendCents: number }>();
+    const spendByUser = new Map<
+      string,
+      { visits: number; covers: number; spendCents: number }
+    >();
     for (const b of window) {
-      const cur = spendByUser.get(b.userId) ?? { visits: 0, covers: 0, spendCents: 0 };
+      const cur = spendByUser.get(b.userId) ?? {
+        visits: 0,
+        covers: 0,
+        spendCents: 0,
+      };
       cur.visits += 1;
       cur.covers += b.partySize;
       spendByUser.set(b.userId, cur);
@@ -229,11 +277,15 @@ export const analytics2 = query({
       .slice(0, 10);
 
     // ── revenue: avg spend per cover, projected covers → revenue ──────────
-    const seatedCovers = window.reduce((s, b) => s + (b.status === "completed" ? b.partySize : 0), 0);
+    const seatedCovers = window.reduce(
+      (s, b) => s + (b.status === "completed" ? b.partySize : 0),
+      0,
+    );
     const revenueCents = validOrders.reduce((s, o) => s + o.totalCents, 0);
     const avgSpendPerCoverCents =
       seatedCovers > 0 ? Math.round(revenueCents / seatedCovers) : 0;
-    const projectedRevenueCents = window.reduce((s, b) => s + b.partySize, 0) * avgSpendPerCoverCents;
+    const projectedRevenueCents =
+      window.reduce((s, b) => s + b.partySize, 0) * avgSpendPerCoverCents;
 
     return {
       rangeDays: lookback,
@@ -269,30 +321,85 @@ export const predict = query({
 
     const targetDow = new Date(`${date}T00:00:00`).getDay();
 
-    // Historical baseline: same weekday over the last 12 weeks.
-    const histories: { booked: number; capacity: number }[] = [];
-    for (let w = 1; w <= 12; w++) {
-      const d = new Date(`${date}T00:00:00`);
-      d.setDate(d.getDate() - w * 7);
-      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-      const [bookings, sections, slots] = await Promise.all([
-        ctx.db.query("bookings").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", key)).collect(),
-        ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId)).collect(),
-        ctx.db.query("slots").withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", key)).collect(),
+    // One cached range read per table replaces 12 rounds of three queries.
+    const start = new Date(`${date}T00:00:00`);
+    start.setDate(start.getDate() - PREDICTION_HISTORY_DAYS);
+    const startKey = `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, "0")}-${String(start.getDate()).padStart(2, "0")}`;
+    const historyKeys = new Set<string>();
+    for (let offset = 7; offset <= PREDICTION_HISTORY_DAYS; offset += 7) {
+      const historicalDate = new Date(`${date}T00:00:00`);
+      historicalDate.setDate(historicalDate.getDate() - offset);
+      historyKeys.add(
+        `${historicalDate.getFullYear()}-${String(historicalDate.getMonth() + 1).padStart(2, "0")}-${String(historicalDate.getDate()).padStart(2, "0")}`,
+      );
+    }
+    const [bookings, sections, slots] = await Promise.all([
+      ctx.db
+        .query("bookings")
+        .withIndex("by_restaurant_date", (q) =>
+          q
+            .eq("restaurantId", restaurantId)
+            .gte("date", startKey)
+            .lt("date", date),
+        )
+        .take(MAX_PREDICTION_ROWS),
+      ctx.db
+        .query("sections")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+        .take(100),
+      ctx.db
+        .query("slots")
+        .withIndex("by_restaurant_date", (q) =>
+          q
+            .eq("restaurantId", restaurantId)
+            .gte("date", startKey)
+            .lt("date", date),
+        )
+        .take(MAX_PREDICTION_ROWS),
+    ]);
+    const bookingsByDate = new Map<string, typeof bookings>();
+    const slotsByDate = new Map<string, typeof slots>();
+    for (const booking of bookings) {
+      if (!historyKeys.has(booking.date)) continue;
+      bookingsByDate.set(booking.date, [
+        ...(bookingsByDate.get(booking.date) ?? []),
+        booking,
       ]);
+    }
+    for (const slot of slots) {
+      if (!historyKeys.has(slot.date)) continue;
+      slotsByDate.set(slot.date, [...(slotsByDate.get(slot.date) ?? []), slot]);
+    }
+
+    const histories: { booked: number; capacity: number }[] = [];
+    for (const key of historyKeys) {
+      const dateBookings = bookingsByDate.get(key) ?? [];
+      const dateSlots = slotsByDate.get(key) ?? [];
       const capacity =
-        slots.length > 0
-          ? slots.reduce((s, sl) => s + sl.total, 0)
+        dateSlots.length > 0
+          ? dateSlots.reduce((s, slot) => s + slot.total, 0)
           : sections.reduce((s, sec) => s + sec.capacity, 0);
-      const booked = bookings.filter((b) => b.status !== "cancelled").reduce((s, b) => s + b.partySize, 0);
+      const booked = dateBookings
+        .filter((b) => b.status !== "cancelled")
+        .reduce((s, b) => s + b.partySize, 0);
       if (capacity > 0) histories.push({ booked, capacity });
     }
 
-    if (histories.length === 0) return { date, dow: targetDow, sampleWeeks: 0, likelySoldOut: null, message: "Not enough history to predict yet." };
+    if (histories.length === 0)
+      return {
+        date,
+        dow: targetDow,
+        sampleWeeks: 0,
+        likelySoldOut: null,
+        message: "Not enough history to predict yet.",
+      };
 
     const avgDensity =
-      histories.reduce((s, h) => s + h.booked / h.capacity, 0) / histories.length;
-    const soldOutProb = Math.round(Math.min(0.97, Math.max(0.03, avgDensity * 1.15)) * 100);
+      histories.reduce((s, h) => s + h.booked / h.capacity, 0) /
+      histories.length;
+    const soldOutProb = Math.round(
+      Math.min(0.97, Math.max(0.03, avgDensity * 1.15)) * 100,
+    );
 
     return {
       date,

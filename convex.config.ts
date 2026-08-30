@@ -9,7 +9,7 @@ const app = defineApp();
 // keep stale grid slots, so diners see times the restaurant never defined
 // (e.g. Sakura House showing 30-min slots instead of fixed omakase seatings).
 //
-// This cron calls `demoRules:ensureDemoRules` every day at 06:50 UTC. The first
+// This cron calls the internal retrofit every day at 06:50 UTC. The first
 // run (minutes after this deployment) applies the demo service windows to any
 // demo restaurant that has none and rebuilds its upcoming availability; every
 // later run is a no-op (the retrofit guard skips configured restaurants), so it
@@ -17,7 +17,7 @@ const app = defineApp();
 app.crons.cron(
   "demo-rules-retrofit",
   { hourUTC: 6, minuteUTC: 50 },
-  "demoRules:ensureDemoRules",
+  "demoRules:ensureDemoRulesForCron",
 );
 
 // Day-before booking reminders: every day at 10:00 UTC this sends an SMS

@@ -1,6 +1,11 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { internalMutation, mutation, query, MutationCtx } from "./_generated/server";
+import {
+  internalMutation,
+  mutation,
+  query,
+  MutationCtx,
+} from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 
 // ---------------------------------------------------------------------------
@@ -37,7 +42,9 @@ export async function awardPoints(
   // idempotency: a per-user ledger row exists per source
   const existing = await ctx.db
     .query("loyaltyLedger")
-    .withIndex("by_user_source", (q) => q.eq("userId", opts.userId).eq("sourceId", opts.sourceId))
+    .withIndex("by_user_source", (q) =>
+      q.eq("userId", opts.userId).eq("sourceId", opts.sourceId),
+    )
     .first();
   if (existing) return;
   await ctx.db.insert("loyaltyLedger", {
@@ -60,23 +67,30 @@ export const myBalance = query({
   args: {},
   handler: async (ctx) => {
     const userId = await getAuthUserId(ctx);
-    if (userId === null) return { points: 0, activity: [] as { _id: string; amount: number; source: string; createdAt: number }[] };
+    if (userId === null)
+      return {
+        points: 0,
+        activity: [] as {
+          _id: string;
+          amount: number;
+          source: string;
+          createdAt: number;
+        }[],
+      };
     const user = await ctx.db.get(userId as Id<"users">);
     const entries = await ctx.db
       .query("loyaltyLedger")
       .withIndex("by_user", (q) => q.eq("userId", userId as Id<"users">))
-      .collect();
+      .order("desc")
+      .take(20);
     return {
       points: user?.points ?? 0,
-      activity: entries
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .slice(0, 20)
-        .map((e) => ({
-          _id: e._id,
-          amount: e.amount,
-          source: e.source,
-          createdAt: e.createdAt,
-        })),
+      activity: entries.map((e) => ({
+        _id: e._id,
+        amount: e.amount,
+        source: e.source,
+        createdAt: e.createdAt,
+      })),
     };
   },
 });
@@ -103,7 +117,12 @@ export const leaderboard = query({
       .filter((q) => q.gt(q.field("points"), 0))
       .take(MAX_SCAN);
     return users
-      .map((u) => ({ _id: u._id, name: u.name ?? "Diner", phone: u.phone, points: u.points ?? 0 }))
+      .map((u) => ({
+        _id: u._id,
+        name: u.name ?? "Diner",
+        phone: u.phone,
+        points: u.points ?? 0,
+      }))
       .sort((a, b) => b.points - a.points)
       .slice(0, Math.min(limit ?? 25, 100));
   },

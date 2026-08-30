@@ -4,6 +4,10 @@ import { query, QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
 
+const ADMIN_LIST_LIMIT = 200;
+const ADMIN_DETAIL_LIMIT = 500;
+const ADMIN_OVERVIEW_LIMIT = 5000;
+
 /**
  * Read-only platform-admin views. Every query here is gated by requireAdmin so
  * only the platform admin (role === "admin") can enumerate restaurants, users,
@@ -23,7 +27,8 @@ function summarizeReviews(reviews: Doc<"reviews">[]) {
   const count = reviews.length;
   const avg =
     count > 0
-      ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / count) * 10) / 10
+      ? Math.round((reviews.reduce((s, r) => s + r.rating, 0) / count) * 10) /
+        10
       : 0;
   return { avg, count };
 }
@@ -61,11 +66,11 @@ export const overview = query({
   handler: async (ctx) => {
     await requireAdmin(ctx);
     const [restaurants, users, bookings, orders, reviews] = await Promise.all([
-      ctx.db.query("restaurants").collect(),
-      ctx.db.query("users").collect(),
-      ctx.db.query("bookings").collect(),
-      ctx.db.query("dineOrders").collect(),
-      ctx.db.query("reviews").collect(),
+      ctx.db.query("restaurants").take(ADMIN_OVERVIEW_LIMIT),
+      ctx.db.query("users").take(ADMIN_OVERVIEW_LIMIT),
+      ctx.db.query("bookings").take(ADMIN_OVERVIEW_LIMIT),
+      ctx.db.query("dineOrders").take(ADMIN_OVERVIEW_LIMIT),
+      ctx.db.query("reviews").take(ADMIN_OVERVIEW_LIMIT),
     ]);
 
     // M-17: revenue counts only completed orders — open/preparing/served are
@@ -81,7 +86,10 @@ export const overview = query({
         admin: users.filter((u) => u.role === "admin").length,
         owner: users.filter((u) => u.role === "owner").length,
         customer: users.filter((u) => u.role === "customer").length,
-        other: users.filter((u) => u.role !== "admin" && u.role !== "owner" && u.role !== "customer").length,
+        other: users.filter(
+          (u) =>
+            u.role !== "admin" && u.role !== "owner" && u.role !== "customer",
+        ).length,
       },
       bookings: bookings.length,
       bookingsByStatus: {
@@ -106,15 +114,26 @@ export const listRestaurants = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const restaurants = await ctx.db.query("restaurants").collect();
+    const restaurants = await ctx.db
+      .query("restaurants")
+      .take(ADMIN_LIST_LIMIT);
 
     const rows = await Promise.all(
       restaurants.map(async (r) => {
         const owner = await safeGet<Doc<"users">>(ctx, r.ownerId);
         const [reviews, bookings, orders] = await Promise.all([
-          ctx.db.query("reviews").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
-          ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
-          ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id)).collect(),
+          ctx.db
+            .query("reviews")
+            .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+            .take(ADMIN_DETAIL_LIMIT),
+          ctx.db
+            .query("bookings")
+            .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+            .take(ADMIN_DETAIL_LIMIT),
+          ctx.db
+            .query("dineOrders")
+            .withIndex("by_restaurant", (q) => q.eq("restaurantId", r._id))
+            .take(ADMIN_DETAIL_LIMIT),
         ]);
         // M-17: completed orders only (see overview).
         const revenueCents = orders
@@ -146,32 +165,89 @@ export const restaurantDetail = query({
     if (!restaurant) return null;
 
     const owner = await safeGet<Doc<"users">>(ctx, restaurant.ownerId);
-    const [sections, hours, menus, bookings, orders, reviews, notifications, assists, menuRequests, gifts] =
-      await Promise.all([
-        ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("menus").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("bookings").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("dineOrders").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("reviews").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("notifications").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("assistRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("menuRequests").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-        ctx.db.query("giftDeliveries").withIndex("by_restaurant", (q) => q.eq("restaurantId", id)).collect(),
-      ]);
+    const [
+      sections,
+      hours,
+      menus,
+      bookings,
+      orders,
+      reviews,
+      notifications,
+      assists,
+      menuRequests,
+      gifts,
+    ] = await Promise.all([
+      ctx.db
+        .query("sections")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("hours")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("menus")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("bookings")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("dineOrders")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("reviews")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("notifications")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("assistRequests")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("menuRequests")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("giftDeliveries")
+        .withIndex("by_restaurant", (q) => q.eq("restaurantId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+    ]);
 
-    const bookingUserNames = await userNames(ctx, bookings.map((b) => b.userId));
-    const orderUserNames = await userNames(ctx, orders.map((o) => o.userId));
-    const reviewUserNames = await userNames(ctx, reviews.map((r) => r.userId));
+    const bookingUserNames = await userNames(
+      ctx,
+      bookings.map((b) => b.userId),
+    );
+    const orderUserNames = await userNames(
+      ctx,
+      orders.map((o) => o.userId),
+    );
+    const reviewUserNames = await userNames(
+      ctx,
+      reviews.map((r) => r.userId),
+    );
 
     const bookingsView = bookings
-      .map((b) => ({ ...b, userName: bookingUserNames.get(b.userId) ?? "Diner" }))
-      .sort((a, b) => `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`));
+      .map((b) => ({
+        ...b,
+        userName: bookingUserNames.get(b.userId) ?? "Diner",
+      }))
+      .sort((a, b) =>
+        `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`),
+      );
     const ordersView = orders
       .map((o) => ({ ...o, userName: orderUserNames.get(o.userId) ?? "Diner" }))
       .sort((a, b) => b.createdAt - a.createdAt);
     const reviewsView = reviews
-      .map((r) => ({ ...r, authorName: reviewUserNames.get(r.userId) ?? "Diner" }))
+      .map((r) => ({
+        ...r,
+        authorName: reviewUserNames.get(r.userId) ?? "Diner",
+      }))
       .sort((a, b) => b.createdAt - a.createdAt);
 
     // time-to-resolve for assist requests (createdAt → resolvedAt)
@@ -208,22 +284,35 @@ export const listUsers = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const users = await ctx.db.query("users").collect();
+    const users = await ctx.db.query("users").take(ADMIN_LIST_LIMIT);
 
     const rows = await Promise.all(
       users.map(async (u) => {
         const [bookings, orders, reviews] = await Promise.all([
-          ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", u._id)).collect(),
-          ctx.db.query("dineOrders").withIndex("by_user", (q) => q.eq("userId", u._id)).collect(),
-          ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", u._id)).collect(),
+          ctx.db
+            .query("bookings")
+            .withIndex("by_user", (q) => q.eq("userId", u._id))
+            .take(ADMIN_DETAIL_LIMIT),
+          ctx.db
+            .query("dineOrders")
+            .withIndex("by_user", (q) => q.eq("userId", u._id))
+            .take(ADMIN_DETAIL_LIMIT),
+          ctx.db
+            .query("reviews")
+            .withIndex("by_user", (q) => q.eq("userId", u._id))
+            .take(ADMIN_DETAIL_LIMIT),
         ]);
         // M-17: completed orders only (see overview).
         const totalSpendCents = orders
           .filter((o) => o.status === "completed")
           .reduce((s, o) => s + o.totalCents, 0);
-        const owned = u.role === "owner" || u.role === "admin"
-          ? await ctx.db.query("restaurants").withIndex("by_owner", (q) => q.eq("ownerId", u._id)).collect()
-          : [];
+        const owned =
+          u.role === "owner" || u.role === "admin"
+            ? await ctx.db
+                .query("restaurants")
+                .withIndex("by_owner", (q) => q.eq("ownerId", u._id))
+                .take(ADMIN_DETAIL_LIMIT)
+            : [];
         return {
           ...u,
           bookingCount: bookings.length,
@@ -247,22 +336,66 @@ export const userDetail = query({
     const user = await ctx.db.get(id);
     if (!user) return null;
 
-    const [bookings, orders, reviews, assists, menuRequests, giftsSent, giftsReceived, owned] =
-      await Promise.all([
-        ctx.db.query("bookings").withIndex("by_user", (q) => q.eq("userId", id)).collect(),
-        ctx.db.query("dineOrders").withIndex("by_user", (q) => q.eq("userId", id)).collect(),
-        ctx.db.query("reviews").withIndex("by_user", (q) => q.eq("userId", id)).collect(),
-        ctx.db.query("assistRequests").withIndex("by_user", (q) => q.eq("userId", id)).collect(),
-        ctx.db.query("menuRequests").withIndex("by_user", (q) => q.eq("userId", id)).collect(),
-        ctx.db.query("giftDeliveries").withIndex("by_sender", (q) => q.eq("senderUserId", id)).collect(),
-        ctx.db.query("giftDeliveries").withIndex("by_receiver", (q) => q.eq("receiverUserId", id)).collect(),
-        ctx.db.query("restaurants").withIndex("by_owner", (q) => q.eq("ownerId", id)).collect(),
-      ]);
+    const [
+      bookings,
+      orders,
+      reviews,
+      assists,
+      menuRequests,
+      giftsSent,
+      giftsReceived,
+      owned,
+    ] = await Promise.all([
+      ctx.db
+        .query("bookings")
+        .withIndex("by_user", (q) => q.eq("userId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("dineOrders")
+        .withIndex("by_user", (q) => q.eq("userId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("reviews")
+        .withIndex("by_user", (q) => q.eq("userId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("assistRequests")
+        .withIndex("by_user", (q) => q.eq("userId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("menuRequests")
+        .withIndex("by_user", (q) => q.eq("userId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("giftDeliveries")
+        .withIndex("by_sender", (q) => q.eq("senderUserId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("giftDeliveries")
+        .withIndex("by_receiver", (q) => q.eq("receiverUserId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+      ctx.db
+        .query("restaurants")
+        .withIndex("by_owner", (q) => q.eq("ownerId", id))
+        .take(ADMIN_DETAIL_LIMIT),
+    ]);
 
-    const bookingRestaurants = await restaurantNames(ctx, bookings.map((b) => b.restaurantId));
-    const orderRestaurants = await restaurantNames(ctx, orders.map((o) => o.restaurantId));
-    const reviewRestaurants = await restaurantNames(ctx, reviews.map((r) => r.restaurantId));
-    const assistRestaurants = await restaurantNames(ctx, assists.map((a) => a.restaurantId));
+    const bookingRestaurants = await restaurantNames(
+      ctx,
+      bookings.map((b) => b.restaurantId),
+    );
+    const orderRestaurants = await restaurantNames(
+      ctx,
+      orders.map((o) => o.restaurantId),
+    );
+    const reviewRestaurants = await restaurantNames(
+      ctx,
+      reviews.map((r) => r.restaurantId),
+    );
+    const assistRestaurants = await restaurantNames(
+      ctx,
+      assists.map((a) => a.restaurantId),
+    );
     const giftRestaurants = await restaurantNames(ctx, [
       ...giftsSent.map((g) => g.restaurantId),
       ...giftsReceived.map((g) => g.restaurantId),
@@ -271,13 +404,24 @@ export const userDetail = query({
     return {
       user,
       bookings: bookings
-        .map((b) => ({ ...b, restaurantName: bookingRestaurants.get(b.restaurantId) ?? "Unknown" }))
-        .sort((a, b) => `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`)),
+        .map((b) => ({
+          ...b,
+          restaurantName: bookingRestaurants.get(b.restaurantId) ?? "Unknown",
+        }))
+        .sort((a, b) =>
+          `${b.date}T${b.time}`.localeCompare(`${a.date}T${a.time}`),
+        ),
       orders: orders
-        .map((o) => ({ ...o, restaurantName: orderRestaurants.get(o.restaurantId) ?? "Unknown" }))
+        .map((o) => ({
+          ...o,
+          restaurantName: orderRestaurants.get(o.restaurantId) ?? "Unknown",
+        }))
         .sort((a, b) => b.createdAt - a.createdAt),
       reviews: reviews
-        .map((r) => ({ ...r, restaurantName: reviewRestaurants.get(r.restaurantId) ?? "Unknown" }))
+        .map((r) => ({
+          ...r,
+          restaurantName: reviewRestaurants.get(r.restaurantId) ?? "Unknown",
+        }))
         .sort((a, b) => b.createdAt - a.createdAt),
       assists: assists
         .map((a) => ({
@@ -288,10 +432,16 @@ export const userDetail = query({
         .sort((a, b) => b.createdAt - a.createdAt),
       menuRequests: menuRequests.sort((a, b) => b.createdAt - a.createdAt),
       giftsSent: giftsSent
-        .map((g) => ({ ...g, restaurantName: giftRestaurants.get(g.restaurantId) ?? "Unknown" }))
+        .map((g) => ({
+          ...g,
+          restaurantName: giftRestaurants.get(g.restaurantId) ?? "Unknown",
+        }))
         .sort((a, b) => b.createdAt - a.createdAt),
       giftsReceived: giftsReceived
-        .map((g) => ({ ...g, restaurantName: giftRestaurants.get(g.restaurantId) ?? "Unknown" }))
+        .map((g) => ({
+          ...g,
+          restaurantName: giftRestaurants.get(g.restaurantId) ?? "Unknown",
+        }))
         .sort((a, b) => b.createdAt - a.createdAt),
       ownedRestaurants: owned.map((r) => ({ _id: r._id, name: r.name })),
     };
@@ -306,9 +456,15 @@ export const listReviews = query({
   args: {},
   handler: async (ctx) => {
     await requireAdmin(ctx);
-    const reviews = await ctx.db.query("reviews").collect();
-    const names = await userNames(ctx, reviews.map((r) => r.userId));
-    const rnames = await restaurantNames(ctx, reviews.map((r) => r.restaurantId));
+    const reviews = await ctx.db.query("reviews").take(ADMIN_LIST_LIMIT);
+    const names = await userNames(
+      ctx,
+      reviews.map((r) => r.userId),
+    );
+    const rnames = await restaurantNames(
+      ctx,
+      reviews.map((r) => r.restaurantId),
+    );
     return reviews
       .map((r) => ({
         ...r,
@@ -316,5 +472,29 @@ export const listReviews = query({
         restaurantName: rnames.get(r.restaurantId) ?? "Unknown",
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
+  },
+});
+
+/**
+ * Single-review counterpart to listReviews (OX-M-32): admin detail pages
+ * previously had to fetch the whole reviews list just to find one row.
+ * Enriches identically to listReviews (authorName, restaurantName) but for
+ * one review, returning null if it doesn't exist.
+ */
+export const reviewById = query({
+  args: { reviewId: v.id("reviews") },
+  handler: async (ctx, { reviewId }) => {
+    await requireAdmin(ctx);
+    const review = await ctx.db.get(reviewId);
+    if (!review) return null;
+    const [names, rnames] = await Promise.all([
+      userNames(ctx, [review.userId]),
+      restaurantNames(ctx, [review.restaurantId]),
+    ]);
+    return {
+      ...review,
+      authorName: names.get(review.userId) ?? "Diner",
+      restaurantName: rnames.get(review.restaurantId) ?? "Unknown",
+    };
   },
 });

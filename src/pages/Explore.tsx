@@ -25,7 +25,7 @@ import {
   MapPinned,
   type LucideIcon,
 } from "lucide-react";
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
@@ -170,6 +170,31 @@ export default function Explore() {
     () => new Set((favorites ?? []).map((r) => r._id)),
     [favorites],
   );
+
+  // L-23: filter once per render (was previously filtered twice — once for
+  // the empty-state length check, once for the rendered list).
+  const pickerResults = useMemo(() => {
+    if (!visible) return [];
+    const query = pickerQuery.trim().toLowerCase();
+    if (!query) return visible;
+    return visible.filter(
+      (r) =>
+        r.name.toLowerCase().includes(query) ||
+        (r.city ?? "").toLowerCase().includes(query) ||
+        (r.neighborhood ?? "").toLowerCase().includes(query),
+    );
+  }, [visible, pickerQuery]);
+
+  // H-05: batched lookup so RestaurantCard can reuse already-fetched
+  // restaurant fields (name/image/cuisine/city/...) instead of opening a
+  // fresh per-card subscription for data we already have in memory.
+  const restaurantById = useMemo(() => {
+    const map = new Map<string, NonNullable<typeof searchWithFilters>[number]>();
+    for (const r of searchWithFilters ?? []) map.set(r._id, r);
+    for (const r of favorites ?? []) map.set(r._id, r as NonNullable<typeof searchWithFilters>[number]);
+    return map;
+  }, [searchWithFilters, favorites]);
+
 
   // Discovery rails only show in the unfiltered "browse" state.
   const hasActiveFilters = !!(
@@ -336,30 +361,13 @@ export default function Explore() {
               </div>
             ) : (
               <div className="-mx-1 max-h-72 overflow-y-auto px-1">
-                {visible.filter((r) => {
-                  const q = pickerQuery.trim().toLowerCase();
-                  if (!q) return true;
-                  return (
-                    r.name.toLowerCase().includes(q) ||
-                    (r.city ?? "").toLowerCase().includes(q) ||
-                    (r.neighborhood ?? "").toLowerCase().includes(q)
-                  );
-                }).length === 0 ? (
+                {pickerResults.length === 0 ? (
                   <p className="py-6 text-center text-sm text-muted-foreground">
                     {t("walkin.pickEmpty")}
                   </p>
                 ) : (
                   <div className="space-y-1.5">
-                    {visible
-                      .filter((r) => {
-                        const q = pickerQuery.trim().toLowerCase();
-                        if (!q) return true;
-                        return (
-                          r.name.toLowerCase().includes(q) ||
-                          (r.city ?? "").toLowerCase().includes(q) ||
-                          (r.neighborhood ?? "").toLowerCase().includes(q)
-                        );
-                      })
+                    {pickerResults
                       .map((r) => (
                         <button
                           key={r._id}
@@ -514,7 +522,16 @@ export default function Explore() {
                 <Card key={r._id} className="group overflow-hidden rounded-2xl border-border/70 p-0">
                   <Link to={cardLink(r._id)} className="flex items-center gap-3 p-3">
                     {r.imageUrl ? (
-                      <img src={r.imageUrl} alt={r.name} className="size-14 shrink-0 rounded-xl object-cover" />
+                      <img
+                        src={r.imageUrl}
+                        alt={r.name}
+                        width={56}
+                        height={56}
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        className="size-14 shrink-0 rounded-xl object-cover"
+                      />
                     ) : (
                       <div className="flex size-14 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary">
                         <Store className="size-6" />
@@ -555,6 +572,7 @@ export default function Explore() {
                 <RestaurantCard
                   key={id}
                   id={id}
+                  restaurant={restaurantById.get(id)}
                   to={cardLink(id)}
                   summary={summaryMap.get(id)}
                   date={quickDate}
@@ -581,7 +599,14 @@ export default function Explore() {
                 >
                   <div className="relative flex h-20 w-full items-center justify-center overflow-hidden bg-gradient-to-br from-primary/20 via-primary/5 to-card">
                     {s.restaurant?.imageUrl ? (
-                      <img src={s.restaurant.imageUrl} alt="" className="absolute inset-0 h-full w-full object-cover opacity-40" />
+                        <img
+                        src={s.restaurant.imageUrl}
+                        alt=""
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        className="absolute inset-0 h-full w-full object-cover opacity-40"
+                      />
                     ) : null}
                     <span className="relative text-2xl">{s.emoji ?? "🍽️"}</span>
                   </div>
@@ -608,6 +633,7 @@ export default function Explore() {
                 <RestaurantCard
                   key={id}
                   id={id}
+                  restaurant={restaurantById.get(id)}
                   to={cardLink(id)}
                   summary={summaryMap.get(id)}
                   date={quickDate}
@@ -660,6 +686,7 @@ export default function Explore() {
               <RestaurantCard
                 key={r._id}
                 id={r._id}
+                restaurant={r}
                 to={cardLink(r._id)}
                 summary={summaryMap.get(r._id)}
                 date={quickDate}
@@ -685,10 +712,37 @@ export default function Explore() {
   );
 }
 
-/** Card loads its own (lightweight) data so search results re-render cheaply. */
-// PERF-FIX: Wrapped in React.memo to prevent unnecessary re-renders on parent state changes
+/**
+ * H-05: cards no longer open subscriptions unconditionally for every row in
+ * an unbounded grid. The base render (image/name/city/cuisine/price/tags)
+ * reuses restaurant data already fetched in bulk by `restaurants.search` /
+ * favorites (passed in as `restaurant`) when available, so it paints
+ * instantly with stable dimensions and no extra query. The two remaining
+ * per-card queries — `restaurants.card` (rating + total capacity) and
+ * `analytics.publicWaitSignal` — are deferred via IntersectionObserver until
+ * the card is within ~400px of the viewport ("lazy-mount"), so the number of
+ * live subscriptions is bounded by what's actually visible instead of the
+ * full result count.
+ *
+ * Desired backend contract to fully eliminate the remaining per-card query:
+ * an additive `totalCapacity` + `rating` (and ideally a batched wait-signal)
+ * on the `restaurants.search` / `trending` / `forYou` results, so Explore
+ * never needs a follow-up per-card fetch at all.
+ */
+type CardRestaurant = {
+  _id: string;
+  name: string;
+  cuisine: string;
+  city: string;
+  neighborhood?: string;
+  priceRange?: string;
+  imageUrl?: string;
+  features: { outside?: boolean; bar?: boolean; smoking?: boolean; soloFriendly?: boolean };
+};
+
 const RestaurantCard = React.memo(function RestaurantCard({
   id,
+  restaurant,
   to,
   summary,
   date,
@@ -696,6 +750,8 @@ const RestaurantCard = React.memo(function RestaurantCard({
   onToggleFavorite,
 }: {
   id: string;
+  /** Pre-fetched restaurant fields from a batched list query, when available. */
+  restaurant?: CardRestaurant;
   to: string;
   summary?: AvailabilitySummary;
   /** Selected quick-find day, or null under "Any day" — badges are hidden
@@ -705,13 +761,44 @@ const RestaurantCard = React.memo(function RestaurantCard({
   onToggleFavorite: (id: string, name: string) => void;
 }) {
   const { t } = useTranslation();
-  // KB-31: use the light `card` query (no menus/items/storage resolution)
-  // instead of the full `get` — a screen of cards no longer runs dozens of
-  // heavy queries.
-  const data = useQuery(api.restaurants.card, { id: id as never });
-  const wait = useQuery(api.analytics.publicWaitSignal, { restaurantId: id as never });
-  if (!data) return null;
-  const { restaurant: r, totalCapacity, rating } = data;
+
+  // H-05: only start the (rating/capacity/wait) subscriptions once this
+  // card is near the viewport.
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [inView, setInView] = useState(false);
+  useEffect(() => {
+    if (inView) return;
+    const el = rootRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      setInView(true);
+      return;
+    }
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { rootMargin: "400px 0px" },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [inView]);
+
+  const data = useQuery(api.restaurants.card, inView ? { id: id as never } : "skip");
+  const wait = useQuery(api.analytics.publicWaitSignal, inView ? { restaurantId: id as never } : "skip");
+
+  const r = restaurant ?? data?.restaurant;
+  const totalCapacity = data?.totalCapacity;
+  const rating = data?.rating;
+
+  // Stable-size placeholder while neither batched nor fetched data is ready
+  // yet (keeps layout from jumping once the real card mounts).
+  if (!r) {
+    return <div ref={rootRef} className="h-[196px] w-full rounded-2xl border border-border/70 bg-muted/20" />;
+  }
+
   const tags: string[] = [];
   if (r.features.outside) tags.push(t("common.outside"));
   if (r.features.bar) tags.push(t("common.bar"));
@@ -740,13 +827,15 @@ const RestaurantCard = React.memo(function RestaurantCard({
           };
 
   return (
-    <Card className="group overflow-hidden rounded-2xl border-border/70 p-0 transition-all hover:-translate-y-0.5 hover:shadow-md">
+    <Card ref={rootRef} className="group overflow-hidden rounded-2xl border-border/70 p-0 transition-all hover:-translate-y-0.5 hover:shadow-md">
       <Link to={to} className="relative block h-36 w-full overflow-hidden">
         {r.imageUrl ? (
           <img
             src={r.imageUrl}
             alt={r.name}
             loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
             className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
           />
         ) : (
@@ -778,7 +867,7 @@ const RestaurantCard = React.memo(function RestaurantCard({
       <div className="flex items-center justify-between gap-3 px-4 py-3">
         <div className="flex flex-wrap items-center gap-1.5">
           <Badge variant="secondary">{r.cuisine}</Badge>
-          {rating.count > 0 && (
+          {rating && rating.count > 0 && (
             <span className="flex items-center gap-1 text-xs font-medium text-amber-600 dark:text-amber-400">
               <Star className="size-3.5 fill-current" /> {rating.avg.toFixed(1)}
               <span className="font-normal text-muted-foreground">({rating.count})</span>
@@ -789,9 +878,11 @@ const RestaurantCard = React.memo(function RestaurantCard({
               {t}
             </Badge>
           ))}
-          <span className="flex items-center gap-1 text-xs text-muted-foreground">
-            <Users className="size-3.5" /> {t("explore.seats", { count: totalCapacity })}
-          </span>
+          {typeof totalCapacity === "number" && (
+            <span className="flex items-center gap-1 text-xs text-muted-foreground">
+              <Users className="size-3.5" /> {t("explore.seats", { count: totalCapacity })}
+            </span>
+          )}
           {wait?.label && (
             <span className="flex items-center gap-1 text-xs text-muted-foreground">
               <Clock className="size-3.5" /> {wait.label}

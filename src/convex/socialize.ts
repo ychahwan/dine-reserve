@@ -8,6 +8,29 @@ import { awardPoints, POINTS } from "./loyalty";
 import { giftTypeSchema, parseOrThrow, sendGiftSchema } from "./validation";
 import { checkRateLimit } from "./rateLimit";
 
+const SOCIAL_ROOM_LIMIT = 200;
+const VISIT_SCAN_LIMIT = 5000;
+const GIFT_HISTORY_LIMIT = 100;
+const OWNER_GIFT_LIMIT = 200;
+
+async function completedVisitCounts(
+  ctx: QueryCtx,
+  restaurantId: Id<"restaurants">,
+  userIds: Id<"users">[],
+) {
+  const wanted = new Set(userIds);
+  const counts = new Map<string, number>();
+  const bookings = await ctx.db
+    .query("bookings")
+    .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
+    .take(VISIT_SCAN_LIMIT);
+  for (const booking of bookings) {
+    if (booking.status !== "completed" || !wanted.has(booking.userId)) continue;
+    counts.set(booking.userId, (counts.get(booking.userId) ?? 0) + 1);
+  }
+  return counts;
+}
+
 // ---------------------------------------------------------------------------
 // helpers
 // ---------------------------------------------------------------------------
@@ -29,11 +52,13 @@ import { checkRateLimit } from "./rateLimit";
  */
 function resolveTodayKey(clientDate?: string): string {
   const serverToday = todayKey();
-  if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate)) return serverToday;
+  if (!clientDate || !/^\d{4}-\d{2}-\d{2}$/.test(clientDate))
+    return serverToday;
 
   const msPerDay = 24 * 60 * 60 * 1000;
   const diffMs = Math.abs(
-    new Date(`${clientDate}T00:00:00Z`).getTime() - new Date(`${serverToday}T00:00:00Z`).getTime(),
+    new Date(`${clientDate}T00:00:00Z`).getTime() -
+      new Date(`${serverToday}T00:00:00Z`).getTime(),
   );
   return diffMs <= msPerDay ? clientDate : serverToday;
 }
@@ -47,6 +72,26 @@ async function isOwnerOf(
   return !!restaurant && restaurant.ownerId === userId;
 }
 
+/**
+ * Owner-or-admin check for Socialize moderation actions (blocklist
+ * management). Mirrors the ownerId === userId || caller.role === "admin"
+ * pattern used by restaurants.get for disabled-restaurant access, so admins
+ * can moderate the blocklist alongside the restaurant's own owner.
+ */
+async function requireOwnerOrAdmin(
+  ctx: MutationCtx,
+  userId: Id<"users">,
+  restaurantId: Id<"restaurants">,
+): Promise<Doc<"restaurants">> {
+  const restaurant = await ctx.db.get(restaurantId);
+  if (!restaurant) throw new Error("Restaurant not found.");
+  const caller = await ctx.db.get(userId);
+  if (!(restaurant.ownerId === userId || caller?.role === "admin")) {
+    throw new Error("Only the restaurant owner or an admin can do that.");
+  }
+  return restaurant;
+}
+
 /** Load a confirmed booking that belongs to the caller (no date restriction). */
 async function requireActiveBooking(
   ctx: MutationCtx,
@@ -54,8 +99,10 @@ async function requireActiveBooking(
   bookingId: Id<"bookings">,
 ) {
   const booking = await ctx.db.get(bookingId);
-  if (!booking || booking.userId !== userId) throw new Error("Booking not found.");
-  if (booking.status !== "confirmed") throw new Error("This booking is no longer active.");
+  if (!booking || booking.userId !== userId)
+    throw new Error("Booking not found.");
+  if (booking.status !== "confirmed")
+    throw new Error("This booking is no longer active.");
   return booking;
 }
 
@@ -70,7 +117,12 @@ async function requireCheckedInBooking(
   bookingId: Id<"bookings">,
   clientDate?: string,
 ) {
-  const booking = await requireActiveTodayBooking(ctx, userId, bookingId, clientDate);
+  const booking = await requireActiveTodayBooking(
+    ctx,
+    userId,
+    bookingId,
+    clientDate,
+  );
   if (!booking.checkedInAt) {
     throw new Error("Please check in at the restaurant before going visible.");
   }
@@ -122,8 +174,12 @@ export const myPresence = query({
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
     const [bookings, restaurants] = await Promise.all([
-      Promise.all(presences.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId))),
-      Promise.all(presences.map((p) => safeGet<Doc<"restaurants">>(ctx, p.restaurantId))),
+      Promise.all(
+        presences.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId)),
+      ),
+      Promise.all(
+        presences.map((p) => safeGet<Doc<"restaurants">>(ctx, p.restaurantId)),
+      ),
     ]);
     return presences
       .map((p, i) => ({
@@ -154,8 +210,11 @@ export const myPresence = query({
  * Only confirmed bookings for today appear, so the room never shows stale
  * or past visits. The caller's own presence is excluded (they already know
  * they're here).
- */export const visibleDiners = query({
-  args: { restaurantId: v.id("restaurants"), clientDate: v.optional(v.string()) },
+ */ export const visibleDiners = query({
+  args: {
+    restaurantId: v.id("restaurants"),
+    clientDate: v.optional(v.string()),
+  },
   handler: async (ctx, { restaurantId, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
@@ -179,16 +238,22 @@ export const myPresence = query({
     if (socializeSettings && !socializeSettings.enabled && !isOwner) return [];
 
     // Block list: if the caller is blocked by this restaurant, they see nothing.
-    if (socializeSettings?.blockedUserIds?.includes(userId as never) && !isOwner) return [];
+    if (
+      socializeSettings?.blockedUserIds?.includes(userId as never) &&
+      !isOwner
+    )
+      return [];
 
     if (!isOwner) {
       const myBookings = await ctx.db
         .query("bookings")
         .withIndex("by_user", (q) => q.eq("userId", userId))
-        .collect();
+        .take(SOCIAL_ROOM_LIMIT);
       const attending = myBookings.some(
         (b) =>
-          b.restaurantId === restaurantId && b.status === "confirmed" && b.date === today,
+          b.restaurantId === restaurantId &&
+          b.status === "confirmed" &&
+          b.date === today,
       );
       if (!attending) return [];
     }
@@ -197,7 +262,7 @@ export const myPresence = query({
     const presences = await ctx.db
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .take(SOCIAL_ROOM_LIMIT);
 
     // Soft gate (Idea #3): determine the viewer's access tier.
     // Lazily promote "checked_in" → "seated" if checked in >15 min ago.
@@ -205,11 +270,19 @@ export const myPresence = query({
     const myPresence = presences.find((p) => p.userId === userId);
     let viewerTier: "booked" | "checked_in" | "seated" = "booked";
     if (myPresence) {
-      const tier = myPresence.accessTier ?? (myPresence.visible ? "checked_in" : "booked");        if (tier === "checked_in") {
+      const tier =
+        myPresence.accessTier ?? (myPresence.visible ? "checked_in" : "booked");
+      if (tier === "checked_in") {
         // Compute tier on-the-fly without writing to DB (queries can't write).
         // The DB is promoted lazily on the next setVisibility call.
-        const myBooking = await safeGet<Doc<"bookings">>(ctx, myPresence.bookingId);
-        if (myBooking?.checkedInAt && Date.now() - myBooking.checkedInAt >= SEATED_THRESHOLD_MS) {
+        const myBooking = await safeGet<Doc<"bookings">>(
+          ctx,
+          myPresence.bookingId,
+        );
+        if (
+          myBooking?.checkedInAt &&
+          Date.now() - myBooking.checkedInAt >= SEATED_THRESHOLD_MS
+        ) {
           viewerTier = "seated";
         } else {
           viewerTier = "checked_in";
@@ -221,9 +294,7 @@ export const myPresence = query({
       viewerTier = "seated"; // owners see full data
     }
 
-    let visible = presences.filter(
-      (p) => p.visible && p.userId !== userId,
-    );
+    let visible = presences.filter((p) => p.visible && p.userId !== userId);
 
     // Block list: hide blocked users from the room.
     if (socializeSettings?.blockedUserIds?.length) {
@@ -232,7 +303,9 @@ export const myPresence = query({
     }
     const [users, bookings] = await Promise.all([
       Promise.all(visible.map((p) => safeGet<Doc<"users">>(ctx, p.userId))),
-      Promise.all(visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId))),
+      Promise.all(
+        visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId)),
+      ),
     ]);
 
     // MinVisits filter (Idea #8): if the restaurant requires N completed
@@ -242,30 +315,26 @@ export const myPresence = query({
     let visitCounts: Map<string, number> | null = null;
     if (minVisits > 0) {
       const visibleUserIds = [...new Set(visible.map((p) => p.userId))];
-      const allBookings = await Promise.all(
-        visibleUserIds.map((uid) =>
-          ctx.db
-            .query("bookings")
-            .withIndex("by_user", (q) => q.eq("userId", uid as never))
-            .collect(),
-        ),
+      visitCounts = await completedVisitCounts(
+        ctx,
+        restaurantId,
+        visibleUserIds,
       );
-      visitCounts = new Map();
-      visibleUserIds.forEach((uid, i) => {
-        const completed = allBookings[i]!.filter(
-          (b) => b.status === "completed" && b.restaurantId === restaurantId,
-        ).length;
-        visitCounts!.set(uid, completed);
-      });
     }
 
     return visible
       .map((p, i) => {
         const booking = bookings[i];
         // presence without a live confirmed booking today is not shown
-        if (!booking || booking.status !== "confirmed" || booking.date !== today) return null;
+        if (
+          !booking ||
+          booking.status !== "confirmed" ||
+          booking.date !== today
+        )
+          return null;
         // MinVisits: hide diners below the threshold
-        if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits) return null;
+        if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits)
+          return null;
 
         // Soft gate (Idea #3): return different data based on viewer's tier.
         const name = users[i]?.name ?? "Guest";
@@ -319,7 +388,10 @@ export const myPresence = query({
  * caller is attending today are ever returned.
  */
 export const tasteTwins = query({
-  args: { restaurantId: v.id("restaurants"), clientDate: v.optional(v.string()) },
+  args: {
+    restaurantId: v.id("restaurants"),
+    clientDate: v.optional(v.string()),
+  },
   handler: async (ctx, { restaurantId, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) return [];
@@ -334,15 +406,22 @@ export const tasteTwins = query({
     // this restaurant, and for diners this venue has blocked, return nothing.
     const socializeSettings = restaurant?.socialize;
     if (socializeSettings && !socializeSettings.enabled && !isOwner) return [];
-    if (socializeSettings?.blockedUserIds?.includes(userId as never) && !isOwner) return [];
+    if (
+      socializeSettings?.blockedUserIds?.includes(userId as never) &&
+      !isOwner
+    )
+      return [];
 
     if (!isOwner) {
       const myBookings = await ctx.db
         .query("bookings")
         .withIndex("by_user", (q) => q.eq("userId", userId))
-        .collect();
+        .take(SOCIAL_ROOM_LIMIT);
       const attending = myBookings.some(
-        (b) => b.restaurantId === restaurantId && b.status === "confirmed" && b.date === today,
+        (b) =>
+          b.restaurantId === restaurantId &&
+          b.status === "confirmed" &&
+          b.date === today,
       );
       if (!attending) return [];
     }
@@ -356,13 +435,19 @@ export const tasteTwins = query({
       .query("dinerPresence")
       .withIndex("by_user", (q) => q.eq("userId", userId))
       .collect();
-    const viewerPresence = viewerPresences.find((p) => p.restaurantId === restaurantId);
+    const viewerPresence = viewerPresences.find(
+      (p) => p.restaurantId === restaurantId,
+    );
     let viewerTier: "booked" | "checked_in" | "seated" = "booked";
     if (viewerPresence) {
       const tier =
-        viewerPresence.accessTier ?? (viewerPresence.visible ? "checked_in" : "booked");
+        viewerPresence.accessTier ??
+        (viewerPresence.visible ? "checked_in" : "booked");
       if (tier === "checked_in") {
-        const viewerBooking = await safeGet<Doc<"bookings">>(ctx, viewerPresence.bookingId);
+        const viewerBooking = await safeGet<Doc<"bookings">>(
+          ctx,
+          viewerPresence.bookingId,
+        );
         viewerTier =
           viewerBooking?.checkedInAt &&
           Date.now() - viewerBooking.checkedInAt >= SEATED_THRESHOLD_MS
@@ -378,15 +463,19 @@ export const tasteTwins = query({
     const myPrefs = me?.prefs;
     if (!myPrefs) return []; // no profile → nothing to match on
     const myDiet = new Set((myPrefs.dietary ?? []).map((d) => d.toLowerCase()));
-    const mySeating = new Set((myPrefs.seating ?? []).map((s) => s.toLowerCase()));
-    const myOccasions = new Set((myPrefs.occasions ?? []).map((o) => o.toLowerCase()));
+    const mySeating = new Set(
+      (myPrefs.seating ?? []).map((s) => s.toLowerCase()),
+    );
+    const myOccasions = new Set(
+      (myPrefs.occasions ?? []).map((o) => o.toLowerCase()),
+    );
     const totalTags = myDiet.size + mySeating.size + myOccasions.size;
     if (totalTags === 0) return [];
 
     const presences = await ctx.db
       .query("dinerPresence")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .take(SOCIAL_ROOM_LIMIT);
     let visible = presences.filter((p) => p.visible && p.userId !== userId);
 
     // BUG-10: apply block list filter (same as visibleDiners)
@@ -397,7 +486,9 @@ export const tasteTwins = query({
 
     const [users, bookings] = await Promise.all([
       Promise.all(visible.map((p) => safeGet<Doc<"users">>(ctx, p.userId))),
-      Promise.all(visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId))),
+      Promise.all(
+        visible.map((p) => safeGet<Doc<"bookings">>(ctx, p.bookingId)),
+      ),
     ]);
 
     // BUG-10: apply minVisits filter (same as visibleDiners)
@@ -405,21 +496,11 @@ export const tasteTwins = query({
     let visitCounts: Map<string, number> | null = null;
     if (minVisits > 0) {
       const visibleUserIds = [...new Set(visible.map((p) => p.userId))];
-      const allBookings = await Promise.all(
-        visibleUserIds.map((uid) =>
-          ctx.db
-            .query("bookings")
-            .withIndex("by_user", (q) => q.eq("userId", uid as never))
-            .collect(),
-        ),
+      visitCounts = await completedVisitCounts(
+        ctx,
+        restaurantId,
+        visibleUserIds,
       );
-      visitCounts = new Map();
-      visibleUserIds.forEach((uid, i) => {
-        const completed = allBookings[i]!.filter(
-          (b) => b.status === "completed" && b.restaurantId === restaurantId,
-        ).length;
-        visitCounts!.set(uid, completed);
-      });
     }
 
     const matches: {
@@ -436,24 +517,41 @@ export const tasteTwins = query({
       const p = visible[i]!;
       const other = users[i];
       const booking = bookings[i];
-      if (!other || !booking || booking.status !== "confirmed" || booking.date !== today) continue;
+      if (
+        !other ||
+        !booking ||
+        booking.status !== "confirmed" ||
+        booking.date !== today
+      )
+        continue;
       // BUG-10: skip diners below minVisits threshold
-      if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits) continue;
+      if (minVisits > 0 && (visitCounts?.get(p.userId) ?? 0) < minVisits)
+        continue;
       const prefs = other.prefs;
       if (!prefs) continue;
 
       const shared: string[] = [];
-      for (const d of prefs.dietary ?? []) if (myDiet.has(d.toLowerCase())) shared.push(d);
-      for (const s of prefs.seating ?? []) if (mySeating.has(s.toLowerCase())) shared.push(s);
-      for (const o of prefs.occasions ?? []) if (myOccasions.has(o.toLowerCase())) shared.push(o);
+      for (const d of prefs.dietary ?? [])
+        if (myDiet.has(d.toLowerCase())) shared.push(d);
+      for (const s of prefs.seating ?? [])
+        if (mySeating.has(s.toLowerCase())) shared.push(s);
+      for (const o of prefs.occasions ?? [])
+        if (myOccasions.has(o.toLowerCase())) shared.push(o);
       if (shared.length === 0) continue;
 
-      const otherTags = prefs.dietary.length + prefs.seating.length + prefs.occasions.length;
+      const otherTags =
+        prefs.dietary.length + prefs.seating.length + prefs.occasions.length;
       // harmonic blend: how much of MY profile they share + how close our
       // profiles are in size (a 1-tag twin sharing my only tag = 100%)
       const coverage = shared.length / totalTags;
-      const proximity = otherTags === 0 ? 0 : 1 - Math.abs(totalTags - otherTags) / Math.max(totalTags, otherTags);
-      const score = Math.round(Math.min(100, Math.max(10, (coverage * 0.7 + proximity * 0.3) * 100)));
+      const proximity =
+        otherTags === 0
+          ? 0
+          : 1 -
+            Math.abs(totalTags - otherTags) / Math.max(totalTags, otherTags);
+      const score = Math.round(
+        Math.min(100, Math.max(10, (coverage * 0.7 + proximity * 0.3) * 100)),
+      );
 
       matches.push({
         _id: p._id,
@@ -484,7 +582,12 @@ export const setVisibility = mutation({
   handler: async (ctx, { bookingId, visible, clientDate }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in.");
-    const booking = await requireCheckedInBooking(ctx, userId, bookingId, clientDate);
+    const booking = await requireCheckedInBooking(
+      ctx,
+      userId,
+      bookingId,
+      clientDate,
+    );
 
     const now = Date.now();
     const existing = await ctx.db
@@ -494,7 +597,11 @@ export const setVisibility = mutation({
     // Determine the appropriate access tier for this mutation (write context).
     const SEATED_THRESHOLD_MS = 15 * 60 * 1000;
     let newTier: "checked_in" | "seated" | undefined;
-    if (visible && booking.checkedInAt && now - booking.checkedInAt >= SEATED_THRESHOLD_MS) {
+    if (
+      visible &&
+      booking.checkedInAt &&
+      now - booking.checkedInAt >= SEATED_THRESHOLD_MS
+    ) {
       newTier = "seated"; // already checked in 15+ min ago
     } else if (visible) {
       newTier = "checked_in";
@@ -572,12 +679,21 @@ export const saveGiftType = mutation({
     priceCents: v.number(),
     available: v.boolean(),
   },
-  handler: async (ctx, { restaurantId, id, name, emoji, description, priceCents, available }) => {
+  handler: async (
+    ctx,
+    { restaurantId, id, name, emoji, description, priceCents, available },
+  ) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
     await requireGiftRestaurantOwner(ctx, userId, restaurantId);
 
-    parseOrThrow(giftTypeSchema, { name, emoji, description, priceCents, available });
+    parseOrThrow(giftTypeSchema, {
+      name,
+      emoji,
+      description,
+      priceCents,
+      available,
+    });
 
     if (id) {
       const existing = await ctx.db.get(id);
@@ -640,10 +756,14 @@ export const sendGift = mutation({
     reveal: v.union(v.literal("now"), v.literal("on_delivery")),
     clientDate: v.optional(v.string()),
   },
-  handler: async (ctx, { bookingId, giftId, receiverUserId, note, reveal, clientDate }) => {
+  handler: async (
+    ctx,
+    { bookingId, giftId, receiverUserId, note, reveal, clientDate },
+  ) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("Please sign in to send a gift.");
-    if (receiverUserId === userId) throw new Error("You can't send a gift to yourself.");
+    if (receiverUserId === userId)
+      throw new Error("You can't send a gift to yourself.");
 
     // Rate limit: 20 gifts per hour per sender
     await checkRateLimit(ctx, {
@@ -655,12 +775,18 @@ export const sendGift = mutation({
 
     parseOrThrow(sendGiftSchema, { giftId, receiverUserId, note, reveal });
 
-    const booking = await requireActiveTodayBooking(ctx, userId, bookingId, clientDate);
+    const booking = await requireActiveTodayBooking(
+      ctx,
+      userId,
+      bookingId,
+      clientDate,
+    );
     const gift = await ctx.db.get(giftId);
     if (!gift || gift.restaurantId !== booking.restaurantId) {
       throw new Error("That gift isn't available at this restaurant.");
     }
-    if (!gift.available) throw new Error(`"${gift.name}" is no longer available.`);
+    if (!gift.available)
+      throw new Error(`"${gift.name}" is no longer available.`);
 
     // BUG-01/02: check block list for both sender and receiver
     const restaurant = await ctx.db.get(booking.restaurantId);
@@ -683,7 +809,10 @@ export const sendGift = mutation({
     if (!active) throw new Error("That diner isn't accepting gifts right now.");
     // M-14: presence alone isn't enough — the receiver's booking must still
     // be confirmed and for today, so gifts can't address absent diners.
-    const receiverBooking = await safeGet<Doc<"bookings">>(ctx, active.bookingId);
+    const receiverBooking = await safeGet<Doc<"bookings">>(
+      ctx,
+      active.bookingId,
+    );
     if (
       !receiverBooking ||
       receiverBooking.status !== "confirmed" ||
@@ -749,29 +878,49 @@ export const myReceivedGifts = query({
     const gifts = await ctx.db
       .query("giftDeliveries")
       .withIndex("by_receiver", (q) => q.eq("receiverUserId", userId))
-      .collect();
+      .order("desc")
+      .take(GIFT_HISTORY_LIMIT);
+    const senderIds = [...new Set(gifts.map((gift) => gift.senderUserId))];
+    const restaurantIds = [...new Set(gifts.map((gift) => gift.restaurantId))];
     const [senders, restaurants] = await Promise.all([
-      Promise.all(gifts.map((g) => safeGet<Doc<"users">>(ctx, g.senderUserId))),
-      Promise.all(gifts.map((g) => safeGet<Doc<"restaurants">>(ctx, g.restaurantId))),
+      Promise.all(senderIds.map((id) => safeGet<Doc<"users">>(ctx, id))),
+      Promise.all(
+        restaurantIds.map((id) => safeGet<Doc<"restaurants">>(ctx, id)),
+      ),
     ]);
+    const sendersById = new Map(
+      senders.filter(Boolean).map((sender) => [sender!._id, sender!]),
+    );
+    const restaurantsById = new Map(
+      restaurants
+        .filter(Boolean)
+        .map((restaurant) => [restaurant!._id, restaurant!]),
+    );
     return gifts
-      .map((g, i) => {
+      .map((g) => {
         const surprise = g.reveal === "on_delivery" && g.status !== "delivered";
+        const sender = sendersById.get(g.senderUserId);
+        const restaurant = restaurantsById.get(g.restaurantId);
         return {
           _id: g._id,
           status: g.status,
           reveal: g.reveal,
           createdAt: g.createdAt,
           deliveredAt: g.deliveredAt,
-          restaurantName: restaurants[i]?.name ?? "Restaurant",
+          restaurantName: restaurant?.name ?? "Restaurant",
           // H-6: sender identity is only revealed on delivery — masking it
           // here is what makes anonymous/surprise gifting actually work.
-          senderName: surprise ? "A guest" : (senders[i]?.name ?? "Guest"),
-          senderImage: surprise ? undefined : (senders[i]?.image ?? undefined),
+          senderName: surprise ? "A guest" : (sender?.name ?? "Guest"),
+          senderImage: surprise ? undefined : (sender?.image ?? undefined),
           // details are hidden until the surprise is delivered
           gift: surprise
             ? null
-            : { name: g.name, emoji: g.emoji, priceCents: g.priceCents, note: g.note },
+            : {
+                name: g.name,
+                emoji: g.emoji,
+                priceCents: g.priceCents,
+                note: g.note,
+              },
           surprise,
         };
       })
@@ -788,13 +937,26 @@ export const mySentGifts = query({
     const gifts = await ctx.db
       .query("giftDeliveries")
       .withIndex("by_sender", (q) => q.eq("senderUserId", userId))
-      .collect();
+      .order("desc")
+      .take(GIFT_HISTORY_LIMIT);
+    const receiverIds = [...new Set(gifts.map((gift) => gift.receiverUserId))];
+    const restaurantIds = [...new Set(gifts.map((gift) => gift.restaurantId))];
     const [receivers, restaurants] = await Promise.all([
-      Promise.all(gifts.map((g) => safeGet<Doc<"users">>(ctx, g.receiverUserId))),
-      Promise.all(gifts.map((g) => safeGet<Doc<"restaurants">>(ctx, g.restaurantId))),
+      Promise.all(receiverIds.map((id) => safeGet<Doc<"users">>(ctx, id))),
+      Promise.all(
+        restaurantIds.map((id) => safeGet<Doc<"restaurants">>(ctx, id)),
+      ),
     ]);
+    const receiversById = new Map(
+      receivers.filter(Boolean).map((receiver) => [receiver!._id, receiver!]),
+    );
+    const restaurantsById = new Map(
+      restaurants
+        .filter(Boolean)
+        .map((restaurant) => [restaurant!._id, restaurant!]),
+    );
     return gifts
-      .map((g, i) => ({
+      .map((g) => ({
         _id: g._id,
         name: g.name,
         emoji: g.emoji,
@@ -804,8 +966,9 @@ export const mySentGifts = query({
         status: g.status,
         createdAt: g.createdAt,
         deliveredAt: g.deliveredAt,
-        receiverName: receivers[i]?.name ?? "Guest",
-        restaurantName: restaurants[i]?.name ?? "Restaurant",
+        receiverName: receiversById.get(g.receiverUserId)?.name ?? "Guest",
+        restaurantName:
+          restaurantsById.get(g.restaurantId)?.name ?? "Restaurant",
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
   },
@@ -828,26 +991,42 @@ export const restaurantGiftDeliveries = query({
     const gifts = await ctx.db
       .query("giftDeliveries")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .order("desc")
+      .take(OWNER_GIFT_LIMIT);
+    const senderIds = [...new Set(gifts.map((gift) => gift.senderUserId))];
+    const receiverIds = [...new Set(gifts.map((gift) => gift.receiverUserId))];
+    const bookingIds = [...new Set(gifts.map((gift) => gift.bookingId))];
     const [senders, receivers, bookings] = await Promise.all([
-      Promise.all(gifts.map((g) => safeGet<Doc<"users">>(ctx, g.senderUserId))),
-      Promise.all(gifts.map((g) => safeGet<Doc<"users">>(ctx, g.receiverUserId))),
-      Promise.all(gifts.map((g) => safeGet<Doc<"bookings">>(ctx, g.bookingId))),
+      Promise.all(senderIds.map((id) => safeGet<Doc<"users">>(ctx, id))),
+      Promise.all(receiverIds.map((id) => safeGet<Doc<"users">>(ctx, id))),
+      Promise.all(bookingIds.map((id) => safeGet<Doc<"bookings">>(ctx, id))),
     ]);
+    const sendersById = new Map(
+      senders.filter(Boolean).map((sender) => [sender!._id, sender!]),
+    );
+    const receiversById = new Map(
+      receivers.filter(Boolean).map((receiver) => [receiver!._id, receiver!]),
+    );
+    const bookingsById = new Map(
+      bookings.filter(Boolean).map((booking) => [booking!._id, booking!]),
+    );
     return gifts
-      .map((g, i) => ({
-        ...g,
-        senderName: senders[i]?.name ?? "Guest",
-        receiverName: receivers[i]?.name ?? "Guest",
-        booking: bookings[i]
-          ? {
-              code: bookings[i]!.code,
-              time: bookings[i]!.time,
-              sectionName: bookings[i]!.sectionName,
-              partySize: bookings[i]!.partySize,
-            }
-          : null,
-      }))
+      .map((g) => {
+        const booking = bookingsById.get(g.bookingId);
+        return {
+          ...g,
+          senderName: sendersById.get(g.senderUserId)?.name ?? "Guest",
+          receiverName: receiversById.get(g.receiverUserId)?.name ?? "Guest",
+          booking: booking
+            ? {
+                code: booking.code,
+                time: booking.time,
+                sectionName: booking.sectionName,
+                partySize: booking.partySize,
+              }
+            : null,
+        };
+      })
       .sort((a, b) => b.createdAt - a.createdAt);
   },
 });
@@ -862,7 +1041,7 @@ export const pendingGiftCount = query({
     const gifts = await ctx.db
       .query("giftDeliveries")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .take(OWNER_GIFT_LIMIT + 1);
     return gifts.filter((g) => g.status === "ordered").length;
   },
 });
@@ -887,5 +1066,82 @@ export const markGiftDelivered = mutation({
       revealedAt: gift.reveal === "on_delivery" ? now : gift.revealedAt,
     });
     return await ctx.db.get(id);
+  },
+});
+
+// ---------------------------------------------------------------------------
+// owner side: Socialize blocklist management (OX-M-26)
+// ---------------------------------------------------------------------------
+//
+// The blocklist used to be managed by the client reading the current
+// restaurant.socialize.blockedUserIds array, splicing it locally, and
+// PATCHing the whole array back. Two concurrent add/remove calls (e.g. two
+// admin tabs, or a slow client racing a fast one) could each read the same
+// stale array and one write would silently clobber the other's change.
+//
+// These mutations instead do the read-modify-write atomically inside a
+// single Convex mutation (which is already transactional/serializable), so
+// the current array is always read and patched within the same
+// transaction and concurrent calls can no longer lose an update.
+
+/**
+ * Owner or admin blocks a diner from this restaurant's Socialize room.
+ * Adds userId to restaurants.socialize.blockedUserIds if not already
+ * present (idempotent) and returns the updated array.
+ */
+export const addBlockedUser = mutation({
+  args: {
+    restaurantId: v.id("restaurants"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, { restaurantId, userId: targetUserId }) => {
+    const callerId = await getAuthUserId(ctx);
+    if (callerId === null) throw new Error("You must be signed in.");
+    const restaurant = await requireOwnerOrAdmin(ctx, callerId, restaurantId);
+
+    const current = restaurant.socialize;
+    const blockedUserIds = current?.blockedUserIds ?? [];
+    if (blockedUserIds.includes(targetUserId)) return blockedUserIds;
+
+    const updated = [...blockedUserIds, targetUserId];
+    await ctx.db.patch(restaurantId, {
+      socialize: {
+        enabled: current?.enabled ?? false,
+        minVisits: current?.minVisits ?? 0,
+        blockedUserIds: updated,
+      },
+    });
+    return updated;
+  },
+});
+
+/**
+ * Owner or admin unblocks a previously blocked diner. Removes userId from
+ * restaurants.socialize.blockedUserIds (no-op if not present) and returns
+ * the updated array.
+ */
+export const removeBlockedUser = mutation({
+  args: {
+    restaurantId: v.id("restaurants"),
+    userId: v.id("users"),
+  },
+  handler: async (ctx, { restaurantId, userId: targetUserId }) => {
+    const callerId = await getAuthUserId(ctx);
+    if (callerId === null) throw new Error("You must be signed in.");
+    const restaurant = await requireOwnerOrAdmin(ctx, callerId, restaurantId);
+
+    const current = restaurant.socialize;
+    const blockedUserIds = current?.blockedUserIds ?? [];
+    if (!blockedUserIds.includes(targetUserId)) return blockedUserIds;
+
+    const updated = blockedUserIds.filter((id) => id !== targetUserId);
+    await ctx.db.patch(restaurantId, {
+      socialize: {
+        enabled: current?.enabled ?? false,
+        minVisits: current?.minVisits ?? 0,
+        blockedUserIds: updated,
+      },
+    });
+    return updated;
   },
 });

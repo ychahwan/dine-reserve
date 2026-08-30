@@ -82,6 +82,9 @@ function formatReviewDate(ts: number) {
 import { toast } from "sonner";
 
 const DAYS_TO_SHOW = 14;
+// L-25: render reviews in bounded pages instead of the whole capped list at
+// once; "Show more" reveals additional pages.
+const REVIEW_PAGE_SIZE = 10;
 
 type SeatPref = "inside" | "outside" | "bar";
 const SEAT_KEYS: { value: SeatPref | null; key: string; icon: LucideIcon }[] = [
@@ -289,6 +292,27 @@ export default function RestaurantDetail() {
     return [...list].sort((a, b) => a.rating - b.rating || b.createdAt - a.createdAt);
   }, [reviewsData, reviewRatingFilter, reviewSort]);
 
+  // L-25: a single pass over the full review list instead of re-filtering it
+  // once per star (5x) on every render.
+  const ratingDistribution = useMemo(() => {
+    const counts = new Map<number, number>([[1, 0], [2, 0], [3, 0], [4, 0], [5, 0]]);
+    for (const rev of reviewsData?.reviews ?? []) {
+      counts.set(rev.rating, (counts.get(rev.rating) ?? 0) + 1);
+    }
+    return counts;
+  }, [reviewsData]);
+
+  // L-25: only render a bounded page of (already-filtered) reviews at a
+  // time; reset the page whenever the filter/sort changes.
+  const [reviewsShown, setReviewsShown] = useState(REVIEW_PAGE_SIZE);
+  useEffect(() => {
+    setReviewsShown(REVIEW_PAGE_SIZE);
+  }, [reviewRatingFilter, reviewSort, id]);
+  const visibleReviews = useMemo(
+    () => filteredReviews.slice(0, reviewsShown),
+    [filteredReviews, reviewsShown],
+  );
+
   // MUST stay above the `if (!data)` early return — hooks cannot be called
   // conditionally. Grouping a few dozen menu items is cheap, so a plain call
   // is fine and keeps hook order stable across load/ready renders.
@@ -485,7 +509,13 @@ export default function RestaurantDetail() {
         {/* Hero */}
         <div className="relative h-52 w-full overflow-hidden">
           {r.imageUrl ? (
-            <img src={r.imageUrl} alt={r.name} className="h-full w-full object-cover" />
+            <img
+              src={r.imageUrl}
+              alt={r.name}
+              decoding="async"
+              referrerPolicy="no-referrer"
+              className="h-full w-full object-cover"
+            />
           ) : (
             <div className="flex h-full w-full items-center justify-center bg-primary/10 text-primary">
               <Store className="size-12" />
@@ -915,6 +945,11 @@ export default function RestaurantDetail() {
                                 <img
                                   src={item.imageUrl}
                                   alt={item.name}
+                                  width={64}
+                                  height={64}
+                                  loading="lazy"
+                                  decoding="async"
+                                  referrerPolicy="no-referrer"
                                   className="size-16 shrink-0 rounded-xl object-cover"
                                 />
                               ) : null}
@@ -1002,7 +1037,7 @@ export default function RestaurantDetail() {
                 </div>
                 <div className="min-w-0 flex-1 space-y-1.5">
                   {[5, 4, 3, 2, 1].map((star) => {
-                    const n = reviewsData.reviews.filter((r) => r.rating === star).length;
+                    const n = ratingDistribution.get(star) ?? 0;
                     const pct = reviewsData.count ? (n / reviewsData.count) * 100 : 0;
                     return (
                       <div key={star} className="flex items-center gap-2 text-xs">
@@ -1063,7 +1098,7 @@ export default function RestaurantDetail() {
 
               {/* Review cards */}
               <div className="mt-3 space-y-2">
-                {filteredReviews.map((rev) => (
+                {visibleReviews.map((rev) => (
                   <div key={rev._id} className="rounded-xl border border-border/70 bg-card px-4 py-3">
                     <div className="flex items-start justify-between gap-2">
                       <div className="flex min-w-0 items-center gap-2.5">
@@ -1110,6 +1145,17 @@ export default function RestaurantDetail() {
                   </div>
                 ))}
               </div>
+              {filteredReviews.length > visibleReviews.length && (
+                <div className="mt-3 flex justify-center">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setReviewsShown((n) => n + REVIEW_PAGE_SIZE)}
+                  >
+                    {t("common.showMore", "Show more")}
+                  </Button>
+                </div>
+              )}
             </>
           )}
         </div>

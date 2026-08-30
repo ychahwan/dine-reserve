@@ -39,8 +39,12 @@ export function OwnerShell({
     );
   }
 
+  if (user === null) {
+    return <Navigate to="/" replace />;
+  }
+
   // Only restaurant owners (and the platform admin) may manage restaurants.
-  if (user && user.role !== "owner" && user.role !== "admin") {
+  if (user.role !== "owner" && user.role !== "admin") {
     return <Navigate to="/dashboard" replace />;
   }
 
@@ -68,11 +72,18 @@ export function OwnerShell({
           {title && (
             <>
               <span className="text-muted-foreground">/</span>
-              <span className="truncate text-sm font-medium text-muted-foreground">{title}</span>
+              <span className="truncate text-sm font-medium text-muted-foreground">
+                {title}
+              </span>
             </>
           )}
           <div className="ml-auto flex items-center gap-1">
-            <Button variant="ghost" size="sm" asChild className="text-muted-foreground">
+            <Button
+              variant="ghost"
+              size="sm"
+              asChild
+              className="text-muted-foreground"
+            >
               <Link to="/explore">
                 <Compass className="size-4" /> Diner view
               </Link>

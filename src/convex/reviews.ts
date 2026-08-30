@@ -1,10 +1,12 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import { mutation, query } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Doc } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
 import { parseOrThrow, reviewArgsSchema } from "./validation";
 import { awardPoints, POINTS } from "./loyalty";
+
+const MAX_PUBLIC_REVIEWS = 50;
 
 /**
  * Verified diner reviews.
@@ -42,7 +44,8 @@ export const create = mutation({
       return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
     })();
     const isCompleted = booking.status === "completed";
-    const isPastConfirmed = booking.status === "confirmed" && booking.date < todayKey;
+    const isPastConfirmed =
+      booking.status === "confirmed" && booking.date < todayKey;
     if (!isCompleted && !isPastConfirmed) {
       throw new Error("You can only review after your visit.");
     }
@@ -82,30 +85,38 @@ export const listForRestaurant = query({
     const reviews = await ctx.db
       .query("reviews")
       .withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurantId))
-      .collect();
+      .order("desc")
+      .take(MAX_PUBLIC_REVIEWS);
     // safeGet: tolerate review rows whose author is a bare auth subject
     // (legacy/test identities) — never crash the restaurant detail page.
-    const users = await Promise.all(reviews.map((r) => safeGet<Doc<"users">>(ctx, r.userId)));
+    const uniqueUserIds = [...new Set(reviews.map((review) => review.userId))];
+    const users = await Promise.all(
+      uniqueUserIds.map((userId) => safeGet<Doc<"users">>(ctx, userId)),
+    );
+    const usersById = new Map(
+      uniqueUserIds.map((userId, index) => [userId, users[index]]),
+    );
     // Expose the author id so the diner UI can offer "delete my review" and
     // the admin console can identify the author of any review.
     const sorted = reviews
-      .map((r, i) => ({
+      .map((r) => ({
         _id: r._id,
         rating: r.rating,
         text: r.text,
         createdAt: r.createdAt,
         userId: r.userId,
-        author: users[i]?.name ?? "Diner",
+        author: usersById.get(r.userId)?.name ?? "Diner",
       }))
       .sort((a, b) => b.createdAt - a.createdAt);
 
     const count = sorted.length;
     const avg =
       count > 0
-        ? Math.round((sorted.reduce((s, r) => s + r.rating, 0) / count) * 10) / 10
+        ? Math.round((sorted.reduce((s, r) => s + r.rating, 0) / count) * 10) /
+          10
         : 0;
 
-    return { count, avg, reviews: sorted };
+    return { count, avg, reviews: sorted, cappedAt: MAX_PUBLIC_REVIEWS };
   },
 });
 
@@ -137,7 +148,9 @@ export const remove = mutation({
     const ledger = await ctx.db
       .query("loyaltyLedger")
       .withIndex("by_user_source", (q) =>
-        q.eq("userId", review.userId).eq("sourceId", `booking:${review.bookingId ?? ""}`),
+        q
+          .eq("userId", review.userId)
+          .eq("sourceId", `booking:${review.bookingId ?? ""}`),
       )
       .collect();
     const reviewLedger = ledger.find((l) => l.source === "review");
@@ -163,7 +176,11 @@ export const remove = mutation({
         adminUserId: userId,
         action: "deleteReview",
         targetUserId: review.userId,
-        details: JSON.stringify({ reviewId, restaurantId: review.restaurantId, rating: review.rating }),
+        details: JSON.stringify({
+          reviewId,
+          restaurantId: review.restaurantId,
+          rating: review.rating,
+        }),
         createdAt: Date.now(),
       });
     }
@@ -199,9 +216,12 @@ export const myReviewable = query({
     const candidates = bookings.filter(
       (b) =>
         !reviewedBookingIds.has(b._id) &&
-        (b.status === "completed" || (b.status === "confirmed" && b.date < todayKey)),
+        (b.status === "completed" ||
+          (b.status === "confirmed" && b.date < todayKey)),
     );
-    const restaurants = await Promise.all(candidates.map((b) => ctx.db.get(b.restaurantId)));
+    const restaurants = await Promise.all(
+      candidates.map((b) => ctx.db.get(b.restaurantId)),
+    );
 
     return candidates
       .map((b, i) => ({
@@ -216,6 +236,8 @@ export const myReviewable = query({
             }
           : null,
       }))
-      .sort((a, b) => `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`));
+      .sort((a, b) =>
+        `${a.date}T${a.time}`.localeCompare(`${b.date}T${b.time}`),
+      );
   },
 });

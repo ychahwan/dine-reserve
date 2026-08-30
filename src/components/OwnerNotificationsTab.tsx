@@ -31,22 +31,65 @@ import { cn } from "@/lib/utils";
 import { formatDate, formatTime } from "@/lib/format";
 import { toast } from "sonner";
 
+const OWNER_LIST_PAGE_SIZE = 50;
+
 const TYPE_META: Record<
   string,
   { label: string; icon: LucideIcon; cls: string }
 > = {
-  on_my_way: { label: "On my way", icon: Car, cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  running_late: { label: "Running late", icon: Clock, cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  arrived: { label: "Arrived", icon: MapPin, cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
-  special_request: { label: "Special request", icon: Sparkles, cls: "bg-violet-600/10 text-violet-700 dark:text-violet-400" },
-  booking_created: { label: "New booking", icon: BellRing, cls: "bg-primary/10 text-primary" },
-  booking_cancelled: { label: "Booking cancelled", icon: BellOff, cls: "bg-destructive/10 text-destructive" },
-  new_order: { label: "New order", icon: ChefHat, cls: "bg-primary/10 text-primary" },
-  assist_request: { label: "Team request", icon: Hand, cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  menu_request: { label: "Off-menu request", icon: Lightbulb, cls: "bg-violet-600/10 text-violet-700 dark:text-violet-400" },
+  on_my_way: {
+    label: "On my way",
+    icon: Car,
+    cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400",
+  },
+  running_late: {
+    label: "Running late",
+    icon: Clock,
+    cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  arrived: {
+    label: "Arrived",
+    icon: MapPin,
+    cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+  },
+  special_request: {
+    label: "Special request",
+    icon: Sparkles,
+    cls: "bg-violet-600/10 text-violet-700 dark:text-violet-400",
+  },
+  booking_created: {
+    label: "New booking",
+    icon: BellRing,
+    cls: "bg-primary/10 text-primary",
+  },
+  booking_cancelled: {
+    label: "Booking cancelled",
+    icon: BellOff,
+    cls: "bg-destructive/10 text-destructive",
+  },
+  new_order: {
+    label: "New order",
+    icon: ChefHat,
+    cls: "bg-primary/10 text-primary",
+  },
+  assist_request: {
+    label: "Team request",
+    icon: Hand,
+    cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400",
+  },
+  menu_request: {
+    label: "Off-menu request",
+    icon: Lightbulb,
+    cls: "bg-violet-600/10 text-violet-700 dark:text-violet-400",
+  },
 };
 
-const DINER_ALERT_TYPES = new Set(["on_my_way", "running_late", "arrived", "special_request"]);
+const DINER_ALERT_TYPES = new Set([
+  "on_my_way",
+  "running_late",
+  "arrived",
+  "special_request",
+]);
 
 function timeAgo(ts: number): string {
   const s = Math.floor((Date.now() - ts) / 1000);
@@ -74,7 +117,11 @@ type Notif = {
   } | null;
 };
 
-export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }) {
+export function OwnerNotificationsTab({
+  restaurantId,
+}: {
+  restaurantId: string;
+}) {
   const all = useQuery(api.notifications.forRestaurant, {
     restaurantId: restaurantId as never,
   });
@@ -87,25 +134,31 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
   const [kind, setKind] = useState<"all" | "alerts" | "events">("all");
   const [bookingFilter, setBookingFilter] = useState<string>("__all__");
   const [markingAll, setMarkingAll] = useState(false);
+  const [visibleLimit, setVisibleLimit] = useState(OWNER_LIST_PAGE_SIZE);
 
-  const items = (all ?? []) as Notif[];
+  const items = useMemo(() => (all ?? []) as Notif[], [all]);
 
   const bookingOptions = useMemo(() => {
     const seen = new Map<string, Notif["booking"]>();
     for (const n of items) {
-      if (n.booking && !seen.has(n.booking._id)) seen.set(n.booking._id, n.booking);
+      if (n.booking && !seen.has(n.booking._id))
+        seen.set(n.booking._id, n.booking);
     }
-    return [...seen.values()].sort((a, b) => `${b!.date}T${b!.time}`.localeCompare(`${a!.date}T${a!.time}`));
+    return [...seen.values()].sort((a, b) =>
+      `${b!.date}T${b!.time}`.localeCompare(`${a!.date}T${a!.time}`),
+    );
   }, [items]);
 
   const filtered = useMemo(() => {
     return items.filter((n) => {
       if (kind === "alerts" && !DINER_ALERT_TYPES.has(n.type)) return false;
       if (kind === "events" && DINER_ALERT_TYPES.has(n.type)) return false;
-      if (bookingFilter !== "__all__" && n.bookingId !== bookingFilter) return false;
+      if (bookingFilter !== "__all__" && n.bookingId !== bookingFilter)
+        return false;
       return true;
     });
   }, [items, kind, bookingFilter]);
+  const visibleNotifications = filtered.slice(0, visibleLimit);
 
   const handleMarkAll = async () => {
     setMarkingAll(true);
@@ -113,7 +166,11 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
       await markAllRead({ restaurantId: restaurantId as never });
       toast.success("All notifications marked as read");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not mark notifications as read.");
+      toast.error(
+        err instanceof Error
+          ? err.message
+          : "Could not mark notifications as read.",
+      );
     } finally {
       setMarkingAll(false);
     }
@@ -133,8 +190,9 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
     <div className="space-y-4 pb-6">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Diner check-ins (on my way, running late…), dine-in activity (orders, pings, off-menu
-          requests) and automatic booking events — tap a notification to mark it as read.
+          Diner check-ins (on my way, running late…), dine-in activity (orders,
+          pings, off-menu requests) and automatic booking events — tap a
+          notification to mark it as read.
         </p>
         <Button
           variant="outline"
@@ -143,7 +201,11 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
           disabled={(unread ?? 0) === 0 || markingAll}
           onClick={handleMarkAll}
         >
-          {markingAll ? <Spinner className="size-3.5" /> : <CheckCheck className="size-3.5" />}
+          {markingAll ? (
+            <Spinner className="size-3.5" />
+          ) : (
+            <CheckCheck className="size-3.5" />
+          )}
           Mark all read
         </Button>
       </div>
@@ -176,7 +238,8 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
             <SelectItem value="__all__">All bookings</SelectItem>
             {bookingOptions.map((b) => (
               <SelectItem key={b!._id} value={b!._id}>
-                {formatDate(b!.date)} · {formatTime(b!.time)} · {b!.partySize} guests
+                {formatDate(b!.date)} · {formatTime(b!.time)} · {b!.partySize}{" "}
+                guests
               </SelectItem>
             ))}
           </SelectContent>
@@ -185,7 +248,8 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
 
       {unread !== undefined && unread > 0 && (
         <p className="flex items-center gap-1.5 text-xs font-medium text-primary">
-          <BellRing className="size-3.5" /> {unread} unread notification{unread === 1 ? "" : "s"}
+          <BellRing className="size-3.5" /> {unread} unread notification
+          {unread === 1 ? "" : "s"}
         </p>
       )}
 
@@ -204,7 +268,7 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((n) => {
+          {visibleNotifications.map((n) => {
             const meta = TYPE_META[n.type] ?? {
               label: n.type,
               icon: BellRing,
@@ -221,30 +285,55 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
                 onClick={() => handleOpen(n)}
               >
                 <div className="flex items-start gap-3">
-                  <span className={cn("mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl", meta.cls)}>
+                  <span
+                    className={cn(
+                      "mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl",
+                      meta.cls,
+                    )}
+                  >
                     <Icon className="size-4" />
                   </span>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
-                      <p className={cn("text-sm", !n.read ? "font-semibold" : "font-medium")}>
+                      <p
+                        className={cn(
+                          "text-sm",
+                          !n.read ? "font-semibold" : "font-medium",
+                        )}
+                      >
                         {meta.label}
-                        {!n.read && <span className="ml-2 inline-block size-2 shrink-0 rounded-full bg-primary align-middle" />}
+                        {!n.read && (
+                          <span className="ml-2 inline-block size-2 shrink-0 rounded-full bg-primary align-middle" />
+                        )}
                       </p>
-                      <span className="shrink-0 text-[10px] text-muted-foreground">{timeAgo(n.createdAt)}</span>
+                      <span className="shrink-0 text-[10px] text-muted-foreground">
+                        {timeAgo(n.createdAt)}
+                      </span>
                     </div>
                     <p className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-                      <span className="font-medium text-foreground/80">{n.dinerName}</span>
+                      <span className="font-medium text-foreground/80">
+                        {n.dinerName}
+                      </span>
                       {n.booking ? (
                         <>
                           <span className="flex items-center gap-1">
-                            <Clock className="size-3" /> {formatDate(n.booking.date)} · {formatTime(n.booking.time)}
+                            <Clock className="size-3" />{" "}
+                            {formatDate(n.booking.date)} ·{" "}
+                            {formatTime(n.booking.time)}
                           </span>
                           <span className="flex items-center gap-1">
                             <Users className="size-3" /> {n.booking.partySize}{" "}
                             {n.booking.partySize === 1 ? "guest" : "guests"}
                           </span>
-                          {n.booking.sectionName && <span>{n.booking.sectionName}</span>}
-                          <Badge variant="secondary" className="font-mono text-[10px]">{n.booking.code}</Badge>
+                          {n.booking.sectionName && (
+                            <span>{n.booking.sectionName}</span>
+                          )}
+                          <Badge
+                            variant="secondary"
+                            className="font-mono text-[10px]"
+                          >
+                            {n.booking.code}
+                          </Badge>
                         </>
                       ) : (
                         <span>Restaurant-wide</span>
@@ -261,6 +350,15 @@ export function OwnerNotificationsTab({ restaurantId }: { restaurantId: string }
             );
           })}
         </div>
+      )}
+      {filtered.length > visibleLimit && (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => setVisibleLimit((n) => n + OWNER_LIST_PAGE_SIZE)}
+        >
+          Show more
+        </Button>
       )}
     </div>
   );

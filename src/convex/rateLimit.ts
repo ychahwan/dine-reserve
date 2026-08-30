@@ -1,6 +1,5 @@
 import { internalMutation, MutationCtx } from "./_generated/server";
 import { v } from "convex/values";
-import { Id } from "./_generated/dataModel";
 
 /**
  * Database-backed per-user rate limiter for Convex mutations.
@@ -35,24 +34,20 @@ export async function checkRateLimit(
   const windowStart = Math.floor(now / windowMs) * windowMs;
   const rateKey = `${key}:${userId}`;
 
-  // L-17: concurrent first hits could each insert their own row while the
-  // decision read a single row (`.first()`), so the effective limit was up
-  // to 2× under a concurrent burst. Sum every row recorded for this key in
-  // the current window before deciding — whichever way concurrent inserts
-  // land, the total is accurate and existing keys' semantics mid-window are
-  // unchanged. Worst case two rows exist for one window; they are both
-  // counted here and merged on the next increment.
+  // Use both fields of the compound index. Reading every historical window
+  // for a hot key made the limiter itself progressively more expensive.
   const rows = await ctx.db
     .query("rateLimits")
-    .withIndex("by_key_window", (q) => q.eq("key", rateKey))
+    .withIndex("by_key_window", (q) =>
+      q.eq("key", rateKey).eq("windowStart", windowStart),
+    )
     .collect();
-  const currentWindow = rows.filter((r) => r.windowStart === windowStart);
-  const total = currentWindow.reduce((s, r) => s + r.count, 0);
+  const total = rows.reduce((sum, row) => sum + row.count, 0);
 
   if (total >= limit) {
     throw new Error("You're doing that too often. Please try again later.");
   }
-  const first = currentWindow[0];
+  const first = rows[0];
   if (first) {
     await ctx.db.patch(first._id, { count: first.count + 1 });
   } else {
@@ -67,10 +62,18 @@ export async function checkRateLimit(
 export const checkOtpSendRateLimit = internalMutation({
   args: { phone: v.string() },
   handler: async (ctx, { phone }) => {
+    // Both checks share this mutation transaction, so a rejected global check
+    // cannot consume the destination's allowance.
     await checkRateLimit(ctx, {
       key: "otpSend",
       userId: phone,
       limit: 5,
+      windowMs: 15 * 60_000,
+    });
+    await checkRateLimit(ctx, {
+      key: "otpSendGlobal",
+      userId: "deployment",
+      limit: 200,
       windowMs: 15 * 60_000,
     });
   },
@@ -85,7 +88,10 @@ export const pruneOldLimits = internalMutation({
   args: {},
   handler: async (ctx) => {
     const cutoff = Date.now() - 48 * 60 * 60_000; // 48 hours
-    const rows = await ctx.db.query("rateLimits").withIndex("by_window", (q) => q.lt("windowStart", cutoff)).collect();
+    const rows = await ctx.db
+      .query("rateLimits")
+      .withIndex("by_window", (q) => q.lt("windowStart", cutoff))
+      .collect();
     for (const row of rows) await ctx.db.delete(row._id);
     return { pruned: rows.length };
   },

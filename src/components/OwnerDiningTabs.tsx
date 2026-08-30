@@ -23,10 +23,18 @@ import { cn } from "@/lib/utils";
 import { formatDate, formatPrice, formatTime } from "@/lib/format";
 import { toast } from "sonner";
 
+const OWNER_LIST_PAGE_SIZE = 50;
+
 const ORDER_META: Record<string, { label: string; cls: string }> = {
   open: { label: "Open", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  preparing: { label: "Preparing", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  served: { label: "Served", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
+  preparing: {
+    label: "Preparing",
+    cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  served: {
+    label: "Served",
+    cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+  },
   completed: { label: "Completed", cls: "bg-muted text-muted-foreground" },
   cancelled: { label: "Cancelled", cls: "bg-destructive/10 text-destructive" },
 };
@@ -43,8 +51,14 @@ const ASSIST_META: Record<string, { label: string; icon: LucideIcon }> = {
 
 const MENU_REQUEST_META: Record<string, { label: string; cls: string }> = {
   new: { label: "New", cls: "bg-sky-600/10 text-sky-700 dark:text-sky-400" },
-  in_progress: { label: "In progress", cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400" },
-  fulfilled: { label: "Fulfilled", cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400" },
+  in_progress: {
+    label: "In progress",
+    cls: "bg-amber-500/10 text-amber-700 dark:text-amber-400",
+  },
+  fulfilled: {
+    label: "Fulfilled",
+    cls: "bg-emerald-600/10 text-emerald-700 dark:text-emerald-400",
+  },
   declined: { label: "Declined", cls: "bg-muted text-muted-foreground" },
 };
 
@@ -68,7 +82,14 @@ type BookingBrief = {
 type OrderWithMeta = {
   _id: string;
   status: "open" | "preparing" | "served" | "completed" | "cancelled";
-  items: { name: string; priceCents: number; quantity: number; note?: string; ingredients?: string[]; removeIngredients?: string[] }[];
+  items: {
+    name: string;
+    priceCents: number;
+    quantity: number;
+    note?: string;
+    ingredients?: string[];
+    removeIngredients?: string[];
+  }[];
   totalCents: number;
   note?: string;
   createdAt: number;
@@ -98,7 +119,10 @@ type MenuReqWithMeta = {
 };
 
 /** "no onion · extra parmesan" style summary for a customized order line. */
-function lineSummary(line: { removeIngredients?: string[]; note?: string }): string | null {
+function lineSummary(line: {
+  removeIngredients?: string[];
+  note?: string;
+}): string | null {
   const parts: string[] = [];
   if (line.removeIngredients && line.removeIngredients.length > 0) {
     parts.push(`no ${line.removeIngredients.join(", no ")}`);
@@ -108,16 +132,17 @@ function lineSummary(line: { removeIngredients?: string[]; note?: string }): str
 }
 
 /** Live badge count for the tab bar (Orders / Requests / Menu ideas). */
-export function DiningTabCount({ restaurantId, kind }: { restaurantId: string; kind: "orders" | "assists" | "menuRequests" }) {
-  // L-30: the Orders badge must match the tab's Active filter, which includes
-  // served — backend openCounts only counts open|preparing, so count orders
-  // client-side to keep badge and tab consistent.
-  const orders = useQuery(api.dining.restaurantOrders, kind === "orders" ? { restaurantId: restaurantId as never } : "skip");
-  const counts = useQuery(api.dining.openCounts, kind === "orders" ? "skip" : { restaurantId: restaurantId as never });
-  const n =
-    kind === "orders"
-      ? ((orders ?? []) as OrderWithMeta[]).filter((o) => o.status === "open" || o.status === "preparing" || o.status === "served").length
-      : counts?.[kind] ?? 0;
+export function DiningTabCount({
+  restaurantId,
+  kind,
+}: {
+  restaurantId: string;
+  kind: "orders" | "assists" | "menuRequests";
+}) {
+  const counts = useQuery(api.dining.openCounts, {
+    restaurantId: restaurantId as never,
+  });
+  const n = counts?.[kind] ?? 0;
   if (n === 0) return null;
   return (
     <span className="ml-1.5 inline-flex min-w-4 items-center justify-center rounded-full px-1 text-[10px] font-bold leading-4 bg-destructive text-white">
@@ -131,9 +156,15 @@ function BookingLine({ booking }: { booking: BookingBrief }) {
   if (!booking) return null;
   return (
     <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-      <Badge variant="secondary" className="font-mono text-[10px]">{booking.code}</Badge>
-      <span>{formatDate(booking.date)} · {formatTime(booking.time)}</span>
-      <span>{booking.partySize} {booking.partySize === 1 ? "guest" : "guests"}</span>
+      <Badge variant="secondary" className="font-mono text-[10px]">
+        {booking.code}
+      </Badge>
+      <span>
+        {formatDate(booking.date)} · {formatTime(booking.time)}
+      </span>
+      <span>
+        {booking.partySize} {booking.partySize === 1 ? "guest" : "guests"}
+      </span>
     </span>
   );
 }
@@ -143,35 +174,53 @@ function BookingLine({ booking }: { booking: BookingBrief }) {
 // ---------------------------------------------------------------------------
 
 export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
-  const orders = useQuery(api.dining.restaurantOrders, { restaurantId: restaurantId as never });
+  const orders = useQuery(api.dining.restaurantOrders, {
+    restaurantId: restaurantId as never,
+  });
   const updateStatus = useMutation(api.dining.updateOrderStatus);
-  const cancelOrder = useMutation(api.dining.cancelOrder);
   const [filter, setFilter] = useState<"active" | "all">("active");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(OWNER_LIST_PAGE_SIZE);
 
   const items = (orders ?? []) as OrderWithMeta[];
-  const visible = filter === "active"
-    ? items.filter((o) => o.status === "open" || o.status === "preparing" || o.status === "served")
-    : items;
+  const matching =
+    filter === "active"
+      ? items.filter(
+          (o) =>
+            o.status === "open" ||
+            o.status === "preparing" ||
+            o.status === "served",
+        )
+      : items;
+  const visible = matching.slice(0, visibleLimit);
 
-  const setStatus = async (id: string, status: "open" | "preparing" | "served" | "completed" | "cancelled") => {
+  const setStatus = async (
+    id: string,
+    status: "open" | "preparing" | "served" | "completed" | "cancelled",
+  ) => {
     setBusyId(id);
     try {
       await updateStatus({ orderId: id as never, status });
       toast.success("Order updated — the diner sees it live.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update the order.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not update the order.",
+      );
     } finally {
       setBusyId(null);
     }
   };
 
-  const openCount = items.filter((o) => o.status === "open" || o.status === "preparing" || o.status === "served").length;
+  const openCount = items.filter(
+    (o) =>
+      o.status === "open" || o.status === "preparing" || o.status === "served",
+  ).length;
 
   return (
     <div className="space-y-4 pb-6">
       <p className="text-sm text-muted-foreground">
-        Dine-in orders appear the second the diner sends them — no more running between tables.
+        Dine-in orders appear the second the diner sends them — no more running
+        between tables.
         {openCount > 0 && (
           <span className="mt-1 block font-medium text-primary">
             {openCount} active order{openCount === 1 ? "" : "s"} right now.
@@ -222,8 +271,12 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold">{o.dinerName}</p>
-                      <Badge className={cn("gap-1", meta.cls)}>{meta.label}</Badge>
-                      <span className="text-[10px] text-muted-foreground">{timeAgo(o.createdAt)}</span>
+                      <Badge className={cn("gap-1", meta.cls)}>
+                        {meta.label}
+                      </Badge>
+                      <span className="text-[10px] text-muted-foreground">
+                        {timeAgo(o.createdAt)}
+                      </span>
                     </div>
                     <div className="mt-1">
                       <BookingLine booking={o.booking} />
@@ -238,14 +291,21 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
                   {o.items.map((line, i) => {
                     const summary = lineSummary(line);
                     return (
-                      <div key={i} className="flex items-center justify-between gap-2 text-sm">
+                      <div
+                        key={i}
+                        className="flex items-center justify-between gap-2 text-sm"
+                      >
                         <span className="min-w-0 text-muted-foreground">
                           {line.quantity}× {line.name}
                           {summary && (
-                            <span className="block text-xs italic">{summary}</span>
+                            <span className="block text-xs italic">
+                              {summary}
+                            </span>
                           )}
                         </span>
-                        <span className="shrink-0 font-medium">{formatPrice(line.priceCents * line.quantity)}</span>
+                        <span className="shrink-0 font-medium">
+                          {formatPrice(line.priceCents * line.quantity)}
+                        </span>
                       </div>
                     );
                   })}
@@ -258,17 +318,29 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
 
                 <div className="mt-3 flex flex-wrap gap-2">
                   {o.status === "open" && (
-                    <Button size="sm" disabled={busyId === o._id} onClick={() => setStatus(o._id, "preparing")}>
+                    <Button
+                      size="sm"
+                      disabled={busyId === o._id}
+                      onClick={() => setStatus(o._id, "preparing")}
+                    >
                       <ChefHat className="size-3.5" /> Start preparing
                     </Button>
                   )}
                   {o.status === "preparing" && (
-                    <Button size="sm" disabled={busyId === o._id} onClick={() => setStatus(o._id, "served")}>
+                    <Button
+                      size="sm"
+                      disabled={busyId === o._id}
+                      onClick={() => setStatus(o._id, "served")}
+                    >
                       <Check className="size-3.5" /> Mark served
                     </Button>
                   )}
                   {o.status === "served" && (
-                    <Button size="sm" disabled={busyId === o._id} onClick={() => setStatus(o._id, "completed")}>
+                    <Button
+                      size="sm"
+                      disabled={busyId === o._id}
+                      onClick={() => setStatus(o._id, "completed")}
+                    >
                       <CheckCircle2 className="size-3.5" /> Complete
                     </Button>
                   )}
@@ -284,7 +356,12 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
                     </Button>
                   )}
                   {o.status === "cancelled" && (
-                    <Button size="sm" variant="outline" disabled={busyId === o._id} onClick={() => setStatus(o._id, "open")}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busyId === o._id}
+                      onClick={() => setStatus(o._id, "open")}
+                    >
                       Reinstate
                     </Button>
                   )}
@@ -293,6 +370,15 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
             );
           })}
         </div>
+      )}
+      {matching.length > visibleLimit && (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => setVisibleLimit((n) => n + OWNER_LIST_PAGE_SIZE)}
+        >
+          Show more
+        </Button>
       )}
     </div>
   );
@@ -303,13 +389,17 @@ export function OwnerOrdersTab({ restaurantId }: { restaurantId: string }) {
 // ---------------------------------------------------------------------------
 
 export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
-  const items = useQuery(api.dining.restaurantAssists, { restaurantId: restaurantId as never });
+  const items = useQuery(api.dining.restaurantAssists, {
+    restaurantId: restaurantId as never,
+  });
   const resolve = useMutation(api.dining.resolveAssist);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(OWNER_LIST_PAGE_SIZE);
 
   const assists = (items ?? []) as AssistWithMeta[];
-  const open = assists.filter((a) => a.status === "open");
-  const closed = assists.filter((a) => a.status !== "open");
+  const visibleAssists = assists.slice(0, visibleLimit);
+  const open = visibleAssists.filter((a) => a.status === "open");
+  const closed = visibleAssists.filter((a) => a.status !== "open");
 
   const handleResolve = async (id: string) => {
     setBusyId(id);
@@ -317,7 +407,9 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
       await resolve({ id: id as never });
       toast.success("Marked as handled — the diner sees it resolved.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not resolve the request.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not resolve the request.",
+      );
     } finally {
       setBusyId(null);
     }
@@ -326,8 +418,8 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
   return (
     <div className="space-y-4 pb-6">
       <p className="text-sm text-muted-foreground">
-        One-tap pings from the diner&apos;s table — water, cutlery, the bill, anything. Mark each one
-        resolved when it&apos;s handled.
+        One-tap pings from the diner&apos;s table — water, cutlery, the bill,
+        anything. Mark each one resolved when it&apos;s handled.
       </p>
 
       {items === undefined ? (
@@ -352,7 +444,10 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
                 const meta = ASSIST_META[a.template] ?? ASSIST_META.custom;
                 const Icon = meta.icon;
                 return (
-                  <Card key={a._id} className="rounded-2xl border-primary/30 bg-primary/5 p-4">
+                  <Card
+                    key={a._id}
+                    className="rounded-2xl border-primary/30 bg-primary/5 p-4"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -360,20 +455,33 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
                             <Icon className="size-4" />
                           </span>
                           <p className="font-semibold">{meta.label}</p>
-                          <span className="text-[10px] text-muted-foreground">{timeAgo(a.createdAt)}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {timeAgo(a.createdAt)}
+                          </span>
                         </div>
                         <div className="mt-2">
                           <BookingLine booking={a.booking} />
                         </div>
-                        <p className="mt-1 text-sm font-medium">{a.dinerName}</p>
+                        <p className="mt-1 text-sm font-medium">
+                          {a.dinerName}
+                        </p>
                         {a.note && (
                           <p className="mt-1.5 rounded-lg bg-card px-2.5 py-1.5 text-xs italic text-muted-foreground">
                             “{a.note}”
                           </p>
                         )}
                       </div>
-                      <Button size="sm" className="shrink-0" disabled={busyId === a._id} onClick={() => handleResolve(a._id)}>
-                        {busyId === a._id ? <Spinner className="size-3.5" /> : <Check className="size-3.5" />}
+                      <Button
+                        size="sm"
+                        className="shrink-0"
+                        disabled={busyId === a._id}
+                        onClick={() => handleResolve(a._id)}
+                      >
+                        {busyId === a._id ? (
+                          <Spinner className="size-3.5" />
+                        ) : (
+                          <Check className="size-3.5" />
+                        )}
                         Mark resolved
                       </Button>
                     </div>
@@ -392,7 +500,10 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
                 const meta = ASSIST_META[a.template] ?? ASSIST_META.custom;
                 const Icon = meta.icon;
                 return (
-                  <Card key={a._id} className="rounded-2xl border-border/70 p-4 opacity-80">
+                  <Card
+                    key={a._id}
+                    className="rounded-2xl border-border/70 p-4 opacity-80"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
@@ -409,13 +520,17 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
                           >
                             {a.status === "resolved" ? "Resolved" : "Withdrawn"}
                           </Badge>
-                          <span className="text-[10px] text-muted-foreground">{timeAgo(a.createdAt)}</span>
+                          <span className="text-[10px] text-muted-foreground">
+                            {timeAgo(a.createdAt)}
+                          </span>
                         </div>
                         <div className="mt-1.5">
                           <BookingLine booking={a.booking} />
                         </div>
                         {a.note && (
-                          <p className="mt-1 text-xs text-muted-foreground">“{a.note}”</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            “{a.note}”
+                          </p>
                         )}
                       </div>
                     </div>
@@ -426,6 +541,15 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
           )}
         </>
       )}
+      {assists.length > visibleLimit && (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => setVisibleLimit((n) => n + OWNER_LIST_PAGE_SIZE)}
+        >
+          Show more
+        </Button>
+      )}
     </div>
   );
 }
@@ -434,25 +558,41 @@ export function OwnerAssistsTab({ restaurantId }: { restaurantId: string }) {
 // Off-menu requests
 // ---------------------------------------------------------------------------
 
-export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string }) {
-  const items = useQuery(api.dining.restaurantMenuRequests, { restaurantId: restaurantId as never });
+export function OwnerMenuRequestsTab({
+  restaurantId,
+}: {
+  restaurantId: string;
+}) {
+  const items = useQuery(api.dining.restaurantMenuRequests, {
+    restaurantId: restaurantId as never,
+  });
   const updateStatus = useMutation(api.dining.updateMenuRequestStatus);
   const [filter, setFilter] = useState<"active" | "all">("active");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(OWNER_LIST_PAGE_SIZE);
 
   const reqs = (items ?? []) as MenuReqWithMeta[];
-  const visible = filter === "active"
-    ? reqs.filter((r) => r.status === "new" || r.status === "in_progress")
-    : reqs;
-  const activeCount = reqs.filter((r) => r.status === "new" || r.status === "in_progress").length;
+  const matching =
+    filter === "active"
+      ? reqs.filter((r) => r.status === "new" || r.status === "in_progress")
+      : reqs;
+  const visible = matching.slice(0, visibleLimit);
+  const activeCount = reqs.filter(
+    (r) => r.status === "new" || r.status === "in_progress",
+  ).length;
 
-  const setStatus = async (id: string, status: "new" | "in_progress" | "fulfilled" | "declined") => {
+  const setStatus = async (
+    id: string,
+    status: "new" | "in_progress" | "fulfilled" | "declined",
+  ) => {
     setBusyId(id);
     try {
       await updateStatus({ id: id as never, status });
       toast.success("Request updated — the diner sees it live.");
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not update the request.");
+      toast.error(
+        err instanceof Error ? err.message : "Could not update the request.",
+      );
     } finally {
       setBusyId(null);
     }
@@ -461,8 +601,9 @@ export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string })
   return (
     <div className="space-y-4 pb-6">
       <p className="text-sm text-muted-foreground">
-        Dishes or drinks diners would love that aren&apos;t on the menu yet — a free source of menu
-        ideas. Fulfill what you can, decline politely what you can&apos;t.
+        Dishes or drinks diners would love that aren&apos;t on the menu yet — a
+        free source of menu ideas. Fulfill what you can, decline politely what
+        you can&apos;t.
       </p>
 
       <div className="flex gap-2">
@@ -509,12 +650,16 @@ export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string })
                     <div className="flex flex-wrap items-center gap-2">
                       <p className="font-semibold">{r.name}</p>
                       <Badge className={cn(meta.cls)}>{meta.label}</Badge>
-                      <span className="text-[10px] text-muted-foreground">{timeAgo(r.createdAt)}</span>
+                      <span className="text-[10px] text-muted-foreground">
+                        {timeAgo(r.createdAt)}
+                      </span>
                     </div>
                     <div className="mt-1">
                       <BookingLine booking={r.booking} />
                     </div>
-                    <p className="mt-1 text-xs text-muted-foreground">from {r.dinerName}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      from {r.dinerName}
+                    </p>
                     {r.description && (
                       <p className="mt-1.5 rounded-lg bg-muted/50 px-2.5 py-1.5 text-xs italic text-muted-foreground">
                         “{r.description}”
@@ -525,7 +670,11 @@ export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string })
                 <div className="mt-3 flex flex-wrap gap-2">
                   {r.status === "new" && (
                     <>
-                      <Button size="sm" disabled={busyId === r._id} onClick={() => setStatus(r._id, "in_progress")}>
+                      <Button
+                        size="sm"
+                        disabled={busyId === r._id}
+                        onClick={() => setStatus(r._id, "in_progress")}
+                      >
                         <ChefHat className="size-3.5" /> Start working on it
                       </Button>
                       <Button
@@ -541,7 +690,11 @@ export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string })
                   )}
                   {r.status === "in_progress" && (
                     <>
-                      <Button size="sm" disabled={busyId === r._id} onClick={() => setStatus(r._id, "fulfilled")}>
+                      <Button
+                        size="sm"
+                        disabled={busyId === r._id}
+                        onClick={() => setStatus(r._id, "fulfilled")}
+                      >
                         <CheckCircle2 className="size-3.5" /> Fulfilled
                       </Button>
                       <Button
@@ -556,7 +709,12 @@ export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string })
                     </>
                   )}
                   {r.status === "declined" && (
-                    <Button size="sm" variant="outline" disabled={busyId === r._id} onClick={() => setStatus(r._id, "new")}>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={busyId === r._id}
+                      onClick={() => setStatus(r._id, "new")}
+                    >
                       Reopen
                     </Button>
                   )}
@@ -565,6 +723,15 @@ export function OwnerMenuRequestsTab({ restaurantId }: { restaurantId: string })
             );
           })}
         </div>
+      )}
+      {matching.length > visibleLimit && (
+        <Button
+          variant="outline"
+          className="w-full"
+          onClick={() => setVisibleLimit((n) => n + OWNER_LIST_PAGE_SIZE)}
+        >
+          Show more
+        </Button>
       )}
     </div>
   );

@@ -1,6 +1,12 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { internalAction, internalMutation, mutation, query, MutationCtx } from "./_generated/server";
+import {
+  internalAction,
+  internalMutation,
+  mutation,
+  query,
+  MutationCtx,
+} from "./_generated/server";
 import { internal, api } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { safeGet } from "./helpers";
@@ -44,6 +50,8 @@ type DinerNotifType =
 
 /** Days since the last visit before we consider a diner "lapsed". */
 const REENGAGE_AFTER_DAYS = 21;
+const UNREAD_COUNT_CAP = 1000;
+const REENGAGE_USER_PAGE = 100;
 
 // ---------------------------------------------------------------------------
 // core helper — deduplicated insert
@@ -101,7 +109,9 @@ export const myNotifications = query({
     // collecting the user's entire notification history to sort/slice in JS.
     const unread = await ctx.db
       .query("dinerNotifications")
-      .withIndex("by_user_read", (q) => q.eq("userId", userId as Id<"users">).eq("read", false))
+      .withIndex("by_user_read", (q) =>
+        q.eq("userId", userId as Id<"users">).eq("read", false),
+      )
       .order("desc")
       .take(100);
     if (unread.length >= 100) {
@@ -109,7 +119,9 @@ export const myNotifications = query({
     }
     const read = await ctx.db
       .query("dinerNotifications")
-      .withIndex("by_user_read", (q) => q.eq("userId", userId as Id<"users">).eq("read", true))
+      .withIndex("by_user_read", (q) =>
+        q.eq("userId", userId as Id<"users">).eq("read", true),
+      )
       .order("desc")
       .take(100 - unread.length);
     return [
@@ -127,9 +139,11 @@ export const unreadCount = query({
     if (userId === null) return 0;
     const items = await ctx.db
       .query("dinerNotifications")
-      .withIndex("by_user_read", (q) => q.eq("userId", userId as Id<"users">).eq("read", false))
-      .collect();
-    return items.length;
+      .withIndex("by_user_read", (q) =>
+        q.eq("userId", userId as Id<"users">).eq("read", false),
+      )
+      .take(UNREAD_COUNT_CAP + 1);
+    return Math.min(items.length, UNREAD_COUNT_CAP);
   },
 });
 
@@ -154,7 +168,9 @@ export const markAllRead = mutation({
     if (userId === null) return 0;
     const unread = await ctx.db
       .query("dinerNotifications")
-      .withIndex("by_user_read", (q) => q.eq("userId", userId as Id<"users">).eq("read", false))
+      .withIndex("by_user_read", (q) =>
+        q.eq("userId", userId as Id<"users">).eq("read", false),
+      )
       .collect();
     await Promise.all(unread.map((n) => ctx.db.patch(n._id, { read: true })));
     return unread.length;
@@ -264,24 +280,39 @@ export const onBookingCompleted = internalMutation({
  */
 export const dailyNudges = internalAction({
   args: {},
-  handler: async (ctx): Promise<{ reengaged: number; reviewNudges: number }> => {
-    const reengaged: number = await ctx.runMutation(internal.dinerNotify.runReengagePass, {});
-    const reviewNudges: number = await ctx.runMutation(internal.dinerNotify.runReviewNudgePass, {});
+  handler: async (
+    ctx,
+  ): Promise<{ reengaged: number; reviewNudges: number }> => {
+    const reengaged: number = await ctx.runMutation(
+      internal.dinerNotify.runReengagePass,
+      {},
+    );
+    const reviewNudges: number = await ctx.runMutation(
+      internal.dinerNotify.runReviewNudgePass,
+      {},
+    );
     return { reengaged, reviewNudges };
   },
 });
 
 export const runReengagePass = internalMutation({
-  args: {},
-  handler: async (ctx) => {
+  args: { cursor: v.optional(v.string()) },
+  handler: async (ctx, { cursor }) => {
     const cutoff = Date.now() - REENGAGE_AFTER_DAYS * 24 * 3600_000;
     const cutoffKey = new Date(cutoff).toISOString().slice(0, 10);
 
-    const users = await ctx.db.query("users").collect();
-    const diners = users.filter((u) => u.role === "customer");
+    const users = await ctx.db
+      .query("users")
+      .paginate({ numItems: REENGAGE_USER_PAGE, cursor: cursor ?? null });
+    const diners = users.page.filter((u) => u.role === "customer");
 
     // preload all stories in the last 14 days
-    const stories = await ctx.db.query("stories").withIndex("by_created", (q) => q.gte("createdAt", Date.now() - 14 * 24 * 3600_000)).collect();
+    const stories = await ctx.db
+      .query("stories")
+      .withIndex("by_created", (q) =>
+        q.gte("createdAt", Date.now() - 14 * 24 * 3600_000),
+      )
+      .take(500);
     const storiesByRestaurant = new Map<string, Doc<"stories">[]>();
     for (const s of stories) {
       const arr = storiesByRestaurant.get(s.restaurantId) ?? [];
@@ -298,11 +329,19 @@ export const runReengagePass = internalMutation({
       const bookings = await ctx.db
         .query("bookings")
         .withIndex("by_user", (q) => q.eq("userId", u._id))
-        .collect();
-      const past = bookings.filter((b) => b.date < cutoffKey && (b.status === "completed" || b.status === "confirmed"));
+        .filter((q) => q.lt(q.field("date"), cutoffKey))
+        .take(100);
+      const past = bookings.filter(
+        (b) =>
+          b.date < cutoffKey &&
+          (b.status === "completed" || b.status === "confirmed"),
+      );
       if (past.length === 0) continue; // never visited or only recent — no nudge
 
-      const lastVisit = past.map((b) => b.date).sort().pop()!;
+      const lastVisit = past
+        .map((b) => b.date)
+        .sort()
+        .pop()!;
       if (lastVisit >= cutoffKey) continue; // visited recently
 
       // does a favorite venue have fresh stories?
@@ -329,6 +368,11 @@ export const runReengagePass = internalMutation({
       });
       if (inserted) notified++;
     }
+    if (!users.isDone) {
+      await ctx.scheduler.runAfter(0, internal.dinerNotify.runReengagePass, {
+        cursor: users.continueCursor,
+      });
+    }
     return notified;
   },
 });
@@ -347,12 +391,13 @@ export const runReviewNudgePass = internalMutation({
         q.eq("status", "completed").gte("updatedAt", recently),
       )
       .collect();
-    const reviews = await ctx.db.query("reviews").collect();
-    const reviewedBookingIds = new Set(reviews.map((r) => r.bookingId));
-
     let notified = 0;
     for (const b of completedRecent) {
-      if (reviewedBookingIds.has(b._id)) continue;
+      const review = await ctx.db
+        .query("reviews")
+        .withIndex("by_booking", (q) => q.eq("bookingId", b._id))
+        .first();
+      if (review) continue;
       if (!b.userId) continue;
       const user = await ctx.db.get(b.userId);
       if (!user) continue;

@@ -15,6 +15,7 @@ import type { ReactNode } from "react";
 import { Link, Navigate, NavLink, useNavigate } from "react-router";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { clearOfflineBookingsCache } from "@/pages/MyBookings";
 
 const TAB_KEYS = [
   { to: "/explore", key: "nav.explore", icon: Compass },
@@ -29,6 +30,10 @@ export function CustomerShell({ children }: { children: ReactNode }) {
   const { t } = useTranslation();
 
   const handleSignOut = async () => {
+    // M-24: clear the offline booking-code cache for this user before the
+    // session ends, so it never lingers for the next signed-in user on
+    // this device.
+    clearOfflineBookingsCache(user?._id as string | undefined);
     await signOut();
     navigate("/");
   };

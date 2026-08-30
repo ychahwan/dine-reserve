@@ -14,6 +14,10 @@ import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { generateCode } from "./bookings";
+import { parseOrThrow, partySizeSchema } from "./validation";
+import { checkRateLimit } from "./rateLimit";
+
+const WALK_IN_HISTORY_LIMIT = 100;
 
 /* ────────────────────────────────────────────
  * Helper: unique booking code (H-3). Reuses bookings' crypto-random
@@ -90,11 +94,10 @@ export const walkInCheckIn = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
+    await checkRateLimit(ctx, { key: "walkInCheckIn", userId, limit: 5, windowMs: 60_000 });
 
     // Validate party size
-    if (args.partySize < 1 || args.partySize > 20) {
-      throw new Error("Party size must be between 1 and 20");
-    }
+    parseOrThrow(partySizeSchema, args.partySize);
 
     // Check restaurant exists
     const restaurant = await ctx.db.get(args.restaurantId);
@@ -165,10 +168,9 @@ export const scanTableQR = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
+    await checkRateLimit(ctx, { key: "scanTableQR", userId, limit: 5, windowMs: 60_000 });
 
-    if (args.partySize < 1 || args.partySize > 20) {
-      throw new Error("Party size must be between 1 and 20");
-    }
+    parseOrThrow(partySizeSchema, args.partySize);
 
     // Validate table QR code exists and is active (L-6: a fabricated table
     // with no QR row must be rejected just like an inactive one).
@@ -254,6 +256,7 @@ export const hostInitiatedWalkIn = mutation({
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
     if (!userId) throw new Error("Not authenticated");
+    await checkRateLimit(ctx, { key: "hostInitiatedWalkIn", userId, limit: 20, windowMs: 60_000 });
 
     // Verify the user is the owner of this restaurant
     const restaurant = await ctx.db.get(args.restaurantId);
@@ -262,9 +265,7 @@ export const hostInitiatedWalkIn = mutation({
     // Disabled venues accept no new business, walk-ins included (H-2).
     if (restaurant.disabled) throw new Error("This restaurant is currently unavailable.");
 
-    if (args.partySize < 1 || args.partySize > 20) {
-      throw new Error("Party size must be between 1 and 20");
-    }
+    parseOrThrow(partySizeSchema, args.partySize);
 
     // Sanitized free-text (M-8).
     const dinerName = args.dinerName.trim().slice(0, 80);
@@ -357,6 +358,7 @@ export const approveWalkIn = mutation({
     const request = await ctx.db.get(args.requestId);
     if (!request) throw new Error("Walk-in request not found");
     if (request.status !== "pending") throw new Error("Request already processed");
+    parseOrThrow(partySizeSchema, request.partySize);
 
     // Verify the user is the owner of this restaurant
     const restaurant = await ctx.db.get(request.restaurantId);
@@ -435,11 +437,12 @@ export const rejectWalkIn = mutation({
     if (!restaurant) throw new Error("Restaurant not found");
     if (restaurant.ownerId !== userId) throw new Error("Only the restaurant owner can reject walk-ins");
 
+    const reason = args.reason?.trim().slice(0, 300) || undefined;
     await ctx.db.patch(args.requestId, {
       status: "rejected",
       processedAt: Date.now(),
       processedBy: userId,
-      rejectReason: args.reason,
+      rejectReason: reason,
     });
 
     // Notify the diner
@@ -447,7 +450,7 @@ export const rejectWalkIn = mutation({
       restaurantId: request.restaurantId,
       userId: request.userId,
       type: "walk_in_rejected",
-      message: `Your walk-in request at ${restaurant.name} was declined${args.reason ? `: ${args.reason}` : ""}`,
+      message: `Your walk-in request at ${restaurant.name} was declined${reason ? `: ${reason}` : ""}`,
       read: false,
       createdAt: Date.now(),
     });
@@ -478,7 +481,7 @@ export const pendingWalkIns = query({
         q.eq("restaurantId", args.restaurantId).eq("status", "pending")
       )
       .order("desc")
-      .collect();
+      .take(WALK_IN_HISTORY_LIMIT);
 
     // Enrich with user names
     const enriched = await Promise.all(
@@ -538,7 +541,8 @@ export const myLatestWalkIn = query({
     const requests = await ctx.db
       .query("walkInRequests")
       .withIndex("by_user", (q) => q.eq("userId", userId as Id<"users">))
-      .collect();
+      .order("desc")
+      .take(WALK_IN_HISTORY_LIMIT);
 
     const latest = requests
       .filter((r) => r.restaurantId === args.restaurantId)
@@ -559,6 +563,7 @@ export const walkInHistory = query({
       v.literal("approved"),
       v.literal("rejected"),
     )),
+    limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
     const userId = await getAuthUserId(ctx);
@@ -568,6 +573,7 @@ export const walkInHistory = query({
     if (!restaurant || restaurant.ownerId !== userId) {
       throw new Error("Unauthorized");
     }
+    const effectiveLimit = Math.min(Math.max(Math.floor(args.limit ?? WALK_IN_HISTORY_LIMIT), 1), 200);
 
     let query = ctx.db
       .query("walkInRequests")
@@ -581,6 +587,6 @@ export const walkInHistory = query({
         );
     }
 
-    return await query.order("desc").collect();
+    return await query.order("desc").take(effectiveLimit);
   },
 });

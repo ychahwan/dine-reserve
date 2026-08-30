@@ -1,11 +1,16 @@
 import { getAuthUserId } from "@convex-dev/auth/server";
 import { v } from "convex/values";
-import { mutation, MutationCtx, query, QueryCtx } from "./_generated/server";
+import { internalMutation, mutation, MutationCtx, query, QueryCtx } from "./_generated/server";
+import { internal } from "./_generated/api";
 import type { Id } from "./_generated/dataModel";
 import { defaultGridTimes, minutesOf, sortTimes, timesForDay } from "../lib/slotgen";
 import { dateFromNow } from "../lib/format";
+import { dateSchema, parseOrThrow } from "./validation";
+import { checkRateLimit } from "./rateLimit";
 
 export const SLOT_STEP_MINUTES = 30;
+const MAX_BOOKING_HORIZON_DAYS = 90;
+const SUMMARY_LIMIT = 30;
 
 /** All slot start times between open and close, e.g. "17:00" -> ["17:00","17:30",...] */
 export function slotTimes(open: string, close: string): string[] {
@@ -133,31 +138,38 @@ export async function rebuildRestaurantSlots(
   restaurantId: Id<"restaurants">,
   daysAhead = 14,
 ) {
-  const today = dateFromNow(0);
-  // M-6: prune only inside the regeneration window. Slots materialized beyond
-  // `daysAhead` (ensureForDate has no upper bound) survive rule edits instead
-  // of being destroyed and never regenerated.
-  const windowEnd = dateFromNow(daysAhead);
-  const slots = await ctx.db
-    .query("slots")
-    .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId))
-    .collect();
-
-  // Batch-delete unbooked future slots within the window (remaining === total
-  // means no bookings reference them) so retrofits stay fast even with
-  // hundreds of stale slots.
-  await Promise.all(
-    slots
-      .filter((s) => s.date >= today && s.date < windowEnd && s.remaining === s.total)
-      .map((s) => ctx.db.delete(s._id)),
-  );
-
-  // Regenerate each day concurrently — days are disjoint documents, so
-  // parallel writes keep this fast even when retrofitting many dates.
-  await Promise.all(
-    Array.from({ length: daysAhead }, (_, i) => ensureSlotsForDate(ctx, restaurantId, dateFromNow(i))),
-  );
+  if (daysAhead <= 0) return;
+  await ctx.scheduler.runAfter(0, internal.availability.rebuildSlotsChunk, {
+    restaurantId,
+    dayOffset: 0,
+    daysAhead: Math.min(daysAhead, MAX_BOOKING_HORIZON_DAYS),
+  });
 }
+
+export const rebuildSlotsChunk = internalMutation({
+  args: {
+    restaurantId: v.id("restaurants"),
+    dayOffset: v.number(),
+    daysAhead: v.number(),
+  },
+  handler: async (ctx, { restaurantId, dayOffset, daysAhead }) => {
+    if (dayOffset < 0 || dayOffset >= daysAhead) return;
+    const date = dateFromNow(dayOffset);
+    const slots = await ctx.db
+      .query("slots")
+      .withIndex("by_restaurant_date", (q) => q.eq("restaurantId", restaurantId).eq("date", date))
+      .collect();
+    await Promise.all(slots.filter((s) => s.remaining === s.total).map((s) => ctx.db.delete(s._id)));
+    await ensureSlotsForDate(ctx, restaurantId, date);
+    if (dayOffset + 1 < daysAhead) {
+      await ctx.scheduler.runAfter(0, internal.availability.rebuildSlotsChunk, {
+        restaurantId,
+        dayOffset: dayOffset + 1,
+        daysAhead,
+      });
+    }
+  },
+});
 
 // ---------------------------------------------------------------------------
 // queries / mutations exposed to the client
@@ -169,6 +181,11 @@ export const ensureForDate = mutation({
   handler: async (ctx, { restaurantId, date }) => {
     const userId = await getAuthUserId(ctx);
     if (userId === null) throw new Error("You must be signed in.");
+    parseOrThrow(dateSchema, date);
+    if (date < dateFromNow(0) || date > dateFromNow(MAX_BOOKING_HORIZON_DAYS)) {
+      throw new Error("Date is outside the booking window.");
+    }
+    await checkRateLimit(ctx, { key: "ensureForDate", userId, limit: 20, windowMs: 60_000 });
     const restaurant = await ctx.db.get(restaurantId);
     if (!restaurant) throw new Error("Restaurant not found.");
     // A disabled restaurant only materializes slots for its owner/admin
@@ -231,39 +248,28 @@ export const forDate = query({
  *  "Find a table" screen. Slots may not be materialized yet (e.g. dates far
  *  ahead); those restaurants report estimated capacity instead. */
 export const summary = query({
-  args: { date: v.string() },
-  handler: async (ctx, { date }) => {
-    const restaurants = (await ctx.db.query("restaurants").collect()).filter((r) => !r.disabled);
+  args: { date: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, { date, limit }) => {
+    parseOrThrow(dateSchema, date);
+    const effectiveLimit = Math.min(Math.max(Math.floor(limit ?? SUMMARY_LIMIT), 1), 50);
+    const restaurants = (await ctx.db.query("restaurants").take(effectiveLimit)).filter((r) => !r.disabled);
     const dow = new Date(`${date}T00:00:00`).getDay();
-    // M-5: bulk-load hours + sections once (grouped below) instead of two
-    // extra indexed queries per restaurant; the per-date slots query stays
-    // per-restaurant but is skipped entirely for closed/unconfigured venues.
-    const [allHours, allSections] = await Promise.all([
-      ctx.db.query("hours").collect(),
-      ctx.db.query("sections").collect(),
-    ]);
-    const hoursByRestaurant = new Map<string, typeof allHours>();
-    for (const h of allHours) {
-      const list = hoursByRestaurant.get(h.restaurantId) ?? [];
-      list.push(h);
-      hoursByRestaurant.set(h.restaurantId, list);
-    }
-    const sectionsByRestaurant = new Map<string, typeof allSections>();
-    for (const s of allSections) {
-      const list = sectionsByRestaurant.get(s.restaurantId) ?? [];
-      list.push(s);
-      sectionsByRestaurant.set(s.restaurantId, list);
-    }
+    const details = await Promise.all(restaurants.map(async (restaurant) => {
+      const [hours, sections] = await Promise.all([
+        ctx.db.query("hours").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurant._id)).collect(),
+        ctx.db.query("sections").withIndex("by_restaurant", (q) => q.eq("restaurantId", restaurant._id)).collect(),
+      ]);
+      return { restaurant, hours, sections };
+    }));
     const out: {
       restaurantId: Id<"restaurants">;
       open: boolean;
       freeSeats: number;
       estimated: boolean;
     }[] = [];
-    for (const r of restaurants) {
+    for (const { restaurant: r, hours, sections } of details) {
       if (r.disabled) continue; // disabled venues never show availability
-      const day = (hoursByRestaurant.get(r._id) ?? []).find((h) => h.dayOfWeek === dow && h.enabled);
-      const sections = sectionsByRestaurant.get(r._id) ?? [];
+      const day = hours.find((h) => h.dayOfWeek === dow && h.enabled);
       if (!day || sections.length === 0) {
         out.push({ restaurantId: r._id, open: false, freeSeats: 0, estimated: false });
         continue;

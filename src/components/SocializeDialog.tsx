@@ -124,7 +124,10 @@ export function SocializeDialog({
     };
   }, [bookingKey]);
 
-  const presences = useQuery(api.socialize.myPresence);
+  // L-24: don't subscribe to presence at all when there's no active booking
+  // (this dialog stays mounted on MyBookings so the query would otherwise
+  // run continuously whenever the bookings page is open).
+  const presences = useQuery(api.socialize.myPresence, booking ? {} : "skip");
   // KB-04/11: pass the diner's local date so the room's "today" matches the
   // day setVisibility stored (otherwise a diner near midnight turns visibility
   // on but is filtered out of the room).
@@ -347,7 +350,16 @@ export function SocializeDialog({
                       className="flex items-center gap-3 rounded-xl border border-border/70 bg-card px-3 py-2.5"
                     >
                       {tw.image ? (
-                        <img src={tw.image} alt="" className="size-8 shrink-0 rounded-full object-cover" />
+                        <img
+                          src={tw.image}
+                          alt=""
+                          width={32}
+                          height={32}
+                          loading="lazy"
+                          decoding="async"
+                          referrerPolicy="no-referrer"
+                          className="size-8 shrink-0 rounded-full object-cover"
+                        />
                       ) : (
                         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary/15 text-xs font-bold text-primary">
                           {initials(tw.name)}
@@ -406,7 +418,16 @@ export function SocializeDialog({
                       style={{ animationDelay: `${i * 0.04}s` }}
                     >
                       {d.image ? (
-                        <img src={d.image} alt="" className="size-10 shrink-0 rounded-full object-cover" />
+                        <img
+                        src={d.image}
+                        alt=""
+                        width={40}
+                        height={40}
+                        loading="lazy"
+                        decoding="async"
+                        referrerPolicy="no-referrer"
+                        className="size-10 shrink-0 rounded-full object-cover"
+                      />
                       ) : (
                         <span className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary/10 text-sm font-bold text-primary">
                           {initials(d.name)}
