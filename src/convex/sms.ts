@@ -1,7 +1,15 @@
 import { v } from "convex/values";
-import { internalAction } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { sendTwilioMessage } from "./twilio";
+import {
+  sendTwilioMessage,
+  getLastE2eOtp,
+  clearE2eOtpStore,
+} from "./twilio";
+
+// Re-export Twilio test-mode helpers so the E2E harness can clear recorded
+// OTPs between tests without importing twilio.ts directly.
+export { getLastE2eOtp, clearE2eOtpStore } from "./twilio";
 
 /**
  * All SMS sending goes through the shared `sendTwilioMessage` helper in
@@ -141,6 +149,45 @@ export const sendOtpSms = internalAction({
     await ctx.runMutation(internal.rateLimit.checkOtpSendRateLimit, { phone });
     const body = `Your Kamix verification code is: ${code}. It expires in 5 minutes.`;
     return await sendTwilioMessage(phone, body, ctx);
+  },
+});
+
+/**
+ * Test-only guard: when the deployment is not in E2E SMS recording mode,
+ * the internal SMS helpers are inert. This keeps production deployments
+ * identical while letting the E2E suite drive OTP flows headlessly.
+ */
+const isE2eRecording =
+  process.env.KAMIX_E2E_SMS_MODE?.toLowerCase() === "record";
+
+/**
+ * E2E helper: return the last OTP recorded by the Twilio sender for a test
+ * phone when `KAMIX_E2E_SMS_MODE=record`. Returns null when test SMS mode is
+ * off or no code was recorded yet.
+ */
+export const lastOtpForTest = internalQuery({
+  args: { phone: v.string() },
+  handler: async (_ctx, { phone }) => {
+    if (!isE2eRecording) {
+      return null;
+    }
+    const code = getLastE2eOtp(phone);
+    return code ?? null;
+  },
+});
+
+/**
+ * E2E helper: clear all recorded OTPs between scenarios so a stale code from
+ * a previous test can never be reused.
+ */
+export const clearRecordedOtps = internalMutation({
+  args: {},
+  handler: async () => {
+    if (!isE2eRecording) {
+      return { cleared: false };
+    }
+    clearE2eOtpStore();
+    return { cleared: true };
   },
 });
 

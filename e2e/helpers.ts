@@ -7,7 +7,11 @@
 import { expect, type Page } from "@playwright/test";
 
 export const USERS = {
-  admin: { phone: "+96176683661", password: "BeityAdmin2026!", target: "/admin" },
+  admin: {
+    phone: process.env.E2E_ADMIN_PHONE ?? "+96176683661",
+    password: process.env.E2E_ADMIN_PASSWORD ?? "BeityAdmin2026!",
+    target: "/admin",
+  },
   customer: { phone: "+19990001111", password: "TestPass123!", target: "/explore" },
   owner: { phone: "+19990001001", password: "TestPass123!", target: "/owner" },
 } as const;
@@ -74,4 +78,71 @@ export async function gotoAuth(page: Page, role: "admin" | "customer" | "owner",
 export async function waitForData(page: Page) {
   await page.waitForLoadState("networkidle");
   await page.waitForTimeout(1000);
+}
+
+/**
+ * KAMIX_E2E_SMS_MODE=record short-circuits Twilio and records OTP codes in
+ * Convex server memory. This helper polls that shared store until a code
+ * appears for the given phone, then returns it.
+ *
+ * It uses the internal Convex query `internal.sms.lastOtpForTest` through the
+ * page's Convex client so polling happens server-side and the test never types
+ * partial codes.
+ */
+export async function waitForRecordedOtp(
+  page: Page,
+  phone: string,
+  timeoutMs = 30_000,
+): Promise<string> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const code = await page.evaluate(async () => {
+      if (typeof window === "undefined" || !window.Convex) {
+        return null;
+      }
+      // @ts-ignore - Convex is attached to window in the app build.
+      const api = window.Convex.api;
+      if (!api || !api.sms || !api.sms.lastOtpForTest) {
+        return null;
+      }
+      try {
+        // @ts-ignore - internal query only callable in the E2E environment
+        // where the deployment explicitly exposes it for tests.
+        return await api.sms.lastOtpForTest({ phone });
+      } catch {
+        return null;
+      }
+    });
+    if (typeof code === "string" && code.length === 6) {
+      return code;
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `Timed out waiting for a recorded OTP for ${phone}. ` +
+      `Set KAMIX_E2E_SMS_MODE=record on the Convex deployment and restart it.`,
+  );
+}
+
+/**
+ * Clear the in-memory recorded OTPs between scenarios so a stale code from a
+ * previous test can never be reused.
+ */
+export async function clearRecordedOtps(page: Page): Promise<void> {
+  await page.evaluate(async () => {
+    if (typeof window === "undefined" || !window.Convex) {
+      return;
+    }
+    // @ts-ignore
+    const api = window.Convex.api;
+    if (!api || !api.sms || !api.sms.clearRecordedOtps) {
+      return;
+    }
+    try {
+      // @ts-ignore
+      await api.sms.clearRecordedOtps();
+    } catch {
+      // If the helper is not deployed yet, fall back to reloading the page.
+    }
+  });
 }

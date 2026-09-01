@@ -276,9 +276,34 @@ export default function AdminRestaurantDetail() {
   const data = useQuery(api.adminView.restaurantDetail, { id: id as never });
   const setRestaurantDisabled = useMutation(api.admin.setRestaurantDisabled);
   const deleteRestaurant = useMutation(api.admin.deleteRestaurant);
+  const updateRestaurant = useMutation(api.admin.updateRestaurant);
   const [modBusy, setModBusy] = useState(false);
   const [modError, setModError] = useState<string | null>(null);
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editCuisine, setEditCuisine] = useState("");
+  const [editCity, setEditCity] = useState("");
+  const [editAddress, setEditAddress] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editPriceRange, setEditPriceRange] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editImageUrl, setEditImageUrl] = useState("");
+  const [saveBusy, setSaveBusy] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+
+  // Keep edit fields in sync if the restaurant data refreshes.
+  useEffect(() => {
+    if (!data) return;
+    setEditName(data.restaurant.name ?? "");
+    setEditCuisine(data.restaurant.cuisine ?? "");
+    setEditCity(data.restaurant.city ?? "");
+    setEditAddress(data.restaurant.address ?? "");
+    setEditPhone(data.restaurant.phone ?? "");
+    setEditPriceRange(data.restaurant.priceRange ?? "");
+    setEditDescription(data.restaurant.description ?? "");
+    setEditImageUrl(data.restaurant.imageUrl ?? "");
+  }, [data]);
 
   // Tab filter state
   const [bookingSearch, setBookingSearch] = useState("");
@@ -316,6 +341,32 @@ export default function AdminRestaurantDetail() {
     key: "name",
     direction: "asc",
   });
+
+  const handleUpdateRestaurant = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!id || saveBusy) return;
+    setSaveBusy(true);
+    setSaveError(null);
+    try {
+      const result = await updateRestaurant({
+        restaurantId: id as never,
+        name: editName,
+        cuisine: editCuisine,
+        city: editCity,
+        address: editAddress,
+        phone: editPhone,
+        priceRange: editPriceRange,
+        description: editDescription,
+        imageUrl: editImageUrl,
+      });
+      setEditing(false);
+      toast.success("Restaurant updated.");
+    } catch (err) {
+      setSaveError(err instanceof Error ? err.message : "Could not update the restaurant.");
+    } finally {
+      setSaveBusy(false);
+    }
+  };
 
   const handleSetDisabled = async (disabled: boolean) => {
     if (!id || modBusy) return;
@@ -605,6 +656,155 @@ export default function AdminRestaurantDetail() {
             <p className="mt-3 text-sm text-muted-foreground">
               {restaurant.description}
             </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Edit restaurant */}
+      <Card className="rounded-2xl border-border/70">
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-base">Edit restaurant</CardTitle>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setEditing((v) => !v);
+                setSaveError(null);
+              }}
+            >
+              {editing ? "Cancel" : "Edit"}
+            </Button>
+          </div>
+          <CardDescription>
+            Update the restaurant name, location, contact details, images and
+            features. Changes are visible to diners immediately.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {editing ? (
+            <form onSubmit={handleUpdateRestaurant} className="space-y-4">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Name</label>
+                  <Input
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Cuisine</label>
+                  <Input
+                    value={editCuisine}
+                    onChange={(e) => setEditCuisine(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">City</label>
+                  <Input
+                    value={editCity}
+                    onChange={(e) => setEditCity(e.target.value)}
+                    required
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Address</label>
+                  <Input
+                    value={editAddress}
+                    onChange={(e) => setEditAddress(e.target.value)}
+                    required
+                  />
+                </div>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Phone</label>
+                  <Input
+                    type="tel"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    placeholder="+961 71 123 456"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs text-muted-foreground">Price range</label>
+                  <Input
+                    value={editPriceRange}
+                    onChange={(e) => setEditPriceRange(e.target.value)}
+                    placeholder="$$"
+                  />
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Description</label>
+                <Input
+                  value={editDescription}
+                  onChange={(e) => setEditDescription(e.target.value)}
+                  placeholder="Short description shown on the restaurant page."
+                />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Image URL</label>
+                <Input
+                  value={editImageUrl}
+                  onChange={(e) => setEditImageUrl(e.target.value)}
+                  placeholder="https://..."
+                />
+              </div>
+              {saveError && (
+                <p className="rounded-lg bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  {saveError}
+                </p>
+              )}
+              <Button type="submit" disabled={saveBusy}>
+                {saveBusy ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" /> Saving…
+                  </>
+                ) : (
+                  "Save changes"
+                )}
+              </Button>
+            </form>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Name</label>
+                <Input value={editName} readOnly />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Cuisine</label>
+                <Input value={editCuisine} readOnly />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">City</label>
+                <Input value={editCity} readOnly />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Address</label>
+                <Input value={editAddress} readOnly />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Phone</label>
+                <Input value={editPhone} readOnly />
+              </div>
+              <div className="space-y-1.5">
+                <label className="text-xs text-muted-foreground">Price range</label>
+                <Input value={editPriceRange} readOnly />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs text-muted-foreground">Description</label>
+                <Input value={editDescription} readOnly />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <label className="text-xs text-muted-foreground">Image URL</label>
+                <Input value={editImageUrl} readOnly />
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

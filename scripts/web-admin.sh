@@ -23,7 +23,7 @@ echo -e "${CYAN}═══ Kamix — Admin console ═══${NC}"
 echo ""
 echo -e "  Backend    : ${VITE_CONVEX_URL}"
 echo -e "  App        : http://localhost:5173 → /admin"
-echo -e "  Admin phone: ${GREEN}+96176683661${NC}"
+echo -e "  Admin phone: ${GREEN}${PLATFORM_ADMIN_PHONE:-+96176683661}${NC}"
 echo -e "  Login      : enter phone at /auth → PASSWORD screen"
 echo ""
 

@@ -70,7 +70,6 @@ export default function Explore() {
   const trending = useQuery(api.restaurants.trending);
   const forYou = useQuery(api.restaurants.forYou);
   const stories = useQuery(api.stories.recent, {});
-  const ensureDemoData = useMutation(api.seed.ensureDemoData);
   const [seeded, setSeeded] = useState(false);
 
   const [q, setQ] = useState("");
@@ -140,16 +139,11 @@ export default function Explore() {
     },
   );
 
-  // Seed demo data once when the app first loads with an empty database.
-  // PERF-FIX: Use searchWithFilters instead of removed restaurants query
+  // Demo data is seeded manually via `resetData` or `seed` (admin-only).
   useEffect(() => {
     if (searchWithFilters === undefined || seeded) return;
-    if (searchWithFilters.length === 0) {
-      ensureDemoData().then(() => setSeeded(true)).catch(() => setSeeded(true));
-    } else {
-      setSeeded(true);
-    }
-  }, [searchWithFilters, seeded, ensureDemoData]);
+    setSeeded(true);
+  }, [searchWithFilters, seeded]);
 
   const visible = useMemo(() => {
     if (!searchWithFilters) return undefined;

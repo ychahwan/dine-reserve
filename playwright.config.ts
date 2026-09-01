@@ -70,5 +70,12 @@ export default defineConfig({
       testMatch: /account-switching\.spec\.ts/,
       // No dependencies — tests the full login flow fresh
     },
+    {
+      name: "auth-extended",
+      testMatch: /auth-extended\.spec\.ts/,
+      dependencies: ["setup"],
+      // Use the OTP user storage state for scenarios that start signed in.
+      use: { storageState: "e2e/.auth/otp.json" },
+    },
   ],
 });

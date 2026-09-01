@@ -24,6 +24,30 @@ export type TwilioSendResult = {
 };
 
 /**
+ * Test-mode hook: when `KAMIX_E2E_SMS_MODE` is set to "record", SMS sending
+ * is short-circuited and the OTP code is recorded for the destination phone.
+ * E2E tests then read the last code from `internal.sms.lastOtpForTest` instead
+ * of waiting on a real phone.
+ *
+ * Never enabled in production. The flag is read only once at module load so
+ * the behavior is stable for the lifetime of the Convex server process.
+ */
+export const E2E_SMS_MODE =
+  process.env.KAMIX_E2E_SMS_MODE?.toLowerCase() === "record";
+
+const e2eOtpStore: Record<string, string> = {};
+
+export function getLastE2eOtp(phone: string): string | undefined {
+  return e2eOtpStore[phone];
+}
+
+export function clearE2eOtpStore(): void {
+  for (const key of Object.keys(e2eOtpStore)) {
+    delete e2eOtpStore[key];
+  }
+}
+
+/**
  * Resolve Twilio credentials from admin settings (stored) or the
  * environment. Supports two auth modes:
  *  - Account SID + main Auth Token (TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN)
@@ -97,6 +121,18 @@ export async function sendTwilioMessage(
   const cfg = await twilioConfig(ctx);
   if (!cfg)
     return { sent: false, skipped: true, reason: "twilio not configured" };
+
+  // E2E shortcut: when test SMS mode is enabled, record the OTP and skip the
+  // real Twilio HTTP call. This is safe because it only activates when the
+  // deployment explicitly sets KAMIX_E2E_SMS_MODE=record.
+  if (E2E_SMS_MODE) {
+    // OTP messages always start with the fixed prefix used by the auth flows.
+    const otpMatch = body.match(/code is: (\d{6})/);
+    if (otpMatch) {
+      e2eOtpStore[to] = otpMatch[1];
+    }
+    return { sent: true, skipped: true, reason: "e2e sms recording" };
+  }
   // Normalize phone to E.164 format: strip spaces/dashes, ensure + prefix
   if (!to) return { sent: false, skipped: true, reason: "invalid phone" };
   const cleaned = to.replace(/[\s\-()]/g, "");

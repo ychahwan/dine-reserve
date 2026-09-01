@@ -27,7 +27,13 @@ import { normalizePhone } from "./users";
  * restaurant. Restaurant accounts must set a new password on their next
  * login (users.mustChangePassword = true), which the Auth flow enforces.
  */
-export const PLATFORM_ADMIN_PHONE = "+96176683661";
+/**
+ * Platform admin phone — read from the PLATFORM_ADMIN_PHONE Convex
+ * environment variable, falling back to the original bootstrap value.
+ * Set via: npx convex env set PLATFORM_ADMIN_PHONE "+1234567890"
+ */
+export const PLATFORM_ADMIN_PHONE =
+  process.env.PLATFORM_ADMIN_PHONE ?? "+96176683661";
 
 /** The signed-in user must be a platform admin or this throws. */
 async function requireAdmin(ctx: MutationCtx) {
@@ -808,5 +814,116 @@ export const updateUserProfile = mutation({
       details: JSON.stringify({ name: cleanName, familyName: cleanFamilyName ?? null }),
     });
     return await ctx.db.get(userId);
+  },
+});
+
+/**
+ * Admin-only: update a restaurant's core editable fields. This is the admin
+ * equivalent of the owner-facing restaurant edit flow, scoped to the fields the
+ * platform admin is expected to maintain: name, cuisine, city, address, phone,
+ * priceRange, description, imageUrl, and features.
+ *
+ * Disabled restaurants can be edited here too — the admin console is the one
+ * place where moderation and metadata edits live together.
+ */
+export const updateRestaurant = mutation({
+  args: {
+    restaurantId: v.id("restaurants"),
+    name: v.optional(v.string()),
+    cuisine: v.optional(v.string()),
+    city: v.optional(v.string()),
+    address: v.optional(v.string()),
+    phone: v.optional(v.string()),
+    priceRange: v.optional(v.string()),
+    description: v.optional(v.string()),
+    imageUrl: v.optional(v.string()),
+    features: v.optional(FEATURES),
+  },
+  handler: async (ctx, args) => {
+    const { userId: adminUserId } = await requireAdmin(ctx);
+    await checkRateLimit(ctx, {
+      key: "updateRestaurant",
+      userId: adminUserId,
+      limit: 120,
+      windowMs: 60 * 60_000,
+    });
+
+    const restaurant = await ctx.db.get(args.restaurantId);
+    if (!restaurant) throw new Error("Restaurant not found.");
+
+    const cleaned: Record<string, unknown> = {};
+
+    if (args.name !== undefined) {
+      const cleanedName = args.name.trim().slice(0, 100);
+      if (!cleanedName) throw new Error("Restaurant name is required.");
+      cleaned.name = cleanedName;
+    }
+
+    if (args.cuisine !== undefined) {
+      const cleanedCuisine = args.cuisine.trim().slice(0, 40);
+      if (!cleanedCuisine) throw new Error("Cuisine type is required.");
+      cleaned.cuisine = cleanedCuisine;
+    }
+
+    if (args.city !== undefined) {
+      const cleanedCity = args.city.trim().slice(0, 60);
+      if (!cleanedCity) throw new Error("City is required.");
+      cleaned.city = cleanedCity;
+    }
+
+    if (args.address !== undefined) {
+      const cleanedAddress = args.address.trim().slice(0, 200);
+      if (!cleanedAddress) throw new Error("Address is required.");
+      cleaned.address = cleanedAddress;
+    }
+
+    if (args.phone !== undefined) {
+      cleaned.phone = args.phone.trim().slice(0, 30) || undefined;
+    }
+
+    if (args.priceRange !== undefined) {
+      const cleanedPrice = args.priceRange.trim();
+      if (cleanedPrice && !/^\$+$/.test(cleanedPrice)) {
+        throw new Error("Price range must look like $$ or $$$. ");
+      }
+      cleaned.priceRange = cleanedPrice || undefined;
+    }
+
+    if (args.description !== undefined) {
+      cleaned.description = args.description.trim().slice(0, 1000) || undefined;
+    }
+
+    if (args.imageUrl !== undefined) {
+      cleaned.imageUrl = args.imageUrl.trim().slice(0, 500) || undefined;
+    }
+
+    if (args.features !== undefined) {
+      cleaned.features = args.features;
+    }
+
+    // Rebuild search text whenever the visible fields may have changed.
+    const docAfter = { ...restaurant, ...cleaned } as typeof restaurant;
+    const searchText = [
+      docAfter.name,
+      docAfter.cuisine,
+      docAfter.city,
+      docAfter.neighborhood ?? "",
+      docAfter.description ?? "",
+    ]
+      .join(" ")
+      .toLowerCase();
+    cleaned.searchText = searchText;
+
+    await ctx.db.patch(args.restaurantId, cleaned);
+
+    await logAdminAction(ctx, adminUserId, "updateRestaurant", {
+      targetUserId: undefined,
+      details: JSON.stringify({
+        restaurantId: args.restaurantId,
+        restaurantName: docAfter.name,
+      }),
+    });
+
+    return await ctx.db.get(args.restaurantId);
   },
 });

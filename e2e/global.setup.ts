@@ -1,17 +1,30 @@
 /**
  * Global setup: logs in as admin, creates test users via admin panel UI,
  * and saves their storage states for each project.
+ *
+ * Extended auth scenarios use additional phones that must exist as real
+ * password accounts before the suite runs.
  */
 import { test as setup, expect } from "@playwright/test";
 
-const ADMIN_PHONE = "+96176683661";
-const ADMIN_PASSWORD = "BeityAdmin2026!";
+const ADMIN_PHONE = process.env.E2E_ADMIN_PHONE ?? "+96176683661";
+const ADMIN_PASSWORD = process.env.E2E_ADMIN_PASSWORD ?? "BeityAdmin2026!";
 const CUSTOMER1_PHONE = "+19990001111";
 const CUSTOMER1_PASSWORD = "TestPass123!";
 const CUSTOMER2_PHONE = "+19990002222";
 const CUSTOMER2_PASSWORD = "TestPass123!";
 const OWNER_PHONE = "+19990001001";
 const OWNER_PASSWORD = "TestPass123!";
+
+// Phones used by e2e/auth-extended.spec.ts.
+const OTP_PHONE = "+19990003333";
+const OTP_PHONE_PASSWORD = "TestPass2026!";
+const RESET_PHONE = "+19990004444";
+const RESET_PHONE_PASSWORD = "OldPass2026!";
+const PHONE_CHANGE_PHONE = "+19990005555";
+const PHONE_CHANGE_PASSWORD = "PhoneChange2026!";
+const DELETE_PHONE = "+19990006666";
+const DELETE_PASSWORD = "DeleteMe2026!";
 
 /** Login via the password auth flow and save storage state. */
 async function loginAndSave(
@@ -100,6 +113,13 @@ setup("seed test users and save auth states", async ({ browser }) => {
   await createUserViaUI(adminPage, CUSTOMER2_PHONE, "Test Customer 2", CUSTOMER2_PASSWORD);
   await createUserViaUI(adminPage, OWNER_PHONE, "E2E Owner", OWNER_PASSWORD, "Restaurant Owner");
 
+  // Extended auth scenarios use additional phones that must exist as password
+  // accounts before the suite runs.
+  await createUserViaUI(adminPage, OTP_PHONE, "E2E OTP User", OTP_PHONE_PASSWORD);
+  await createUserViaUI(adminPage, RESET_PHONE, "E2E Reset User", RESET_PHONE_PASSWORD);
+  await createUserViaUI(adminPage, PHONE_CHANGE_PHONE, "E2E Phone Change User", PHONE_CHANGE_PASSWORD);
+  await createUserViaUI(adminPage, DELETE_PHONE, "E2E Delete User", DELETE_PASSWORD);
+
   await adminCtx.close();
 
   // ── 3. Login as customer 1 ──
@@ -122,4 +142,18 @@ setup("seed test users and save auth states", async ({ browser }) => {
   await loginAndSave(ownerPage, OWNER_PHONE, OWNER_PASSWORD, "e2e/.auth/owner.json");
   console.log("✅ Owner logged in");
   await ownerCtx.close();
+
+  // ── 6. Login as OTP/reverse-test user ──
+  const otpCtx = await browser.newContext();
+  const otpPage = await otpCtx.newPage();
+  await loginAndSave(otpPage, OTP_PHONE, OTP_PHONE_PASSWORD, "e2e/.auth/otp.json");
+  console.log("✅ OTP user logged in");
+  await otpCtx.close();
+
+  // ── 7. Login as delete-user account ──
+  const deleteCtx = await browser.newContext();
+  const deletePage = await deleteCtx.newPage();
+  await loginAndSave(deletePage, DELETE_PHONE, DELETE_PASSWORD, "e2e/.auth/delete.json");
+  console.log("✅ Delete user logged in");
+  await deleteCtx.close();
 });
